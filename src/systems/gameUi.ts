@@ -396,7 +396,7 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
     // CENTER STAGE: HOTSPOTS + MIDDLE COMMAND MENU + CREW DECK
     // (x: 286..984, y: 78..710 -> w: 698, h: 632)
     // ---------------------------------------------------------------------
-    const centerStage = makeAbsBox(world, gameRoot, 286, 78, 698, 632, undefined, true);
+    const centerStage = makeAbsBox(world, gameRoot, 286, 78, 698, 632);
 
     // Top Station Hotspots (MSP bordered tabs)
     const stationHotspots: Array<{
@@ -515,11 +515,11 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
         38,
         174,
         46,
-        'Ask A.R.I.E.S. AI to make a crew job!',
+        'Create a custom or quick crew job!',
         { fontSize: 12, color: PALETTE.textMuted, verticalAlign: TextVerticalAlign.Top, wordWrap: true },
     );
     const aiCtaBox = makeAbsBox(world, aiCardInner, 14, 94, 244, 28, PALETTE.goldNormal, true);
-    makeAbsLabel(world, aiCtaBox, 0, 0, 244, 28, 'ASK A.R.I.E.S. AI', {
+    makeAbsLabel(world, aiCtaBox, 0, 0, 244, 28, 'ISSUE TASK', {
         fontSize: 12,
         bold: true,
         color: PALETTE.darkInk,
@@ -1090,7 +1090,7 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
             setText(world, nextStepLbl, 'STEP 1 OF 4: Open DAILY UPDATE below to handle today\'s Mars alert!');
         } else if (state.tasks.length === 0) {
             setVisualColor(world, nextStepStripe, PALETTE.cyan);
-            setText(world, nextStepLbl, 'STEP 2 OF 4: Tap ISSUE TASKS below to ask A.R.I.E.S. for a crew job!');
+            setText(world, nextStepLbl, 'STEP 2 OF 4: Tap ISSUE TASK below to pick a job for your crew!');
         } else if (assignedCount === 0 || hasUnassignedTasks) {
             const crewNames = state.crew.filter((c) => c.health > 0).map((c) => c.name.split(' ')[0]!).join(', ');
             setVisualColor(world, nextStepStripe, PALETTE.amber);
@@ -1128,7 +1128,7 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
             world,
             aiConsoleSubLbl,
             state.tasks.length === 0
-                ? 'Ask A.R.I.E.S. AI to make a job for your crew!'
+                ? 'Create a custom or quick job for your crew!'
                 : `${state.tasks.length} active job${state.tasks.length > 1 ? 's' : ''}. Add another anytime!`,
         );
 
