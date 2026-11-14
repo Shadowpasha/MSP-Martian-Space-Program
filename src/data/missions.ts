@@ -36,7 +36,7 @@ export interface MissionOffer {
 export interface MissionBriefing {
     /** What the crew will do, in plain words. */
     task: string;
-    /** The real NASA mission or instrument this is based on. */
+    /** The real NASA mission or instrument this is based on (short name, for the popup heading). */
     basis: string;
     /** A true fact from that mission. */
     fact: string;
@@ -48,7 +48,7 @@ export interface MissionBriefing {
 
 export const THARSIS_BRIEFING: MissionBriefing = {
     task: 'Set up the wind sampler on Tharsis Ridge and record 48 hours of weather so the station gets better storm warnings.',
-    basis: 'NASA weather stations REMS (Curiosity) and MEDA (Perseverance)',
+    basis: 'the Mars weather stations REMS and MEDA',
     fact: 'In 2018 a dust storm covered all of Mars. It blocked so much sunlight that the solar-powered Opportunity rover ran out of power and never woke up again.',
     lesson: 'Dust storms block sunlight, so solar power drops. Battery packs take cargo space, but they keep the station running in the dark.',
     source: 'NASA: Opportunity rover mission comes to end (2019)',
@@ -65,7 +65,8 @@ export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
         {
             title: mission.missionGoal.title,
             site: pending ? mission.planet.toUpperCase() + ' · TEAM MANIFEST' : 'MARS · SITE A',
-            description: mission.missionGoal.description,
+            // The card line is the goal only; the deadline has its own line on the card.
+            description: pending ? mission.missionGoal.description : 'Record 48 hours of weather data at Site A.',
             setup: mission,
             prepared: pending ? 'team' : undefined,
             briefing: pending ? undefined : THARSIS_BRIEFING,

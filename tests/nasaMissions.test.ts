@@ -26,5 +26,6 @@ test('NASA mission setups: deadline covers travel + work, four prep requirements
         assert.deepEqual(setup.missionGoal.minimumReserves, { food: 10, water: 10, oxygen: 25 });
         JSON.parse(JSON.stringify(setup)); // must survive Storage
     }
-    assert.ok(nasaMissionOffers().every(o => o.briefing.source && o.description.includes("Based on NASA's")));
+    // The NASA basis lives in the briefing popup; the card description is the goal only.
+    assert.ok(nasaMissionOffers().every(o => o.briefing.source && o.briefing.basis && !o.description.includes('NASA')));
 });

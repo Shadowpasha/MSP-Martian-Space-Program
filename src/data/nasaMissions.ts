@@ -31,7 +31,7 @@ export interface NasaMission {
     /** Short goal line used in the card description, e.g. "Drill an ice core for 1 sol". */
     objective: string;
     realBasis: { mission: string; fact: string; sources: NasaSource[] };
-    /** Short NASA name for the card line ("Based on NASA's …"). */
+    /** Short NASA name for the popup heading ("Real NASA mission: …"). */
     cardBasis: string;
     /** The trade-off this mission teaches (popup "Why it matters"). */
     lesson: string;
@@ -70,7 +70,7 @@ export const NASA_MISSIONS: NasaMission[] = [
         id: 'ice_hunter',
         title: 'Ice Hunter',
         planet: 'mars',
-        briefing: 'Water is the most precious thing on Mars: you can drink it, grow plants and even split it into oxygen. Drill for buried ice at the crater rim.',
+        briefing: 'Water is the most precious thing on Mars. You can drink it, water plants with it, and split it into oxygen. Drive to the crater rim and drill for buried ice.',
         objective: 'Drill an ice core for 1 sol',
         realBasis: {
             mission: 'Phoenix lander (2008) and the RIMFAX ground radar on Perseverance',
@@ -93,14 +93,14 @@ export const NASA_MISSIONS: NasaMission[] = [
         title: 'Shadow Ice',
         planet: 'moon',
         briefing: 'Some craters at the Moon\'s south pole never see sunlight, so ice has stayed frozen there for ages. Drill a core from the dark floor.',
-        objective: 'Drill a polar ice core for 1 sol',
+        objective: 'Drill polar ice for 1 sol',
         realBasis: {
             mission: 'LCROSS (2009)',
             fact: 'In 2009 NASA crashed a rocket stage into Cabeus Crater and flew LCROSS through the cloud it threw up. Its instruments found water: the first proof of ice in the Moon\'s dark craters.',
             sources: [SRC.lcross],
         },
         cardBasis: 'LCROSS',
-        lesson: 'The Moon has no air at all. Every breath comes from the oxygen you pack, so air and space are always fighting.',
+        lesson: 'The Moon has no air at all. Every breath comes from the oxygen tanks you pack, and every tank takes cargo space.',
         // LCROSS hit Cabeus, so the fact shown is only true at this site.
         site: { name: 'Cabeus Crater', coords: '84.9S, 35.5W', distanceMP: 35 },
         taskSols: 1,
@@ -141,7 +141,7 @@ export const NASA_MISSIONS: NasaMission[] = [
         objective: 'Grow and harvest plants for 5 sols',
         realBasis: {
             mission: 'NASA Veggie plant system on the International Space Station',
-            fact: 'On August 10, 2015, astronauts on the Space Station ate the first lettuce officially grown for eating in space. It grew for 33 days under LED lights.',
+            fact: 'On August 10, 2015, astronauts on the Space Station ate the first lettuce grown in the Veggie garden for eating in space. It grew for 33 days under LED lights.',
             sources: [SRC.veggie],
         },
         cardBasis: 'Veggie on the Space Station',
@@ -220,12 +220,13 @@ export function nasaMissionOffers() {
         return {
             title: m.title,
             site: `${m.planet === 'moon' ? 'MOON' : 'MARS'} · ${m.site.name.toUpperCase()}`,
-            description: `${setup.missionGoal.description} Based on NASA's ${m.cardBasis}.`,
+            // The card shows the goal only; the site, deadline and NASA mission each have their own place.
+            description: `${m.objective}.`,
             image: m.image,
             setup,
             briefing: {
                 task: m.briefing,
-                basis: m.realBasis.mission,
+                basis: m.cardBasis,
                 fact: m.realBasis.fact,
                 lesson: m.lesson,
                 source: m.realBasis.sources[0]?.label ?? '',

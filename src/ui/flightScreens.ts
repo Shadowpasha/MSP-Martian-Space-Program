@@ -4,7 +4,7 @@ import {
     type CrewMember, type SkillUpgradeDef, type TaskCategory, type UpgradeBranch,
 } from '../contracts/gameContract';
 import { CARGO_BY_ID, normalizeCargo } from '../data/cargo';
-import { formatResource, LAUNCH_CREW_SIZE, resourceEntries, type MissionOffer } from '../data/missions';
+import { LAUNCH_CREW_SIZE, type MissionOffer } from '../data/missions';
 import { purchaseProblem, type PlaytestProfile } from '../data/profile';
 import { MENU_BACKGROUND, SIDEBAR_BACKGROUND, type FlightUi, type IconName } from './flightUi';
 import { makeAbsBox } from './theme';
@@ -290,16 +290,19 @@ export function showMissions(
         ui.image(card, [12, 12, 304, 148], offer.image ?? `assets/textures/mission_${Math.min(3, index + 1)}.png`);
         ui.label(card, [16, 168, 296, 28], offer.site, { color: active ? p.amber : p.muted, size: 14 });
         ui.label(card, [16, 204, 296, 64], offer.title, { display: true, size: 28, wrap: true, color: active ? p.text : p.muted });
-        ui.label(card, [16, 276, 296, 86], offer.description, { size: 15, color: p.secondary, wrap: true, top: true });
+        // The goal in one line; the site is above, the deadline and the kit below. Nothing is said twice.
+        ui.label(card, [16, 276, 296, 56], offer.description, { size: 16, color: active ? p.text : p.muted, wrap: true, top: true });
         if (offer.setup) {
             const { missionGoal: goal } = offer.setup;
-            ui.label(card, [16, 372, 296, 28], `Deadline · Sol ${goal.deadlineSol}`, { size: 16, color: p.amber });
-            ui.label(card, [16, 404, 296, 80], goal.requirements.map(req => `${req.target} · ${req.label.split(' (')[0]}`).join('\n'), {
-                size: 14, wrap: true, top: true,
-            });
-            ui.label(card, [16, 488, 296, 40], resourceEntries(goal.minimumReserves).map(([key, amount]) => formatResource(key, amount)).join(' · '), {
-                size: 14, color: p.secondary, wrap: true,
-            });
+            ui.label(card, [16, 344, 296, 28], `Deadline · Sol ${goal.deadlineSol}`, { size: 16, color: p.amber });
+            const kit = Object.entries(goal.requiredEquipment ?? {}).filter(([, count]) => (count ?? 0) > 0) as [IconName, number][];
+            if (kit.length) {
+                ui.label(card, [16, 384, 296, 24], 'Must pack', { size: 14, color: p.secondary });
+                kit.forEach(([id, count], row) => {
+                    ui.icon(card, 16, 414 + row * 36, 28, id, p.amber);
+                    ui.label(card, [56, 412 + row * 36, 240, 32], `${CARGO_BY_ID[id as keyof typeof CARGO_BY_ID].name} × ${count}`, { size: 15 });
+                });
+            }
         }
         // Selecting a mission opens its briefing popup first; "Prepare Cargo" there continues.
         const button = ui.button(card, [16, 532, 296, 44], () => (offer.briefing ? openBriefing(offer) : onChoose(offer)), {
@@ -326,30 +329,25 @@ export function showMissions(
         selectButtons.forEach(button => button.setDisabled(true));
         popup = makeAbsBox(ui.world, root, 0, 0, 1280, 720, { ...p.ink, a: 0.82 }, false);
         ui.world.insert(popup, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
-        const panel = ui.frame(popup, [280, 70, 720, 580], p.raised);
+        const panel = ui.frame(popup, [280, 95, 720, 530], p.raised);
         ui.box(panel, [12, 12, 240, 136], p.ink);
         ui.image(panel, [12, 12, 240, 136], offer.image ?? 'assets/textures/mission_1.png');
-        ui.label(panel, [272, 14, 420, 22], offer.site, { color: p.amber, size: 14 });
-        ui.label(panel, [272, 38, 420, 44], offer.title, { display: true, size: 32 });
-        if (offer.setup) {
-            ui.label(panel, [272, 86, 420, 22], `Deadline · Sol ${offer.setup.missionGoal.deadlineSol}  ·  ${offer.setup.planet === 'moon' ? 'Moon' : 'Mars'}`, {
-                size: 15, color: p.secondary,
-            });
-        }
-        ui.label(panel, [272, 112, 420, 40], brief.task, { size: 14, wrap: true, top: true });
+        // The card already showed the site and the deadline; the popup adds the job, the real
+        // NASA mission and the lesson. Title on top, then three short blocks.
+        ui.label(panel, [272, 10, 420, 44], offer.title, { display: true, size: 32 });
+        ui.label(panel, [272, 58, 420, 92], brief.task, { size: 15, wrap: true, top: true });
 
-        const nasa = ui.frame(panel, [12, 164, 688, 216], p.ink);
-        ui.label(nasa, [16, 8, 648, 28], 'The real NASA mission', { display: true, size: 20, color: p.amber });
-        ui.label(nasa, [16, 38, 648, 24], brief.basis, { size: 15, color: p.text, wrap: true });
-        ui.label(nasa, [16, 70, 648, 96], brief.fact, { size: 15, color: p.secondary, wrap: true, top: true });
-        ui.label(nasa, [16, 170, 648, 24], `Source: ${brief.source}`, { size: 12, color: p.muted });
+        const nasa = ui.frame(panel, [12, 168, 688, 152], p.ink);
+        ui.label(nasa, [16, 8, 648, 28], `Real NASA mission: ${brief.basis}`, { display: true, size: 20, color: p.amber });
+        ui.label(nasa, [16, 44, 648, 64], brief.fact, { size: 15, color: p.text, wrap: true, top: true });
+        ui.label(nasa, [16, 112, 648, 24], `Source: ${brief.source}`, { size: 13, color: p.muted });
 
-        const why = ui.frame(panel, [12, 392, 688, 100], p.ink);
+        const why = ui.frame(panel, [12, 332, 688, 108], p.ink);
         ui.label(why, [16, 8, 648, 28], 'Why it matters', { display: true, size: 20, color: p.good });
-        ui.label(why, [16, 38, 648, 52], brief.lesson, { size: 15, color: p.secondary, wrap: true, top: true });
+        ui.label(why, [16, 42, 648, 52], brief.lesson, { size: 15, color: p.secondary, wrap: true, top: true });
 
-        ui.button(panel, [12, 508, 200, 48], closeBriefing, { label: 'Back' });
-        ui.button(panel, [452, 508, 248, 48], () => { closeBriefing(); onChoose(offer); }, { label: 'Prepare Cargo', tone: 'primary' });
+        ui.button(panel, [12, 460, 200, 48], closeBriefing, { label: 'Back' });
+        ui.button(panel, [452, 460, 248, 48], () => { closeBriefing(); onChoose(offer); }, { label: 'Prepare Cargo', tone: 'primary' });
     }
 }
 

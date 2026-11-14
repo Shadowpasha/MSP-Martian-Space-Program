@@ -30,14 +30,14 @@ export function showLaunchSummary(
         ui.label(card, [120, 14, 124, 52], member.name, { display: true, size: 20, wrap: true, top: true });
         ui.label(card, [120, 70, 124, 22], ROLE[member.role] ?? member.role, { size: 14, color: p.amber });
         ui.label(card, [12, 144, 236, 24], member.perk.title, { display: true, size: 16, color: p.good });
-        ui.label(card, [12, 170, 236, 64], member.perk.description, { size: 12, color: p.secondary, wrap: true, top: true });
+        ui.label(card, [12, 170, 236, 68], member.perk.description, { size: 13, color: p.secondary, wrap: true, top: true });
     });
 
     // ---- Mission, cargo, supplies (right) ----
     const side = ui.frame(root, [848, 108, 416, 596]);
     ui.label(side, [16, 10, 384, 34], goal.title, { display: true, size: 24, wrap: true });
-    ui.label(side, [16, 44, 384, 22], `${setup.planet === 'moon' ? 'Moon' : 'Mars'} · ${goal.coords} · due Sol ${goal.deadlineSol}`, {
-        size: 13, color: p.secondary,
+    ui.label(side, [16, 44, 384, 22], `${setup.planet === 'moon' ? 'Moon' : 'Mars'} · Deadline Sol ${goal.deadlineSol}`, {
+        size: 14, color: p.amber,
     });
 
     ui.label(side, [16, 74, 260, 28], 'Packed Cargo', { display: true, size: 20 });
@@ -66,7 +66,7 @@ export function showLaunchSummary(
         });
     });
 
-    ui.label(side, [16, 462, 384, 52], problem ?? 'Ready for launch. Short supplies can be grown or recycled on the way.', {
+    ui.label(side, [16, 462, 384, 52], problem ?? 'All set. Ready for launch.', {
         size: 14, wrap: true, color: problem ? p.bad : p.good,
     });
     ui.button(side, [16, 528, 140, 48], onBack, { label: 'Back' });

@@ -131,13 +131,13 @@ export const flightSystem = defineSystem(
                     });
                     break;
                 case 'mission':
-                    showShell(ui, page, 'Mission Selection', 'Review the contract before loading the cargo bay.', 'mars', navigate);
+                    showShell(ui, page, 'Mission Selection', 'Pick a job for your crew.', 'mars', navigate);
                     showMissions(ui, missionOffers(readPendingSetup()), selectMission, missionPage, next => { missionPage = next; navigate('mission'); });
                     break;
                 case 'cargo': {
                     const chosen = offer;
                     if (!chosen?.setup) { navigate('mission'); break; }
-                    showShell(ui, page, 'Cargo Preparation', chosen.title, 'windSampler', navigate);
+                    showShell(ui, page, 'Cargo Preparation', `${chosen.title} · pack what the mission needs`, 'windSampler', navigate);
                     const problem = (placements: CargoPlacement[]) => {
                         const setup = buildLaunchSetup(chosen, profile.crewIds, placements);
                         return setup ? launchProblem(setup) : 'Choose a mission to launch.';
@@ -152,7 +152,7 @@ export const flightSystem = defineSystem(
                     const chosen = offer;
                     const preview = chosen?.setup ? buildLaunchSetup(chosen, profile.crewIds, draft) : null;
                     if (!chosen || !preview) { navigate('mission'); break; }
-                    showShell(ui, page, 'Launch Summary', `${chosen.title} · check your crew and cargo`, 'check', navigate);
+                    showShell(ui, page, 'Launch Summary', `${chosen.title} · last check before launch`, 'check', navigate);
                     showLaunchSummary(ui, preview, draft, launchProblem(preview), () => launch(chosen, false), () => navigate('cargo'));
                     break;
                 }

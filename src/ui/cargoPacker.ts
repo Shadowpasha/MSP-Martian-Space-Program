@@ -98,7 +98,8 @@ export function showCargoPacker(
     const inventory = ui.frame(root, [840, 108, 424, 596]);
     ui.label(bay, [20, 12, 332, 40], 'Cargo Bay', { display: true, size: 28 });
     const usage = ui.label(bay, [340, 12, 196, 40], '', { size: 15, color: p.amber, center: true });
-    ui.label(bay, [20, 56, 524, 32], 'Drag a supply into the bay, or click it and then a cell.', { size: 14, color: p.secondary });
+    // One line of guidance above the grid: what to do next, what is in hand, or why a spot is red.
+    const status = ui.label(bay, [20, 54, 528, 32], '', { size: 15, wrap: true });
     const grid = ui.frame(bay, [20, 92, 528, 348], p.ink);
 
     let placements = draft;
@@ -121,14 +122,13 @@ export function showCargoPacker(
         }, { tone: 'tile' });
         return { button, x, y };
     });
-    const status = ui.label(bay, [20, 448, 528, 40], '', { size: 14, wrap: true });
-    const rotate = ui.button(bay, [20, 500, 164, 44], rotateHeld, { label: 'Rotate [R]' });
-    const empty = ui.button(bay, [196, 500, 164, 44], emptyBay, { label: 'Empty Bay' });
-    const cancel = ui.button(bay, [372, 500, 176, 44], cancelHeld, { label: 'Put Back [Esc]' });
-    ui.label(bay, [20, 548, 528, 28], 'Click a packed item to take it out · drag it to move it', { size: 13, color: p.muted });
+    const rotate = ui.button(bay, [20, 460, 164, 44], rotateHeld, { label: 'Rotate (R)' });
+    const empty = ui.button(bay, [196, 460, 164, 44], emptyBay, { label: 'Empty Bay' });
+    const cancel = ui.button(bay, [372, 460, 176, 44], cancelHeld, { label: 'Put Back (Esc)' });
+    ui.label(bay, [20, 516, 528, 28], 'Click a packed item to take it out. Drag it to move it.', { size: 14, color: p.muted });
 
     // ---- Inventory: tabbed by kind, so items are quick to find ----
-    ui.label(inventory, [16, 12, 384, 36], 'Supply Inventory', { display: true, size: 28 });
+    ui.label(inventory, [16, 12, 384, 36], 'Inventory', { display: true, size: 28 });
     const required = setup.missionGoal.requiredEquipment ?? {};
     const tabOf = (id: CargoItemId): InventoryTab => TAB_OF[id] ?? 'Supplies';
     let tab: InventoryTab = INVENTORY_TABS.find(t => CARGO_ITEMS.some(item => tabOf(item.id) === t && (required[item.id] ?? 0) > 0)) ?? 'Mission';
@@ -138,33 +138,32 @@ export function showCargoPacker(
         const marker = ui.box(button.entity, [84, 2, 6, 6], p.amber);
         return { name, button, marker };
     });
-    const ROW = 64;
+    const ROW = 70;
     const items = CARGO_ITEMS.map((item) => {
         const slot = CARGO_ITEMS.filter(other => tabOf(other.id) === tabOf(item.id)).indexOf(item);
         const button = ui.button(inventory, [16, 94 + slot * ROW, 384, ROW - 6], () => {
             if (ui.hasKeyboardFocus(button.entity)) pick(item.id, true);
         });
         ui.icon(button.entity, 10, 12, 32, item.id, p.amber);
-        ui.label(button.entity, [54, 4, 220, 26], item.name, { display: true, size: 18 });
-        ui.label(button.entity, [54, 30, 270, 24], item.effect, { size: 12, color: p.secondary, wrap: true });
-        const needed = (required[item.id] ?? 0) > 0;
-        if (needed) {
-            const tag = ui.box(button.entity, [276, 8, 64, 18], p.amber);
-            ui.label(tag, [0, 0, 64, 18], 'NEEDED', { size: 11, color: p.ink, center: true });
-        }
-        const stock = ui.label(button.entity, [334, 0, 44, ROW - 6], '', { size: 15, color: p.amber, center: true });
+        ui.label(button.entity, [54, 4, 200, 26], item.name, { display: true, size: 18 });
+        ui.label(button.entity, [54, 28, 258, 36], item.effect, { size: 13, color: p.secondary, wrap: true, top: true });
+        const need = required[item.id] ?? 0;
+        // NEEDED turns into PACKED once enough of the item is in the bay.
+        const tag = need > 0 ? ui.box(button.entity, [254, 8, 68, 20], p.amber) : null;
+        const tagText = tag ? ui.label(tag, [0, 0, 68, 20], 'NEEDED', { size: 11, color: p.ink, center: true }) : null;
+        const stock = ui.label(button.entity, [320, 0, 60, ROW - 6], '', { size: 13, color: p.amber, center: true });
         ui.on(button.entity, 'press', () => pick(item.id, false));
-        return { item, button, stock };
+        return { item, button, stock, need, tag, tagText };
     });
 
     // ---- Supply meters: how long each supply lasts with what is packed ----
-    const meterTop = 380;
-    ui.label(inventory, [16, meterTop, 384, 22], `Supplies for ${setup.crew.length || 4} crew · mission ends Sol ${setup.missionGoal.deadlineSol}`, {
+    const meterTop = 388;
+    ui.label(inventory, [16, meterTop, 384, 22], `Will supplies last ${setup.missionGoal.deadlineSol} sols for ${setup.crew.length || 4} crew?`, {
         size: 13, color: p.secondary,
     });
     const meterKeys: (keyof ResourcePool)[] = ['food', 'water', 'oxygen'];
     const meters = meterKeys.map((key, index) => {
-        const y = meterTop + 26 + index * 26;
+        const y = meterTop + 24 + index * 24;
         ui.icon(inventory, 16, y + 1, 20, key as 'food' | 'water' | 'oxygen', p.amber);
         ui.label(inventory, [44, y, 70, 22], key === 'oxygen' ? 'O₂' : key[0]!.toUpperCase() + key.slice(1), { size: 14 });
         const segs = Array.from({ length: 12 }, (_, i) => ui.box(inventory, [116 + i * 13, y + 6, 11, 10], p.well));
@@ -172,7 +171,8 @@ export function showCargoPacker(
         return { key, segs, days };
     });
 
-    const validation = ui.label(inventory, [16, 478, 384, 40], '', { size: 14, wrap: true });
+    // The checklist: which NEEDED items are still missing, or that everything is ready.
+    const validation = ui.label(inventory, [16, 484, 384, 36], '', { size: 14, wrap: true });
     const launch = ui.button(inventory, [16, 528, 384, 48], () => { if (!held) onLaunch(); }, { label: 'Review & Launch', tone: 'primary' });
 
     const piecesLayer = ui.box(grid, [0, 0, 520, 340]);
@@ -232,7 +232,7 @@ export function showCargoPacker(
         }
         held = { item, rotation: 0 };
         if (!keyboard) drag = { ...lastMouse };
-        say(`${CARGO_BY_ID[item].name} in hand: drop it on the bay or click a cell. R rotates, Esc puts it back.`, false);
+        say(`${CARGO_BY_ID[item].name} in hand. Drop it in the bay, or click a cell.`, false);
     }
 
     function pressCell(x: number, y: number, keyboard: boolean): void {
@@ -299,7 +299,14 @@ export function showCargoPacker(
     // ---- Drawing ----
     function preview(): void {
         for (const cell of markers) ui.fill(cell.ghost, p.transparent);
-        if (!hover) return;
+        if (!hover) {
+            // Off the grid with something in hand: say what to do with it, not the last red reason.
+            if (held) {
+                ui.setText(status, `${CARGO_BY_ID[held.item].name} in hand. Drop it in the bay, or click a cell.`);
+                ui.textColor(status, p.text);
+            }
+            return;
+        }
         if (held) {
             const { x, y } = centredAnchor(held.item, held.rotation, hover.x, hover.y);
             const next = { id: held.from?.id ?? nextId, item: held.item, x, y, rotation: held.rotation };
@@ -359,21 +366,31 @@ export function showCargoPacker(
         }
 
         const counts = packedInventory(placements);
-        for (const { item, button, stock } of items) {
-            ui.setText(stock, `×${item.stock - counts[item.id]}`);
+        for (const { item, button, stock, need, tag, tagText } of items) {
+            const left = item.stock - counts[item.id];
+            ui.setText(stock, `${left} left`);
+            ui.textColor(stock, left === 0 ? p.muted : p.amber);
             ui.fill(button.surface, held?.item === item.id ? p.teal : p.raised);
             ui.show(button.entity, tabOf(item.id) === tab);
+            if (tag && tagText) {
+                const done = counts[item.id] >= need;
+                ui.fill(tag, done ? p.good : p.amber);
+                ui.setText(tagText, done ? 'PACKED' : 'NEEDED');
+            }
         }
+        const missing = CARGO_ITEMS.filter(item => counts[item.id] < (required[item.id] ?? 0));
         for (const t of tabs) {
             const active = t.name === tab;
             ui.fill(t.button.surface, active ? p.amber : p.raised);
             ui.textColor(t.button.text, active ? p.ink : p.text);
-            const missing = CARGO_ITEMS.some(item => tabOf(item.id) === t.name && counts[item.id] < (required[item.id] ?? 0));
-            ui.show(t.marker, missing && !active);
+            ui.show(t.marker, !active && missing.some(item => tabOf(item.id) === t.name));
         }
         ui.setText(usage, `${occupied} / ${CARGO_COLUMNS * CARGO_ROWS} cells used`);
-        ui.setText(status, feedback || 'Pack the required equipment first, then supplies.');
-        ui.textColor(status, error ? p.bad : p.secondary);
+        const nextStep = missing.length
+            ? 'First pack the NEEDED items. Drag one into the bay, or click it and then a cell.'
+            : 'Needed items packed. Add supplies, then Review & Launch.';
+        ui.setText(status, feedback || nextStep);
+        ui.textColor(status, error ? p.bad : feedback ? p.text : p.secondary);
 
         // Meters: starting stock + what packed items will add, against daily use in the main loop.
         const lastsBy = supplyLasts(setup, placements);
@@ -386,8 +403,11 @@ export function showCargoPacker(
         }
 
         const problem = held ? 'Place or put back the item in hand first.' : launchProblem(placements);
-        ui.setText(validation, problem ?? 'Crew and equipment ready.');
-        ui.textColor(validation, problem ? p.bad : p.good);
+        const checklist = missing.length
+            ? `Still needed: ${missing.map(item => `${item.name} × ${(required[item.id] ?? 0) - counts[item.id]}`).join(', ')}`
+            : problem ?? 'Everything needed is packed. Ready to review.';
+        ui.setText(validation, checklist);
+        ui.textColor(validation, missing.length ? p.amber : problem ? p.bad : p.good);
         ui.fill(launch.surface, problem ? p.well : p.amber);
         ui.textColor(launch.text, problem ? p.secondary : p.ink);
         launch.setDisabled(Boolean(problem));
