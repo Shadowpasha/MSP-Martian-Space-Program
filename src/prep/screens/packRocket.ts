@@ -1,5 +1,6 @@
 // Pack the Rocket: a pixel-grid cargo bay (design.md §7.4 "Cargo / equipment").
-// Drag from the shelf, or click to pick up and click a slot. Amber preview = fits,
+// Drag from the shelf, or click to pick up and click a slot; click a packed item to
+// take it out. Held items centre on the pointer and stay inside the bay. Amber preview = fits,
 // red preview + message = doesn't. The inspector shows how long each supply lasts
 // with this crew and what still blocks launch.
 import type { Color, Entity } from 'esengine';
@@ -7,7 +8,7 @@ import { getItem, ITEMS } from '../data/items';
 import { MARS_BASE, MOON_BASE } from '../data/missions';
 import type { ItemCategory, ItemDef } from '../data/types';
 import { checklist, launchMinSols, supplyForecasts, type Level } from '../logic/checklist';
-import { crewOnBoard, launchStatus, type PrepState } from '../logic/flow';
+import { crewOnBoard, heldAnchor, launchStatus, type PrepState } from '../logic/flow';
 import { shapeCells } from '../logic/rocketGrid';
 import { MAPS, iconPath, itemSpritePath } from '../ui/assets';
 import type { Ui } from '../ui/kit';
@@ -137,8 +138,9 @@ export function buildPackRocket(ui: Ui, root: Entity, s: PrepState, act: PackAct
         ui.box(bay, cx + i * segW, gy + 150, segW - 2, 14, on ? T.cyan400 : T.ink600);
     }
     ui.text(bay, cx, gy + 172, cw, 48, used === total
-        ? 'Rocket full. Take something out to make room.'
-        : 'More crew means more crates to pack.', { size: TYPE.label, color: T.textSecondary, wrap: true });
+        ? 'Rocket full. Click an item to take it out.'
+        : grid.items.length > 0 ? 'Click a packed item to take it out.' : 'More crew means more crates to pack.',
+    { size: TYPE.label, color: T.textSecondary, wrap: true });
     if (s.keyboard) {
         ui.text(bay, cx, gy + 220, cw, 50, held ? 'Arrows move · Enter packs' : 'Arrows pick · Enter takes · Q/E tabs · X unpacks',
             { size: TYPE.label, color: T.amber300, wrap: true });
@@ -184,8 +186,9 @@ export function buildPackRocket(ui: Ui, root: Entity, s: PrepState, act: PackAct
             const h = s.hover;
             if (!h) return;
             if (s.held) {
-                const fits = grid.canPlace(s.held.itemId, h.x, h.y, s.held.rotation);
-                for (const c of grid.footprint(s.held.itemId, h.x, h.y, s.held.rotation)) {
+                const a = heldAnchor(s, h.x, h.y);
+                const fits = grid.canPlace(s.held.itemId, a.x, a.y, s.held.rotation);
+                for (const c of grid.footprint(s.held.itemId, a.x, a.y, s.held.rotation)) {
                     const ov = overlays[c.y]?.[c.x];
                     if (ov) ui.setColor(ov, fits ? T.previewOk : T.previewBad);
                 }

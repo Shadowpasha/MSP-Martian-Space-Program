@@ -9,7 +9,7 @@ import { buildSetup } from './buildSetup';
 import { canLaunch, checklist, launchBlocker } from './checklist';
 import { createRng, type Rng } from './rng';
 import { rollOffers, type MissionOffer } from './roll';
-import { RocketGrid, type Rotation } from './rocketGrid';
+import { RocketGrid, shapeSize, type Rotation } from './rocketGrid';
 
 export type PrepScreen = 'mission' | 'crew' | 'pack';
 export const STEPS: { id: PrepScreen; label: string }[] = [
@@ -235,7 +235,7 @@ export function pickFromGrid(s: PrepState, x: number, y: number): boolean {
     s.grid.remove(uid);
     s.held = { itemId: it.itemId, rotation: it.rotation, from: { kind: 'grid', x: it.x, y: it.y, rotation: it.rotation } };
     s.inspect = it.itemId;
-    say(s, `Picked up ${getItem(it.itemId).name}. Place it again, or press Esc.`);
+    say(s, `Moving the ${getItem(it.itemId).name}. Drop it in a new slot.`);
     return true;
 }
 
@@ -254,7 +254,7 @@ export function cancelHeld(s: PrepState): void {
     s.dirty = true;
 }
 
-/** Hover position is the cell under the pointer; the held shape's top-left sits there. */
+/** Hover position is the cell under the pointer; the held shape is centred on it (see heldAnchor). */
 export function setHover(s: PrepState, x: number, y: number): void {
     if (s.hover && s.hover.x === x && s.hover.y === y) return;
     s.hover = { x, y };
@@ -267,23 +267,53 @@ export function clearHover(s: PrepState): void {
     s.previewDirty = true;
 }
 
-export function heldFitsAt(s: PrepState, x: number, y: number): boolean {
-    return !!s.held && s.grid.canPlace(s.held.itemId, x, y, s.held.rotation);
+/**
+ * Where the held item's top-left goes when the pointer is over cell (hx, hy):
+ * the item is centred on that cell, then pushed back inside the bay so it never
+ * hangs off a wall just because the pointer is near the edge.
+ */
+export function heldAnchor(s: PrepState, hx: number, hy: number): { x: number; y: number } {
+    if (!s.held) return { x: hx, y: hy };
+    const { w, h } = shapeSize(getItem(s.held.itemId).shape, s.held.rotation);
+    const clamp = (v: number, hi: number) => Math.max(0, Math.min(hi, v));
+    return {
+        x: clamp(hx - Math.floor((w - 1) / 2), s.grid.cols - w),
+        y: clamp(hy - Math.floor((h - 1) / 2), s.grid.rows - h),
+    };
 }
 
-/** Click (or drop) on a cell: place what you hold, otherwise pick up what is there. */
+export function heldFitsAt(s: PrepState, hx: number, hy: number): boolean {
+    if (!s.held) return false;
+    const a = heldAnchor(s, hx, hy);
+    return s.grid.canPlace(s.held.itemId, a.x, a.y, s.held.rotation);
+}
+
+/** Click on a cell: place what you hold there, otherwise take out what is there. */
 export function clickCell(s: PrepState, x: number, y: number): void {
     if (s.held) {
         placeHeldAt(s, x, y);
         return;
     }
-    pickFromGrid(s, x, y);
+    unpackAt(s, x, y);
 }
 
-export function placeHeldAt(s: PrepState, x: number, y: number): boolean {
+/**
+ * A press on a packed item picked it up; the pointer was released without
+ * dragging, so it was a click: take the item out of the rocket.
+ */
+export function removeHeldFromGrid(s: PrepState): void {
+    const h = s.held;
+    if (!h || h.from.kind !== 'grid') return;
+    s.held = null;
+    say(s, `Took out the ${getItem(h.itemId).name}.`);
+}
+
+/** Place the held item centred on cell (hx, hy), kept inside the bay. */
+export function placeHeldAt(s: PrepState, hx: number, hy: number): boolean {
     const h = s.held;
     if (!h) return false;
     const def = getItem(h.itemId);
+    const { x, y } = heldAnchor(s, hx, hy);
     if (!s.grid.place(h.itemId, x, y, h.rotation)) {
         say(s, `The ${def.name} doesn't fit there. Try another slot or rotate it (R).`, 'warn');
         return false;

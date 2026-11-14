@@ -9,8 +9,8 @@ import { ROCKET_COLS, ROCKET_ROWS } from '../src/prep/logic/balance';
 import { buildSetup } from '../src/prep/logic/buildSetup';
 import { canLaunch, checklist, launchBlocker, supplyForecasts } from '../src/prep/logic/checklist';
 import {
-    cancelHeld, chooseFocusedMission, clickCell, confirmCrew, launch, newPrepState, pickFromGrid,
-    pickFromShelf, quickPack, rotateHeld, toggleCrew,
+    cancelHeld, chooseFocusedMission, clickCell, confirmCrew, heldAnchor, launch, newPrepState, pickFromGrid,
+    pickFromShelf, quickPack, removeHeldFromGrid, rotateHeld, toggleCrew,
 } from '../src/prep/logic/flow';
 import { createRng } from '../src/prep/logic/rng';
 import { makeOffer, rollOffers, type MissionOffer } from '../src/prep/logic/roll';
@@ -180,4 +180,36 @@ test('supplies stay in hand after placing, hardware does not', () => {
     pickFromShelf(s, 'medkit');
     clickCell(s, 1, 0);
     assert.equal(s.held, null);
+});
+
+test('clicking a packed item takes it out; a press that becomes a drag moves it instead', () => {
+    const s = newPrepState({ seed: 6 });
+    chooseFocusedMission(s);
+    quickPack(s, 'repair_kit');
+    assert.equal(s.grid.count('repair_kit'), 1);
+    clickCell(s, 0, 0);
+    assert.equal(s.grid.count('repair_kit'), 0, 'click removes');
+    assert.equal(s.held, null);
+
+    // The system's path: press picks up, release without moving removes.
+    quickPack(s, 'repair_kit');
+    pickFromGrid(s, 1, 0);
+    removeHeldFromGrid(s);
+    assert.equal(s.grid.count('repair_kit'), 0);
+    assert.equal(s.held, null);
+});
+
+test('held items centre on the pointer cell and are pushed back inside the bay at the walls', () => {
+    const s = newPrepState({ seed: 6 });
+    chooseFocusedMission(s);
+    const cols = s.grid.cols;
+    const rows = s.grid.rows;
+    pickFromShelf(s, 'ice_drill'); // 4 wide
+    assert.deepEqual(heldAnchor(s, 3, 1), { x: 2, y: 1 }, 'centred on the pointer');
+    assert.deepEqual(heldAnchor(s, cols - 1, 0), { x: cols - 4, y: 0 }, 'right wall pushes it left');
+    assert.deepEqual(heldAnchor(s, 0, rows - 1), { x: 0, y: rows - 1 }, 'left wall');
+    rotateHeld(s); // now 4 tall
+    assert.deepEqual(heldAnchor(s, 2, rows - 1), { x: 2, y: rows - 4 }, 'bottom wall pushes it up');
+    clickCell(s, cols - 1, rows - 1);
+    assert.equal(s.grid.count('ice_drill'), 1, 'placed even with the pointer in the corner');
 });
