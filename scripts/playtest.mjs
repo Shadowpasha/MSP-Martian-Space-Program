@@ -49,7 +49,18 @@ const types = {
     '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
     '.json': 'application/json', '.esscene': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png',
     '.ttf': 'font/ttf', '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
 };
+/**
+ * Site files the Estella export does not make (it rewrites index.html on every export, so there is no
+ * <link rel="icon">). Browsers ask for /favicon.ico and /apple-touch-icon.png on their own.
+ */
+const siteFiles = new Map(['/favicon.ico', '/apple-touch-icon.png'].map(path => [path, resolve(repoRoot, 'deploy/web' + path)]));
+/**
+ * Gemini failures are answered with 503, never 502 or 504: Cloudflare replaces an origin's 502/504 with
+ * its own HTML error page, the game cannot read that, and the player never sees the reason.
+ */
+const upstreamFailed = 503;
 /** Text and WebAssembly shrink a lot with gzip; images and audio are already compressed. */
 const compressible = new Set(['.html', '.js', '.css', '.json', '.esscene', '.wasm', '.svg', '.ttf']);
 const modelName = 'gemini-3-flash-preview';
@@ -185,11 +196,13 @@ async function handlePlanner(request, response) {
         }, { retries: { strategy: 'none' }, timeout_ms: 18_000 });
         const output = result.output_text?.trim() || result.outputs?.map(part => part.text ?? '').join('').trim();
         if (!output) {
-            sendJson(response, 502, { error: 'Gemini returned an empty response.' });
+            console.warn(`A.R.I.E.S. ${kind ?? 'plan'} · Gemini returned an empty response (${result.status ?? 'no status'})`);
+            sendJson(response, upstreamFailed, { error: 'Gemini returned an empty response.' });
             return;
         }
         if (kind && !isJsonObject(output)) {
-            sendJson(response, 502, { error: 'Gemini returned an incomplete gameplay response.' });
+            console.warn(`A.R.I.E.S. ${kind} · Gemini returned incomplete JSON (${output.length} chars)`);
+            sendJson(response, upstreamFailed, { error: 'Gemini returned an incomplete gameplay response.' });
             return;
         }
         sendJson(response, 200, { text: output });
@@ -197,8 +210,10 @@ async function handlePlanner(request, response) {
         const status = error instanceof ApiError || typeof error?.status === 'number' ? error.status : null;
         const reason = status === 429 ? 'Gemini quota or rate limit reached.'
             : status === 401 || status === 403 ? 'Gemini rejected the server’s API key.'
+            : status === 503 ? 'Gemini is overloaded. Try again shortly.'
             : status ? `Gemini request failed (HTTP ${status}).` : 'Could not reach Gemini.';
-        sendJson(response, 502, { error: reason });
+        console.warn(`A.R.I.E.S. ${kind ?? 'plan'} · ${reason} ${String(error?.message ?? error).slice(0, 300)}`);
+        sendJson(response, upstreamFailed, { error: reason });
     }
 }
 
@@ -233,8 +248,9 @@ createServer(async (request, response) => {
             response.writeHead(404).end();
             return;
         }
-        const file = resolve(buildDir, '.' + url.pathname, url.pathname.endsWith('/') ? 'index.html' : '');
-        if (!file.startsWith(resolve(buildDir) + sep)) {
+        const siteFile = siteFiles.get(url.pathname);
+        const file = siteFile ?? resolve(buildDir, '.' + url.pathname, url.pathname.endsWith('/') ? 'index.html' : '');
+        if (!siteFile && !file.startsWith(resolve(buildDir) + sep)) {
             response.writeHead(404).end();
             return;
         }

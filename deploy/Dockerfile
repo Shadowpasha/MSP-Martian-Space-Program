@@ -10,6 +10,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY scripts/playtest.mjs scripts/playtest.mjs
+COPY deploy/web/ deploy/web/
 COPY dist/web/ web/
 
 USER node

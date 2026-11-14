@@ -3,4 +3,5 @@
 !package.json
 !package-lock.json
 !scripts/playtest.mjs
+!deploy/web/
 !dist/web/
