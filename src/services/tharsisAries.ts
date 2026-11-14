@@ -1,3 +1,4 @@
+import { expeditionOf } from '../data/expeditions';
 import { EQUIPMENT_IDS, STATION_EQUIPMENT } from '../data/tharsisEquipment';
 import { TECHNIQUES, WORK_ORDERS, type Technique } from '../data/tharsisOrders';
 import { localArea, stormDay, type TharsisState } from '../simulation/tharsis';
@@ -15,21 +16,25 @@ export async function draftSurveyBriefing(state: TharsisState, signal?: AbortSig
     const { area } = state.tharsis.briefing;
     const local = localArea(state, area);
     if (!local) return null;
+    const expedition = expeditionOf(state.tharsis.expedition);
+    // Report lines about the field trip (they start with the rover, the site, or the survey window).
+    const site = expedition.site[0]!.toUpperCase() + expedition.site.slice(1);
+    const fieldLine = (line: string) => line.startsWith('Rover') || line.startsWith(site) || line.startsWith('The interrupted survey');
     const systemInstruction = [
-        'Write one ground-truth engineering briefing for the fiction Mars Station Program, the Tharsis Ridge weather survey. Use the supplied run facts and only the listed systems. There is no Earth resupply or transfer between locations.',
-        'Use realistic NASA-style diagnostics. Examples include MEDA wind and pressure checks, scheduled relay contacts, power load isolation, water-recovery conductivity checks and oxygen-generator inlet faults. Rover events use only rover systems and supplies.',
+        `Write one ground-truth engineering briefing for the fiction Mars Station Program, ${expedition.aries}. Use the supplied run facts and only the listed systems. There is no Earth resupply or transfer between locations.`,
+        `Use realistic NASA-style diagnostics. Examples include ${expedition.ariesExamples}. Rover events use only rover systems and supplies.`,
         'Supply observable symptoms and measurements that help a careful player reason about the fault. Return two or three plausible actions with distinct consequences. The observation and detail must leave consequences hidden. The result describes the actual outcome without embedded numbers.',
         'Include at least one choice with commitment none, cargo none, and no losses, stress, or exposure. Other actions may waste resources for no gain. Use only the listed effect IDs. Positive resource effects must be in positiveResourceEffects for the chosen system. Effect none must stand alone. No invented cargo, mission progress, severe failures, threats, or new weather.',
         'If a regional dust storm is underway, focus on a local fault during the alert. Storm timing and storm-wide effects are handled by mission control.',
-        'If field_reset is listed, it is a severity-1 setback that costs the current survey Sol. Use it only for an avoidable bad response to a wind instrument or route communications fault.',
+        'If field_reset is listed, it is a severity-1 setback that costs the current survey Sol. Use it only for an avoidable bad response to a field instrument or route communications fault.',
         'Keep title <=52 characters, observation <=310, action <=48, detail <=126, result <=150. Use plain text. For cargo use none or an available cargo ID. Avoid repeating recent systems.',
     ].join('\n');
     const systems = EVENT_SYSTEMS[area].filter(system => !state.tharsis.recentSystems.slice(-2).includes(system));
     const input = JSON.stringify({
-        mission: 'Tharsis Ridge Weather Survey', seed: state.tharsis.seed, briefingSol: state.sol, lastSol: state.tharsis.reportSol, deadline: state.goal.deadlineSol,
-        difficulty: 'Tharsis standard', area, weather: local.conditions.weather, stormDay: stormDay(state), radiation: local.conditions.radiation, morale: local.conditions.morale,
+        mission: state.goal.title, seed: state.tharsis.seed, briefingSol: state.sol, lastSol: state.tharsis.reportSol, deadline: state.goal.deadlineSol,
+        difficulty: `${expedition.region} standard`, hazard: expedition.hazard.kind === 'solar' ? 'solar particle storm' : 'regional dust storm', area, weather: local.conditions.weather, stormDay: stormDay(state), radiation: local.conditions.radiation, morale: local.conditions.morale,
         resources: local.resources, cargo: local.cargo, crew: local.crew.map(({ role, health, stamina }) => ({ role, health, stamina })),
-        localReport: state.lastSolReport.filter(line => area === 'station' ? !/^(Rover|Site A|The interrupted survey)/.test(line) : /^(Rover|Site A|The interrupted survey)/.test(line)).slice(0, 6),
+        localReport: state.lastSolReport.filter(line => area === 'station' ? !fieldLine(line) : fieldLine(line)).slice(0, 6),
         fieldHours: state.tharsis.hours, travelPhase: state.tharsis.rover?.phase, completedWork: Object.keys(state.tharsis.completed),
         systems, positiveResourceEffects: Object.fromEntries(systems.map(system => [system, allowedPositiveEffects(system)])),
         commitments: EVENT_COMMITMENT_IDS, effects: availableEffectIds(state), severity: [1, 2], availableCargo: allowedEventCargo(local.cargo),

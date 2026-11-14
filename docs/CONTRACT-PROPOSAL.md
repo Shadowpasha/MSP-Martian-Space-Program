@@ -1,5 +1,8 @@
 # Contract proposal: unlock the other missions
 
+> **History.** This document describes the original Sol survival loop, which has since been retired: every
+> mission now runs as an expedition (see `src/data/expeditions.ts` and the README).
+
 **For:** the main-loop owner (`src/contracts/gameContract.ts`, `src/simulation/solEngine.ts`, `src/data/events.ts`, `src/ui/modals.ts`).
 **Status:** part 1 is DONE on this branch (goal flags `oxygen_produced`, `crop_harvested`, `radiation_measured` in `GOAL_FLAGS`; Breathe Easy, Space Garden and Radiation Detective are playable). Parts 2–3 are still open.
 

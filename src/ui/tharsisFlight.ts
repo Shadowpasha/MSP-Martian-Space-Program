@@ -6,7 +6,7 @@ import { CHECKLIST, type Technique } from '../data/tharsisOrders';
 import { assistantIsAvailable, checkGeminiConnection } from '../services/geminiPlanner';
 import { discussWork, draftSurveyBriefing, type DiscussionMessage, type TaskDraft } from '../services/tharsisAries';
 import { advanceSol, commitBriefing, continueAfterOutcome, continueAfterReport, createInitialGameState, isTharsis } from '../simulation/solEngine';
-import { defaultLoad, fieldCrew, fieldReturnEstimate, resourceForecast, roverPosition, stormDay, type RoverLoad } from '../simulation/tharsis';
+import { defaultLoad, expeditionFor, fieldCrew, fieldReturnEstimate, resourceForecast, roverPosition, stormDay, type RoverLoad } from '../simulation/tharsis';
 import { resolveBriefing, choiceBlock, commitmentLabel } from '../simulation/tharsisEvents';
 import { acceptCustomWork, acceptWork, assignWork, findOrder, LOW_MORALE, stationCrew } from '../simulation/tharsisWork';
 import { makeFlightUi, type Bounds, type FlightArt, type FlightUi } from './flightUi';
@@ -31,7 +31,7 @@ interface Options {
     setup: MissionSetupInput;
     profile: { highContrast: boolean; reducedMotion: boolean };
     onFinish: (result: MainLoopResult) => void;
-    onExit: (target: 'menu' | 'mission' | 'moon') => void;
+    onExit: (target: 'menu' | 'mission') => void;
 }
 
 export type RunButton = (key: string, parent: Entity, bounds: Bounds, action: () => void, options?: Parameters<FlightUi['button']>[3]) => ReturnType<FlightUi['button']>;
@@ -228,7 +228,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         ui.image(root, [0, 0, 1280, 720], atSite ? SITE : STATION);
         if (day) ui.box(root, [0, 98, 1280, 476], { r: 0.41, g: 0.15, b: 0.08, a: 0.26 });
         const clock = ui.frame(root, [12, 12, 376, 84], p.ink, day ? p.rust : p.edge);
-        ui.label(clock, [14, 4, 352, 34], 'Tharsis Ridge', { display: true, size: 33 });
+        ui.label(clock, [14, 4, 352, 34], expeditionFor(state).region, { display: true, size: 33, fit: 20 });
         ui.label(clock, [16, 44, 342, 22], `SOL ${sol} / ${state.goal.deadlineSol}   ·   ${atSite ? 'EXPEDITION' : 'STATION'}`, { color: p.amber, size: 15 });
 
         const monitor = ui.frame(root, [400, 12, 868, 84], p.ink, p.teal);
@@ -280,16 +280,17 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         } else {
             const card = ui.frame(root, [24, 280, 416, 220], p.ink, p.teal);
             const eta = fieldReturnEstimate(state);
-            const leg = rover?.phase === 'outbound' ? `En route to Site A · ${rover.travelLeft} Sol left` : rover?.phase === 'returning' ? `Returning · ${rover.travelLeft} Sol left` :
-                rover?.phase === 'site' ? 'At Site A · Survey active' : run.returnedWithData ? 'Docked · Data recovered' : 'Docked · Readying for Site A';
-            ui.label(card, [16, 8, 368, 44], rover ? 'Rover telemetry' : 'Site A overlook', { display: true, size: 26, color: p.cyan });
+            const { site, surveyHours } = expeditionFor(state);
+            const leg = rover?.phase === 'outbound' ? `En route to ${site} · ${rover.travelLeft} Sol left` : rover?.phase === 'returning' ? `Returning · ${rover.travelLeft} Sol left` :
+                rover?.phase === 'site' ? `At ${site} · Survey active` : run.returnedWithData ? 'Docked · Data recovered' : `Docked · Readying for ${site}`;
+            ui.label(card, [16, 8, 368, 44], rover ? 'Rover telemetry' : `${site[0]!.toUpperCase()}${site.slice(1)} overlook`, { display: true, size: 26, fit: 18, color: p.cyan });
             ui.label(card, [16, 58, 368, 38], leg, { wrap: true, size: 15 });
             ui.label(card, [16, 104, 368, 24], fieldCrew(state).map(member => member.name.split(' ')[0]).join(' + ') || 'No field crew selected', { color: p.secondary });
-            ui.label(card, [16, 144, 368, 28], `${run.hours}/48 consecutive hours`, { color: run.hours === 48 ? p.good : p.amber });
+            ui.label(card, [16, 144, 368, 28], `${run.hours}/${surveyHours} consecutive hours`, { color: run.hours === surveyHours ? p.good : p.amber });
             ui.label(card, [16, 174, 368, 25], `${run.completed.harden ? 'Hardened' : 'Standard rover'} · ${eta ? `Earliest dock Sol ${eta}` : `Return by Sol ${state.goal.deadlineSol}`}`, { size: 14, color: eta && eta > state.goal.deadlineSol ? p.bad : p.secondary });
             const route = ui.frame(root, [24, 176, 416, 80], p.ink, p.teal);
             ui.label(route, [12, 0, 140, 28], 'STATION', { size: 13, color: p.secondary });
-            ui.label(route, [320, 0, 72, 28], 'SITE A', { size: 13, color: p.secondary });
+            ui.label(route, [240, 0, 152, 28], expeditionFor(state).site.replace(/^the /, '').toUpperCase(), { size: 13, color: p.secondary, fit: 10 });
             ui.box(route, [25, 44, 356, 4], p.teal);
             ui.box(route, [24, 39, 4, 14], p.secondary);
             ui.box(route, [379, 39, 4, 14], p.secondary);
@@ -405,7 +406,6 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             result.lessons.slice(0, 4).forEach((lesson, index) => ui.label(box, [22, 192 + 58 * index, 912, 52], lesson, { size: 17, wrap: true }));
             button('menu', box, [22, 454, 286, 52], () => onExit('menu'), { label: 'Main Menu', tone: 'primary' });
             button('mission', box, [331, 454, 286, 52], () => onExit('mission'), { label: 'New Mission' });
-            button('moon', box, [640, 454, 286, 52], () => onExit('moon'), { label: 'Moon Test' });
         }
     }
 

@@ -1,5 +1,8 @@
 # Merge notes: main + MSP_Mokhtar + NASA missions
 
+> **History.** This document describes the original Sol survival loop, which has since been retired: every
+> mission now runs as an expedition (see `src/data/expeditions.ts` and the README).
+
 This branch is **`main` → merge `MSP_Mokhtar` → fixes on top**. Mokhtar's launch flow is the game;
 the commits on top add to it.
 

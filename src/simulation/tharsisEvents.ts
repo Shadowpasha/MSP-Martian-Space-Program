@@ -1,3 +1,4 @@
+import { EXPEDITIONS, expeditionOf, type Expedition } from '../data/expeditions';
 import type { CargoItemId, ResourcePool } from '../contracts/gameContract';
 import { CARGO_BY_ID } from '../data/cargo';
 import { formatResource, resourceEntries } from '../data/missions';
@@ -27,13 +28,13 @@ const POSITIVE_BANDS: Record<string, readonly (keyof typeof EFFECTS)[]> = {
     'oxygen generator': ['oxygen_saved', 'power_saved'],
     'solar power': ['power_saved'],
     'crew health': [],
-    'sampler checkout': ['power_saved'],
+    'instrument checkout': ['power_saved'],
     'rover workshop': ['power_saved'],
     'food storage': [],
     'rover power': ['power_saved'],
     'rover oxygen': ['oxygen_saved'],
     'route communications': ['power_saved'],
-    'wind instrument': ['power_saved'],
+    'field instrument': ['power_saved'],
     'field supplies': [],
     'field dosimetry': [],
 };
@@ -48,8 +49,8 @@ export const allowedEventCargo = (cargo: Partial<Record<CargoItemId, number>>) =
 export const EVENT_EFFECT_IDS = Object.keys(EFFECTS) as Array<keyof typeof EFFECTS>;
 export const EVENT_COMMITMENT_IDS = Object.keys(COMMITMENTS) as Array<keyof typeof COMMITMENTS>;
 export const EVENT_SYSTEMS = {
-    station: ['water reclamation', 'oxygen generator', 'solar power', 'crew health', 'sampler checkout', 'rover workshop', 'food storage'],
-    rover: ['rover power', 'rover oxygen', 'route communications', 'wind instrument', 'field supplies', 'field dosimetry'],
+    station: ['water reclamation', 'oxygen generator', 'solar power', 'crew health', 'instrument checkout', 'rover workshop', 'food storage'],
+    rover: ['rover power', 'rover oxygen', 'route communications', 'field instrument', 'field supplies', 'field dosimetry'],
 } as const;
 
 export function availableEffectIds(state: TharsisState): Array<keyof typeof EFFECTS> {
@@ -113,10 +114,10 @@ const STATION_EVENTS: readonly LocalScenario[] = [
         ],
     },
     {
-        title: 'Wind mast readings disagree', system: 'sampler checkout',
-        observation: 'The apparent gusts arrive exactly when the ventilation fan switches speed. The outdoor pressure trace stays level.',
+        title: 'Instrument readings disagree', system: 'instrument checkout',
+        observation: 'The readings jump exactly when the ventilation fan switches speed. The reference trace stays level.',
         choices: [
-            choice('Compare fan-on and fan-off traces', 'Repeat the check with the mast shielded from the vent.', 'The paired traces identified the airflow contamination.', 'crew_confidence'),
+            choice('Compare fan-on and fan-off traces', 'Repeat the check with the instrument shielded from the vent.', 'The paired traces identified the airflow contamination.', 'crew_confidence'),
             choice('Replace the instrument harness', 'Splice in the spare wiring and rerun the test.', 'The replacement harness read the same gusts. The crew used a spare unnecessarily.', 'materials_loss', 'materials'),
         ],
     },
@@ -157,15 +158,28 @@ const ROVER_EVENTS: readonly LocalScenario[] = [
     },
 ];
 
-export function authoredBriefing(sol: number, area: Area, seed: number, storm: 'onset' | 'peak' | 'clearing' | null): SurveyBriefing {
+export function authoredBriefing(
+    sol: number, area: Area, seed: number, storm: 'onset' | 'peak' | 'clearing' | null,
+    expedition: Expedition = EXPEDITIONS.tharsis, deadline = 16,
+): SurveyBriefing {
     if (sol === 1) return {
-        title: 'Tharsis Ridge flight briefing', system: 'mission control', area, source: 'Mission control',
-        observation: 'Site A lies beyond the ridge. Prepare the rover, instruments, supplies, and field crew. Return the crew and 48 consecutive hours of data by Sol 16. Seasonal dust risk is elevated. The launch checklist tracks your work orders.',
+        title: `${expedition.region} flight briefing`, system: 'mission control', area, source: 'Mission control',
+        observation: expedition.intro.replace('{deadline}', String(deadline)),
         choices: [
             choice('Check the maintenance log', 'Review the landing diagnostics before scheduling checks.', 'The readings are consistent with a clean landing.', 'crew_confidence'),
             choice('Repeat the full power test', 'Run the lander’s full-load test one more time.', 'The second test found no new fault and used station power.', 'power_loss', 'power'),
         ],
     };
+    if (storm && expedition.hazard.kind === 'solar') {
+        const title = storm === 'onset' ? 'Solar particle storm' : storm === 'peak' ? 'Storm at peak flux' : 'Last Sol of the storm';
+        const observation = area === 'rover'
+            ? 'A solar particle storm is underway and radiation is climbing fast. Unprotected crews must shelter. A hardened rover can operate at higher Power and O₂ cost.'
+            : 'The Sun is active and station radiation is climbing fast. Solar power is unaffected. Activate shelter operations in Life Support to reduce exposure.';
+        return { title, observation, system: 'storm', area, source: 'Mission control', choices: [
+            choice('Isolate nonessential circuits', 'Use the low-load storm checklist.', 'The lower electrical load preserved reserve power.', 'power_saved'),
+            choice('Run at full output', 'Keep all lights, transmitters, and work circuits live.', 'The extra load drained reserves during the alert.', 'power_loss', 'none', 2),
+        ] };
+    }
     if (storm) {
         const title = storm === 'onset' ? 'Regional dust storm' : storm === 'peak' ? 'Storm at peak opacity' : 'Last Sol under dust';
         const observation = area === 'rover'
@@ -186,7 +200,8 @@ export function authoredBriefing(sol: number, area: Area, seed: number, storm: '
 export function nextBriefing(state: TharsisState): SurveyBriefing {
     const day = stormDay(state);
     return authoredBriefing(state.sol, state.tharsis.rover ? 'rover' : 'station', state.tharsis.seed,
-        day === 1 ? 'onset' : day === 2 ? 'peak' : day === 3 ? 'clearing' : null);
+        day === 1 ? 'onset' : day === 2 ? 'peak' : day === 3 ? 'clearing' : null,
+        expeditionOf(state.tharsis.expedition), state.goal.deadlineSol);
 }
 
 export function commitmentLabel(choice: SurveyChoice): string {
@@ -239,7 +254,7 @@ export function validateBriefing(value: unknown, state: TharsisState): SurveyBri
             if (!id || (severity !== 1 && severity !== 2) || effects.some(effect => effect.id === id)) return null;
             const rule: EffectRule = EFFECTS[id];
             if ((rule.amount ?? 0) > 0 && !POSITIVE_BANDS[system]?.includes(id)) return null;
-            if (rule.resetsSurvey && (severity !== 1 || (system !== 'wind instrument' && system !== 'route communications'))) return null;
+            if (rule.resetsSurvey && (severity !== 1 || (system !== 'field instrument' && system !== 'route communications'))) return null;
             effects.push({ id, severity });
         }
         if (effects.length > 1 && effects.some(({ id }) => id === 'none')) return null;

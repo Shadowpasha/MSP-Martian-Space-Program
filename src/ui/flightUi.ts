@@ -94,7 +94,12 @@ export const ICON_NAMES = [
     'power', 'oxygen', 'water', 'food', 'solar', 'radiation', 'rover', 'circuit',
     'windSampler', 'repairKits', 'batteryPacks', 'medkits', 'seedPods', 'extraRations', 'waterCanisters', 'oxygenTanks',
 ] as const;
-export type IconName = typeof ICON_NAMES[number];
+/** Icons that do not fit in the 8 x 4 atlas: one image each (scripts/art/launch_sprites.py). */
+export const EXTRA_ICONS = {
+    radDetector: 'assets/textures/icons/icon_rad_detector_32.png',
+    iceDrill: 'assets/textures/icons/icon_ice_drill_32.png',
+} as const;
+export type IconName = typeof ICON_NAMES[number] | keyof typeof EXTRA_ICONS;
 
 /** Average glyph width as a share of font size. Slightly wide on purpose, so estimates err toward fitting. */
 const GLYPH_WIDTH = 0.6;
@@ -203,7 +208,9 @@ export function makeFlightUi(
             'engineer', 'botanist', 'medic', 'scientist', 'captain', 'oxygen', 'water', 'food', 'solar', 'radiation', 'circuit',
             'windSampler', 'repairKits', 'batteryPacks', 'medkits', 'seedPods', 'extraRations',
         ].includes(name);
-        return image(parent, [x, y, size, size], 'assets/textures/flight_icons.png', spriteHasColor ? palette.white : tint, ICON_NAMES.indexOf(name));
+        if (name in EXTRA_ICONS) return image(parent, [x, y, size, size], EXTRA_ICONS[name as keyof typeof EXTRA_ICONS], palette.white);
+        return image(parent, [x, y, size, size], 'assets/textures/flight_icons.png', spriteHasColor ? palette.white : tint,
+            ICON_NAMES.indexOf(name as typeof ICON_NAMES[number]));
     }
 
     /** Buttons being rattled because someone pressed them while they were disabled. */

@@ -1,3 +1,5 @@
+import { expeditionOf } from '../data/expeditions';
+import { CARGO_BY_ID } from '../data/cargo';
 import type { CrewMember, ResourcePool, SkillTreeModifiers } from '../contracts/gameContract';
 import { EQUIPMENT_IDS, STATION_EQUIPMENT, type StationEquipmentId } from '../data/tharsisEquipment';
 import { formatResource, resourceEntries } from '../data/missions';
@@ -84,7 +86,8 @@ export function orderBlock(state: TharsisState, order: WorkOrder): string | null
     const missing = order.needs?.filter(id => !state.tharsis.completed[id]);
     if (missing?.length) return `Needs ${missing.map(id => ORDER_BY_ID.get(id)!.title).join(' and ')}`;
     if (order.id === 'suits' && state.tharsis.fieldPair.length !== 2) return 'Choose both travelers in the rover checklist.';
-    if (order.id === 'sampler' && !state.cargo.windSampler) return 'A Wind Sampler must be in station cargo.';
+    const { instrument } = expeditionOf(state.tharsis.expedition);
+    if (order.id === 'sampler' && !state.cargo[instrument]) return `A ${CARGO_BY_ID[instrument].name} must be in station cargo.`;
     return equipmentBlock(state, order);
 }
 

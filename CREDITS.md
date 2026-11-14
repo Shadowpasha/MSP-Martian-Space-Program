@@ -7,9 +7,9 @@ MSP: Mars Station Program, made for the NASA Space Apps Challenge 2026
 
 - Mokhtar Ouardi ([@MokhtarOuardi](https://github.com/MokhtarOuardi)): launch flow, menus, Tharsis Ridge expedition, A.R.I.E.S. terminal and work console
 - Anas Aburaya
-- [@Shadowpasha](https://github.com/Shadowpasha): Sol survival loop, Gemini planner and events, music and sound system
+- [@Shadowpasha](https://github.com/Shadowpasha): the original Sol survival loop (since retired), Gemini planner and events, music and sound system
 - Adam ([@amer-adam](https://github.com/amer-adam)): missions, Mission Selection, Cargo Preparation, Launch Summary,
-  Crew and Upgrade redo, launch intro, animations and UI sound effects
+  Crew and Upgrade redo, launch intro, animations, UI sound effects, and the Radiation and Ice expeditions
 
 ## AI assistance
 
@@ -17,7 +17,7 @@ Parts of the code, the generated UI sound effects and the generated pixel sprite
 with **Claude** (Anthropic's AI assistant) in Claude Code, working with Adam. Every fact shown in the game was
 checked against the sources listed under *Facts and sources*.
 
-The survival loop's planner and daily events can use **Google Gemini** at runtime (`src/services/geminiPlanner.ts`).
+A.R.I.E.S. (the expedition briefings and work-order assistant) can use **Google Gemini** at runtime through the local playtest server (`scripts/playtest.mjs`, `src/services/geminiPlanner.ts`).
 
 ## Audio
 

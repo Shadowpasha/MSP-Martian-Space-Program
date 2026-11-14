@@ -1,8 +1,9 @@
 import {
-    AVAILABLE_CREW, cloneSetup, DEFAULT_MARS_SETUP, MOON_TEST_SETUP,
+    AVAILABLE_CREW, cloneSetup, DEFAULT_MARS_SETUP,
     type CrewMember, type MissionSetupInput, type ResourcePool,
 } from '../contracts/gameContract';
 import { CARGO_BY_ID, normalizeCargo, packedInventory, type CargoPlacement } from './cargo';
+import { EXPEDITION_RESERVES, expeditionRequirements } from './expeditions';
 import { nasaMissionOffers, type MissionDifficulty } from './nasaMissions';
 
 export const LAUNCH_CREW_SIZE = 4;
@@ -10,6 +11,7 @@ const surveyBase = cloneSetup(DEFAULT_MARS_SETUP);
 export const WEATHER_SURVEY: MissionSetupInput = {
     ...surveyBase,
     rules: 'tharsis-expedition',
+    expedition: 'tharsis',
     targetSol: 16,
     missionGoal: {
         ...surveyBase.missionGoal,
@@ -17,13 +19,8 @@ export const WEATHER_SURVEY: MissionSetupInput = {
         title: 'Tharsis Ridge Weather Survey',
         description: 'Deploy to Site A, collect 48 consecutive hours of weather data, and return by Sol 16. Seasonal dust risk is elevated.',
         deadlineSol: 16,
-        requirements: [
-            { id: 'req_rover', label: 'Rover work orders', kind: 'prep_rover', current: 0, target: 3 },
-            { id: 'req_sensor', label: 'Instrument checks', kind: 'prep_sensor', current: 0, target: 3 },
-            { id: 'req_supplies', label: 'Field supply checks', kind: 'prep_supplies', current: 0, target: 2 },
-            { id: 'req_crew', label: 'Field crew checks', kind: 'assign_crew', current: 0, target: 2 },
-        ],
-        minimumReserves: { food: 10, water: 10, oxygen: 25 },
+        requirements: expeditionRequirements(),
+        minimumReserves: { ...EXPEDITION_RESERVES },
         requiredEquipment: { windSampler: 1 },
     },
 };
@@ -33,7 +30,7 @@ export interface MissionOffer {
     site: string;
     description: string;
     setup?: MissionSetupInput;
-    prepared?: 'team' | 'moon-test';
+    prepared?: 'team';
     /** Card picture; defaults to assets/textures/mission_<slot>.png. */
     image?: string;
     /** Difficulty bar on the card (1 Easy, 2 Medium, 3 Hard); a team manifest has none. */
@@ -86,13 +83,6 @@ export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
     ];
 }
 
-export function preparedMoonOffer(): MissionOffer {
-    return {
-        title: MOON_TEST_SETUP.missionGoal.title, site: 'MOON · TEST MISSION',
-        description: MOON_TEST_SETUP.missionGoal.description, setup: MOON_TEST_SETUP, prepared: 'moon-test',
-    };
-}
-
 export const RESOURCE_LABELS: Record<keyof ResourcePool, string> = {
     energy: 'Power', food: 'Food', water: 'Water', oxygen: 'O₂', res: 'Materials',
 };
@@ -123,7 +113,6 @@ export function buildLaunchSetup(
 ): MissionSetupInput | null {
     if (!offer.setup) return null;
     const setup = cloneSetup(offer.setup);
-    if (offer.prepared) delete setup.rules;
     if (!usePreparedCrew) {
         const selected = new Set(crewIds);
         const anchors = DEFAULT_MARS_SETUP.crew.map(member => member.stageAnchor);

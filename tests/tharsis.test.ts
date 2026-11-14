@@ -64,7 +64,7 @@ test('authored dependencies, assignment, explicit acceptance, and cargo determin
     assert.match(acceptWork(state, service, [])!, /planning/);
     plan(state);
     assert.equal(acceptWork(state, service, []), null);
-    assert.match(orderBlock(state, ORDER_BY_ID.get('calibrate')!)!, /Service drive and power and Assemble Wind Sampler/);
+    assert.match(orderBlock(state, ORDER_BY_ID.get('calibrate')!)!, /Service drive and power and Assemble the field instrument/);
 });
 
 test('manifest validation is atomic and changes to the travelers invalidate their suits', () => {

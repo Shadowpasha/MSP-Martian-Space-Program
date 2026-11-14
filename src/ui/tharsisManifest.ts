@@ -1,8 +1,9 @@
+import { INSTRUMENTS } from '../data/expeditions';
 import type { Entity } from 'esengine';
 import type { ResourcePool } from '../contracts/gameContract';
 import { CARGO_ITEMS } from '../data/cargo';
 import { RESOURCE_LABELS } from '../data/missions';
-import { defaultLoad, dispatchProblem, dispatchRover, emergencyReturn, loadSlots, localArea, PACK_UNITS, ROVER_SLOTS,
+import { defaultLoad, dispatchProblem, expeditionFor, dispatchRover, emergencyReturn, loadSlots, localArea, PACK_UNITS, ROVER_SLOTS,
     STORM_DRAW, tripPlan, useLocalCargo, type Area, type RoverLoad, type TharsisState } from '../simulation/tharsis';
 import { chooseFieldCrew } from '../simulation/tharsisWork';
 import type { FlightUi } from './flightUi';
@@ -58,14 +59,14 @@ export function showRoverChecklist({ state, ui, content, button, change, draft, 
     });
     ui.label(tanks, [12, 261, 508, 25], 'Per Sol   2 Food · 2 Water · 3 O₂ · 4 Power', { size: 14, color: p.secondary });
 
-    CARGO_ITEMS.forEach((item, index) => {
+    rosterItems(state).forEach((item, index) => {
         const y = 40 + index * 30;
         ui.label(holds, [12, y, 206, 27], item.name, { size: 15 });
         ui.label(holds, [224, y, 108, 27], `${item.cells.length} slot${item.cells.length === 1 ? '' : 's'}`, { size: 13, color: p.secondary });
         ui.label(holds, [324, y, 100, 27], `${draft.cargo[item.id]} / ${state.cargo[item.id]}`, { size: 15, color: p.cyan, center: true });
         const adjust = (delta: number) => change(() => { draft.cargo[item.id] += delta; return null; });
-        button(`cargo-${item.id}-minus`, holds, [428, y, 47, 26], () => adjust(-1), { label: '−', disabled: item.id === 'windSampler' || !draft.cargo[item.id] });
-        button(`cargo-${item.id}-plus`, holds, [484, y, 47, 26], () => adjust(1), { label: '+', disabled: item.id === 'windSampler' || draft.cargo[item.id] >= state.cargo[item.id] });
+        button(`cargo-${item.id}-minus`, holds, [428, y, 47, 26], () => adjust(-1), { label: '−', disabled: INSTRUMENTS.includes(item.id) || !draft.cargo[item.id] });
+        button(`cargo-${item.id}-plus`, holds, [484, y, 47, 26], () => adjust(1), { label: '+', disabled: INSTRUMENTS.includes(item.id) || draft.cargo[item.id] >= state.cargo[item.id] });
     });
 
     const problem = dispatchProblem(state, draft);
@@ -78,7 +79,13 @@ export function showRoverChecklist({ state, ui, content, button, change, draft, 
         const result = dispatchRover(state, draft);
         if (!result) dispatch();
         return result;
-    }), { label: problem ? 'Dispatch locked' : 'Dispatch to Site A', tone: problem ? 'plain' : 'primary', disabled: Boolean(problem) });
+    }), { label: problem ? 'Dispatch locked' : `Dispatch to ${expeditionFor(state).site.replace(/^the /, '')}`, tone: problem ? 'plain' : 'primary', disabled: Boolean(problem), labelSize: 16 });
+}
+
+/** The cargo this expedition can carry: everything except the other missions' instruments. */
+function rosterItems(state: TharsisState) {
+    const own = expeditionFor(state).instrument;
+    return CARGO_ITEMS.filter(item => item.id === own || !INSTRUMENTS.includes(item.id));
 }
 
 export function showStorage({ state, ui, content, button, change, area, open }: Console & {
@@ -90,11 +97,11 @@ export function showStorage({ state, ui, content, button, change, area, open }: 
     const station = area === 'station';
     ui.label(content, [22, 60, 1112, 27], station ? 'Use supplies at the station. Supplies in the rover checklist transfer at dispatch.' :
         'Use the cargo loaded into the rover. Station supplies are accessible again after docking.', { size: 15, color: p.cyan });
-    CARGO_ITEMS.forEach((item, index) => {
+    rosterItems(state).forEach((item, index) => {
         const row = ui.frame(content, [20 + index % 2 * 576, 102 + Math.floor(index / 2) * 105, 556, 94], p.ink);
         ui.label(row, [14, 6, 394, 30], `${item.name}  ×${local.cargo[item.id]}`, { display: true, size: 22, color: local.cargo[item.id] ? p.text : p.muted });
         ui.label(row, [14, 40, 360, 38], item.effect, { size: 14, color: p.secondary, wrap: true });
-        if (item.id !== 'windSampler') button(`use-${item.id}`, row, [420, 21, 110, 46], () => change(() => {
+        if (!INSTRUMENTS.includes(item.id)) button(`use-${item.id}`, row, [420, 21, 110, 46], () => change(() => {
             const result = useLocalCargo(state, area, item.id);
             return result ?? `Used ${item.name} · ${item.effect}`;
         }), { label: 'Use one', disabled: !local.cargo[item.id] });

@@ -17,6 +17,7 @@ import {
     CARGO_BY_ID, CARGO_COLUMNS, CARGO_ITEMS, CARGO_ROWS, occupiedCells, packedInventory, placementProblem, rotatedCells,
     type CargoPlacement, type Rotation,
 } from '../data/cargo';
+import { INSTRUMENTS } from '../data/expeditions';
 import { FOOD_PER_CREW_PER_SOL, OXYGEN_PER_SOL, WATER_PER_CREW_PER_SOL } from '../data/supplyRates';
 import { type FlightUi } from './flightUi';
 import { play } from './feedback';
@@ -26,6 +27,7 @@ import { easeOutBack, makeMotion } from './motion';
 const CARGO_COLORS: Record<CargoItemId, number> = {
     windSampler: 0xd39e55, repairKits: 0xcc745e, batteryPacks: 0xe1bd65, medkits: 0xcf7c8c,
     seedPods: 0x8db079, extraRations: 0xba9a6e, waterCanisters: 0x75a7c7, oxygenTanks: 0x69bbb5,
+    radDetector: 0xc9b25a, iceDrill: 0x8fb6d6,
 };
 const DRAG_THRESHOLD_PX = 6;
 
@@ -33,7 +35,7 @@ const DRAG_THRESHOLD_PX = 6;
 const INVENTORY_TABS = ['Mission', 'Supplies', 'Power', 'Tools'] as const;
 type InventoryTab = typeof INVENTORY_TABS[number];
 const TAB_OF: Partial<Record<CargoItemId, InventoryTab>> = {
-    windSampler: 'Mission',
+    windSampler: 'Mission', radDetector: 'Mission', iceDrill: 'Mission',
     seedPods: 'Supplies', extraRations: 'Supplies', waterCanisters: 'Supplies', oxygenTanks: 'Supplies',
     batteryPacks: 'Power',
     repairKits: 'Tools', medkits: 'Tools',
@@ -143,8 +145,10 @@ export function showCargoPacker(
         return { name, button, marker };
     });
     const ROW = 70;
-    const items = CARGO_ITEMS.map((item) => {
-        const slot = CARGO_ITEMS.filter(other => tabOf(other.id) === tabOf(item.id)).indexOf(item);
+    // Each mission's own instrument shows; the other missions' instruments stay out of the list.
+    const offered = CARGO_ITEMS.filter(item => !INSTRUMENTS.includes(item.id) || (required[item.id] ?? 0) > 0);
+    const items = offered.map((item) => {
+        const slot = offered.filter(other => tabOf(other.id) === tabOf(item.id)).indexOf(item);
         const button = ui.button(inventory, [16, 94 + slot * ROW, 384, ROW - 6], () => {
             if (ui.hasKeyboardFocus(button.entity)) pick(item.id, true);
         }, { quiet: true });

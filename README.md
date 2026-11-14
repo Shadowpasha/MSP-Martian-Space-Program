@@ -34,7 +34,7 @@ Set `GEMINI_API_KEY` in an untracked `.env` beside `package.json`, or in the ter
 
 ## Team integration
 
-`MissionSetupInput` defines the mission, roster, starting conditions and packed quantities. The built-in survey uses `rules: 'tharsis-expedition'`. The Moon Test and team-provided missions run on the original rules. The optional goal fields `minimumReserves` and `requiredEquipment` gate completion. Older manifests can omit water-canister and oxygen-tank counts.
+`MissionSetupInput` defines the mission, roster, starting conditions and packed quantities. Every mission runs as an expedition (`rules: 'tharsis-expedition'`); `expedition` picks its profile in `src/data/expeditions.ts`: `tharsis` (Easy), `radiation` (Medium, a solar storm) or `ice` (Hard, a long cold drive). A team-provided setup without a profile runs as the Tharsis survey. The other missions in the picker are marked *Coming soon*. The original Sol survival loop was retired. The optional goal fields `minimumReserves` and `requiredEquipment` gate completion. Older manifests can omit water-canister and oxygen-tank counts.
 
 - `mars-outpost:pending-setup` accepts a team-provided `MissionSetupInput`. Play offers that mission and its prepared cargo and crew. The launch consumes the pending setup.
 - `mars-outpost:skill-upgrades` retains the legacy unlocked-ID list. The current profile lives under `mars-outpost:profile-v1`.

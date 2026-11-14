@@ -683,10 +683,14 @@ export function showMissions(
                 ui.icon(card, 16, y + 2, 20, icon, cargo ? p.amber : p.secondary);
                 ui.label(card, [44, y, 268, 24], text, { size: 14, color: cargo ? p.text : p.secondary });
             });
+        } else {
+            // Not playable yet: the card still shows the job and its NASA mission, with a clear lock.
+            ui.icon(card, 16, 306, 20, 'lock', p.muted);
+            ui.label(card, [44, 304, 268, 24], 'Coming soon', { size: 15, color: p.muted });
         }
         // Selecting a mission opens its briefing popup first; "Prepare Cargo" there continues.
         const button = ui.button(card, [16, 532, 296, 44], () => (offer.briefing ? openBriefing(offer) : onChoose(offer)), {
-            label: active ? 'Select Mission' : 'Unavailable', disabled: !active, tone: active ? 'primary' : 'plain',
+            label: active ? 'Select Mission' : 'Coming soon', disabled: !active, tone: active ? 'primary' : 'plain',
         });
         if (active) selectButtons.push(button);
     });
