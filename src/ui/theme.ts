@@ -90,6 +90,8 @@ export function roleColor(role: CrewRole): Color {
     if (role === 'engineer') return { r: 0.32, g: 0.65, b: 0.98, a: 1 };
     if (role === 'botanist') return { r: 0.32, g: 0.84, b: 0.52, a: 1 };
     if (role === 'pilot') return { r: 0.94, g: 0.38, b: 0.36, a: 1 };
+    if (role === 'scientist') return PALETTE.cyan;
+    if (role === 'captain') return PALETTE.purple;
     return { r: 0.96, g: 0.64, b: 0.26, a: 1 };
 }
 
@@ -97,6 +99,8 @@ export function roleShortTag(role: CrewRole): string {
     if (role === 'engineer') return 'ENG';
     if (role === 'botanist') return 'BIO';
     if (role === 'pilot') return 'PLT';
+    if (role === 'scientist') return 'SCI';
+    if (role === 'captain') return 'CMD';
     return 'MED';
 }
 
@@ -194,7 +198,7 @@ export function makeFramedBox(
         Math.max(4, width - borderWidth * 2),
         Math.max(4, height - borderWidth * 2),
         fillColor,
-        true,
+        clickThrough,
     );
     return { frame, inner };
 }

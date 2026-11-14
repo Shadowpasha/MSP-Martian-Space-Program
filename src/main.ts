@@ -1,6 +1,6 @@
 import { addSystemToSchedule, Schedule } from 'esengine';
 
 import './components';
-import { gameUiSystem } from './systems/gameUi';
+import { flightSystem } from './systems/flight';
 
-addSystemToSchedule(Schedule.Update, gameUiSystem);
+addSystemToSchedule(Schedule.Update, flightSystem);
