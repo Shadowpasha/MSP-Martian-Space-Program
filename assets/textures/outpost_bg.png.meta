@@ -4,8 +4,9 @@
   "type": "texture",
   "importer": {
     "maxSize": 2048,
-    "filterMode": "bilinear",
+    "filterMode": "nearest",
     "wrapMode": "clamp",
+    "mipmaps": false,
     "premultiplyAlpha": false,
     "sliceBorder": {
       "left": 0,
