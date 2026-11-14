@@ -9,7 +9,7 @@ import {
 import type { CargoPlacement } from '../data/cargo';
 import { buildLaunchSetup, LAUNCH_CREW_SIZE, launchProblem, missionOffers, preparedMoonOffer, type MissionOffer } from '../data/missions';
 import { awardResearch, loadProfile, purchaseUpgrade, type PlaytestProfile } from '../data/profile';
-import { showCargo } from '../ui/cargoScreen';
+import { showCargoPacker } from '../ui/cargoPacker';
 import {
     showCrew, showExit, showMenu, showMissions, showPreparedManifest, showQuit, showSettings, showShell, showUpgrades, type Page,
 } from '../ui/flightScreens';
@@ -111,7 +111,8 @@ export const flightSystem = defineSystem(
             }
 
             const ui = makeFlightUi(world, events, root, art, focus, profile);
-            let surfaceTick: ((state: typeof input) => void) | undefined;
+            // Returns true when the page used Escape itself (e.g. putting back a held cargo item).
+            let surfaceTick: ((state: typeof input) => boolean | void) | undefined;
             switch (page) {
                 case 'crew':
                     showShell(ui, page, 'Crew', 'Select four specialists for the next mission.', 'crew', navigate);
@@ -141,7 +142,7 @@ export const flightSystem = defineSystem(
                     };
                     const start = () => launch(chosen, Boolean(chosen.prepared));
                     if (chosen.prepared) showPreparedManifest(ui, chosen, problem(draft), start);
-                    else surfaceTick = showCargo(ui, draft, next => { draft = next; }, problem, start);
+                    else surfaceTick = showCargoPacker(ui, chosen.setup, draft, next => { draft = next; }, problem, start);
                     break;
                 }
                 case 'settings':
@@ -158,12 +159,13 @@ export const flightSystem = defineSystem(
                     surfaceTick = showMenu(ui, navigate, profile.reducedMotion);
             }
             tickPage = () => {
-                if (input.isKeyPressed('Escape') || input.isGamepadButtonPressed(GamepadButton.East)) {
+                // The page sees input first, so Escape can put back a held cargo item instead of leaving.
+                const usedEscape = surfaceTick?.(input) === true;
+                if (!usedEscape && (input.isKeyPressed('Escape') || input.isGamepadButtonPressed(GamepadButton.East))) {
                     if (page === 'cargo') navigate('mission');
                     else if (page !== 'menu') navigate('menu');
                 }
                 ui.updateFocus(input);
-                surfaceTick?.(input);
             };
         }
 
