@@ -6,6 +6,8 @@ dist/
 Thumbs.db
 .esengine/cache/
 .esengine/play/
+.esengine/build-size/
+art/*.meta
 .env
 .env.local
 .env.*.local

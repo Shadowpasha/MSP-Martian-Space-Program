@@ -1,8 +1,10 @@
 import {
     cloneSetup,
     computeSkillModifiers,
+    DEFAULT_SKILL_MODIFIERS,
     DEFAULT_MARS_SETUP,
     type CargoInventory,
+    type CargoItemId,
     type ConditionState,
     type CrewMember,
     type CrewRole,
@@ -20,6 +22,8 @@ import {
     type WeatherType,
 } from '../contracts/gameContract';
 import { pickDailyEvent, type DailyEventDef, type EventChoice } from '../data/events';
+import { CARGO_BY_ID, normalizeCargo } from '../data/cargo';
+import { formatResource, resourceEntries } from '../data/missions';
 import type { ProposedTaskSpec } from '../services/geminiPlanner';
 
 export interface ActiveTask {
@@ -29,6 +33,7 @@ export interface ActiveTask {
     category: TaskCategory;
     totalSols: number;
     progress: number;       // 0 .. totalSols
+    staffedSols: number;
     upfrontPaid: boolean;
     dailyCost: Partial<ResourcePool>;
     rewardOnComplete: {
@@ -65,7 +70,7 @@ export interface OutpostGameState {
     resources: ResourcePool;
     conditions: ConditionState;
     tomorrowForecast: WeatherForecast;
-    cargo: CargoInventory;
+    cargo: Required<CargoInventory>;
     crew: CrewMember[];
     skillModifiers: SkillTreeModifiers;
     unlockedSkillIds: string[];
@@ -74,6 +79,7 @@ export interface OutpostGameState {
     tasks: ActiveTask[];
     usedEventIds: string[];
     currentEvent: DailyEventDef | null;
+    lastEventTitle: string;
     lastEventChoiceLabel: string;
     lastEventOutcome: string | null;
     lastSolReport: string[];
@@ -123,7 +129,7 @@ export function createInitialGameState(
     const setup = cloneSetup(inputSetup);
     const skillModifiers = unlockedSkillIds.length > 0
         ? computeSkillModifiers(unlockedSkillIds)
-        : { ...setup.skillModifiers };
+        : { ...DEFAULT_SKILL_MODIFIERS, ...setup.skillModifiers };
 
     const usedEventIds: string[] = [];
     const firstEvent = pickDailyEvent(1, setup.startingConditions.weather, new Set(usedEventIds), setup.missionGoal.completed);
@@ -137,7 +143,7 @@ export function createInitialGameState(
         resources: { ...setup.startingResources },
         conditions: { ...setup.startingConditions },
         tomorrowForecast: forecastForSol(2, setup.planet, setup.missionGoal.deadlineSol, setup.missionGoal.completed),
-        cargo: { ...setup.cargo },
+        cargo: normalizeCargo(setup.cargo),
         crew: setup.crew.map((c) => ({ ...c, perk: { ...c.perk }, stageAnchor: { ...c.stageAnchor } })),
         skillModifiers,
         unlockedSkillIds: [...unlockedSkillIds],
@@ -149,6 +155,7 @@ export function createInitialGameState(
         tasks: [],
         usedEventIds,
         currentEvent: firstEvent,
+        lastEventTitle: firstEvent.title,
         lastEventChoiceLabel: 'Pending',
         lastEventOutcome: null,
         lastSolReport: [
@@ -156,7 +163,7 @@ export function createInitialGameState(
             `Primary Objective: ${setup.missionGoal.title} by Sol ${setup.missionGoal.deadlineSol}.`,
         ],
         dailyLog: [
-            { id: 1, sol: 1, kind: 'good', text: `Sol 1: Outpost initialized on ${setup.planet.toUpperCase()}. 4 crew online.` },
+            { id: 1, sol: 1, kind: 'good', text: `Sol 1: Outpost initialized on ${setup.planet.toUpperCase()}. ${setup.crew.length} crew online.` },
             { id: 2, sol: 1, kind: 'event', text: `Alert: ${firstEvent.title}` },
         ],
         timeline: [],
@@ -198,7 +205,7 @@ export function canAffordCost(resources: ResourcePool, cost: Partial<ResourcePoo
 
 export function isChoiceAvailable(state: OutpostGameState, choice: EventChoice): { ok: boolean; reason?: string } {
     if (choice.requiresCargo && state.cargo[choice.requiresCargo] <= 0) {
-        return { ok: false, reason: `Needs ${choice.requiresCargo}` };
+        return { ok: false, reason: `Needs ${CARGO_BY_ID[choice.requiresCargo].name}` };
     }
     if (choice.requiresRole) {
         const alive = state.crew.some((c) => c.role === choice.requiresRole && c.health > 0);
@@ -217,7 +224,9 @@ export function resolveDailyEventChoice(state: OutpostGameState, choiceId: strin
 
     if (choice.consumesCargo) {
         for (const [k, amt] of Object.entries(choice.consumesCargo) as [keyof CargoInventory, number][]) {
-            if (amt) state.cargo[k] = Math.max(0, state.cargo[k] - amt);
+            if (!amt) continue;
+            const missionReserve = state.goal.requiredEquipment?.[k] ?? 0;
+            state.cargo[k] -= Math.min(amt, Math.max(0, state.cargo[k] - missionReserve));
         }
     }
     if (choice.resourceDelta) {
@@ -261,8 +270,12 @@ export function enqueueTask(
         title: spec.title,
         description: spec.description,
         category: spec.category,
-        totalSols: Math.max(1, Math.round(spec.durationSols)),
+        totalSols: Math.max(
+            1, Math.round(spec.durationSols),
+            spec.rewardOnComplete.goalFlag === state.goal.requiredFlag ? Math.ceil(state.goal.durationHours / 24) : 0,
+        ),
         progress: 0,
+        staffedSols: 0,
         upfrontPaid: true,
         dailyCost: { ...spec.dailyCost },
         rewardOnComplete: {
@@ -321,7 +334,7 @@ export function syncAssignCrewRequirement(state: OutpostGameState): void {
         (t) => t.category === 'GOAL' || t.rewardOnComplete.goalFlag === state.goal.requiredFlag,
     );
     if (goalTask) {
-        req.current = Math.min(req.target, goalTask.assignedCrewIds.length);
+        req.current = Math.min(req.target, staffedCrewCount(state, goalTask));
         return;
     }
     const distinctAssigned = new Set<string>();
@@ -347,6 +360,29 @@ export function advanceMissionRequirement(
 
 export function getMissingMissionRequirements(state: OutpostGameState): MissionRequirement[] {
     return state.goal.requirements.filter((r) => r.current < r.target);
+}
+
+function staffedCrewCount(state: OutpostGameState, task: ActiveTask): number {
+    return state.crew.filter(member => member.health > 0 && task.assignedCrewIds.includes(member.id)).length;
+}
+
+export function getReserveShortfalls(state: OutpostGameState): string[] {
+    return resourceEntries(state.goal.minimumReserves)
+        .filter(([key, target]) => state.resources[key] < target)
+        .map(([key, target]) => `${formatResource(key, state.resources[key])} / ${formatResource(key, target)}`);
+}
+
+function missionCompletionShortfalls(state: OutpostGameState, expedition: ActiveTask): string[] {
+    const crew = staffedCrewCount(state, expedition);
+    const missing = state.goal.requirements.flatMap(requirement => {
+        const current = requirement.kind === 'assign_crew' ? crew : requirement.current;
+        return current < requirement.target ? [`${current}/${requirement.target} ${requirement.label}`] : [];
+    });
+    for (const item of Object.values(CARGO_BY_ID)) {
+        const required = state.goal.requiredEquipment?.[item.id] ?? 0;
+        if (state.cargo[item.id] < required) missing.push(`${required} × ${item.name}`);
+    }
+    return [...missing, ...getReserveShortfalls(state)];
 }
 
 export function areMissionRequirementsMet(state: OutpostGameState): boolean {
@@ -379,7 +415,8 @@ export function computeTaskEfficiency(
         };
     }
 
-    let costMult = state.skillModifiers.aiCostDiscountMult;
+    // Planner proposals already include the AI discount in their quoted costs.
+    let costMult = 1;
     let progress = 0;
     let yieldMult = 1;
     const matchedPerkNames: string[] = [];
@@ -419,32 +456,18 @@ export function computeTaskEfficiency(
     };
 }
 
-export function consumeCargoDirectly(state: OutpostGameState, item: keyof CargoInventory): { ok: boolean; text: string } {
+export function consumeCargoDirectly(state: OutpostGameState, item: CargoItemId): { ok: boolean; text: string } {
     if (state.cargo[item] <= 0) return { ok: false, text: 'Out of stock.' };
+    if (item === 'windSampler') return { ok: false, text: 'Use the Wind Sampler during the weather survey.' };
+    const supply = CARGO_BY_ID[item];
     state.cargo[item] -= 1;
-    let text = '';
-    if (item === 'batteryPacks') {
-        applyResourceDelta(state.resources, { energy: 22 });
-        text = 'Used Battery Pack: +22 Energy.';
-    } else if (item === 'extraRations') {
-        applyResourceDelta(state.resources, { food: 10 });
-        state.conditions.morale = clamp(state.conditions.morale + 5, 0, 100);
-        text = 'Opened Extra Rations: +10 Food, +5 Morale.';
-    } else if (item === 'medkits') {
-        state.conditions.radiation = clamp(state.conditions.radiation - 12, 0, 100);
-        state.conditions.morale = clamp(state.conditions.morale + 6, 0, 100);
-        for (const c of state.crew) c.health = clamp(c.health + 15, 0, 100);
-        text = 'Used Medkit: -12 Radiation, +15 Crew Health, +6 Morale.';
-    } else if (item === 'seedPods') {
-        applyResourceDelta(state.resources, { food: 8, oxygen: 6 });
-        text = 'Planted Seed Pod boost: +8 Food, +6 Oxygen.';
-    } else if (item === 'repairKits') {
-        applyResourceDelta(state.resources, { oxygen: 12, energy: 6 });
-        text = 'Used Repair Kit on life support seals: +12 Oxygen, +6 Energy.';
-    } else {
-        state.cargo[item] += 1;
-        return { ok: false, text: 'Wind Sampler must be deployed via your Mission task.' };
+    if (supply.resources) applyResourceDelta(state.resources, supply.resources);
+    if (supply.morale) state.conditions.morale = clamp(state.conditions.morale + supply.morale, 0, 100);
+    if (supply.radiation) state.conditions.radiation = clamp(state.conditions.radiation + supply.radiation, 0, 100);
+    if (supply.crewHealth) {
+        for (const member of state.crew) member.health = clamp(member.health + supply.crewHealth, 0, 100);
     }
+    const text = `Used ${supply.name} · ${supply.effect}.`;
     advanceMissionRequirement(state, 'prep_supplies', 1);
     appendLog(state, 'good', text);
     return { ok: true, text };
@@ -543,12 +566,14 @@ export function advanceSol(state: OutpostGameState): { advanced: boolean; reason
 
     // 4. Advance Active Tasks
     const completedTitles: string[] = [];
-    const remainingTasks: ActiveTask[] = [];
-    for (const task of state.tasks) {
+    const completed = new Set<string>();
+    const isExpedition = (task: ActiveTask) => task.rewardOnComplete.goalFlag === state.goal.requiredFlag;
+    const orderedTasks = [...state.tasks.filter(task => !isExpedition(task)), ...state.tasks.filter(isExpedition)];
+    for (const task of orderedTasks) {
+        if (isExpedition(task) && state.goal.completed) continue;
         const eff = computeTaskEfficiency(state, task);
         if (eff.progressPerSol <= 0) {
             report.push(`Task "${task.title}" stalled (no crew assigned).`);
-            remainingTasks.push(task);
             continue;
         }
         if (eff.matchedPerkNames.length > 0) {
@@ -568,23 +593,23 @@ export function advanceSol(state: OutpostGameState): { advanced: boolean; reason
             if (member) member.stamina = clamp(member.stamina - 8, 20, 100);
         }
 
-        task.progress = round1(task.progress + eff.progressPerSol);
-        if (task.progress >= task.totalSols) {
-            const isGoalTask = task.rewardOnComplete.goalFlag === state.goal.requiredFlag;
+        task.staffedSols += 1;
+        task.progress = Math.min(task.totalSols, round1(task.progress + eff.progressPerSol));
+        const isGoalTask = isExpedition(task);
+        const requiredFieldSols = Math.max(1, Math.ceil(state.goal.durationHours / 24));
+        if (task.progress >= task.totalSols && (!isGoalTask || task.staffedSols >= requiredFieldSols)) {
             if (isGoalTask) {
-                syncAssignCrewRequirement(state);
-                const missingReqs = getMissingMissionRequirements(state);
-                if (missingReqs.length > 0) {
-                    task.progress = round1(Math.max(0, task.totalSols - 0.5));
-                    const missingText = missingReqs.map((r) => `${r.current}/${r.target} ${r.label}`).join(', ');
+                const missing = missionCompletionShortfalls(state, task);
+                if (missing.length > 0) {
+                    const missingText = missing.join(', ');
                     report.push(`"${task.title}" held: complete requirements (${missingText}).`);
                     appendLog(state, 'warn', `"${task.title}" waiting on Mission Requirements: ${missingText}.`);
-                    remainingTasks.push(task);
                     continue;
                 }
             }
 
             completedTitles.push(task.title);
+            completed.add(task.id);
             state.tasksCompletedCount += 1;
 
             const gainedResources: Partial<ResourcePool> = {};
@@ -624,11 +649,11 @@ export function advanceSol(state: OutpostGameState): { advanced: boolean; reason
             const perkMsg = eff.matchedPerkNames.length > 0 ? ` (${eff.matchedPerkNames[0]})` : '';
             report.push(`Completed "${task.title}"${perkMsg}!`);
             appendLog(state, 'good', `Completed "${task.title}"${perkMsg}.`);
-        } else {
-            remainingTasks.push(task);
+        } else if (isGoalTask && task.staffedSols < requiredFieldSols) {
+            report.push(`Expedition data collected on ${task.staffedSols}/${requiredFieldSols} Sols.`);
         }
     }
-    state.tasks = remainingTasks;
+    state.tasks = state.tasks.filter(task => !completed.has(task.id));
     syncAssignCrewRequirement(state);
 
     // Resting crew recover stamina
@@ -647,7 +672,7 @@ export function advanceSol(state: OutpostGameState): { advanced: boolean; reason
     state.timeline.push({
         sol: state.sol,
         weather: state.conditions.weather,
-        eventTitle: state.lastEventChoiceLabel,
+        eventTitle: state.lastEventTitle,
         eventChoiceLabel: state.lastEventChoiceLabel,
         tasksCompleted: completedTitles,
         resourcesAfter: { ...state.resources },
@@ -687,6 +712,7 @@ export function advanceSol(state: OutpostGameState): { advanced: boolean; reason
     );
     state.usedEventIds.push(nextEvent.id);
     state.currentEvent = nextEvent;
+    state.lastEventTitle = nextEvent.title;
     state.lastEventChoiceLabel = 'Pending';
     state.lastEventOutcome = null;
     state.phase = 'event';
@@ -746,7 +772,7 @@ function finalizeRun(
         lessons.push(`Plan "${state.goal.title}" at least 2-3 Sols before Sol ${state.goal.deadlineSol} using A.R.I.E.S. AI or Rover Bay.`);
     }
     if (state.perkMatchesCount < state.tasksCompletedCount) {
-        lessons.push('Match crew specialties to task categories (ENG->Elena, BIO->Kenji, NAV/GOAL->Maya, MED->Marcus) for huge cost & speed bonuses.');
+        lessons.push('Match crew specialties to task categories for better progress, lower costs, and higher yields.');
     }
     if (lessons.length === 0) {
         lessons.push('Textbook Martian logistics! Try Mars without skill modifiers or aim for an even higher surplus next run.');

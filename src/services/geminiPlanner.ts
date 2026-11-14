@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { CREW_ROLES } from '../contracts/gameContract';
 import type {
     CargoInventory,
     ConditionState,
@@ -13,7 +14,7 @@ import type {
 } from '../contracts/gameContract';
 
 /**
- * Optional in-code override; leave empty and set GEMINI_API_KEY in the project's `.env` file instead.
+ * Optional in-code override for local development. The packaged playtest leaves this empty.
  * When no key is found, the planner uses the built-in deterministic offline task simulator.
  */
 export const GEMINI_API_KEY = '';
@@ -28,7 +29,6 @@ export interface GeminiConfig {
 }
 
 let cachedEnvApiKey: string | null = null;
-let envFetchPromise: Promise<string> | null = null;
 
 function stripQuotes(raw: string): string {
     const trimmed = raw.trim();
@@ -80,37 +80,7 @@ function readSyncEnvApiKey(): string {
 }
 
 export async function resolveGeminiApiKey(explicitKey?: string): Promise<string> {
-    if (explicitKey?.trim()) return explicitKey.trim();
-
-    const syncKey = readSyncEnvApiKey();
-    if (syncKey) return syncKey;
-
-    if (envFetchPromise) return envFetchPromise;
-    if (typeof window === 'undefined' || typeof fetch !== 'function') return '';
-
-    envFetchPromise = (async () => {
-        for (const url of ['./.env', '/.env']) {
-            const ac = new AbortController();
-            const timer = setTimeout(() => ac.abort(), 1500);
-            try {
-                const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
-                const contentType = res.headers.get('content-type') ?? '';
-                if (!res.ok || contentType.includes('text/html')) continue;
-                const parsed = parseDotEnvApiKey(await res.text());
-                if (parsed) {
-                    cachedEnvApiKey = parsed;
-                    return parsed;
-                }
-            } catch {
-                // `.env` unavailable over HTTP; keep checking or fall back cleanly.
-            } finally {
-                clearTimeout(timer);
-            }
-        }
-        return '';
-    })();
-
-    return envFetchPromise;
+    return explicitKey?.trim() || readSyncEnvApiKey();
 }
 
 export async function preloadGeminiKey(): Promise<boolean> {
@@ -120,7 +90,7 @@ export async function preloadGeminiKey(): Promise<boolean> {
 export function getGeminiStatusLabel(): string {
     return readSyncEnvApiKey()
         ? `A.R.I.E.S. AI Online (${DEFAULT_GEMINI_MODEL})`
-        : 'A.R.I.E.S. Simulator Active (.env key optional)';
+        : 'A.R.I.E.S. Offline Planner';
 }
 
 export function getActiveGeminiConfig(): GeminiConfig {
@@ -199,10 +169,12 @@ function normalizeCategory(raw: unknown): TaskCategory {
 
 function normalizeRole(raw: unknown, cat: TaskCategory): CrewRole {
     const s = String(raw ?? '').toLowerCase();
-    if (s === 'engineer' || s === 'botanist' || s === 'pilot' || s === 'medic') return s;
+    const recognized = CREW_ROLES.find(role => role === s);
+    if (recognized) return recognized;
     if (cat === 'BIO') return 'botanist';
     if (cat === 'NAV' || cat === 'GOAL') return 'pilot';
     if (cat === 'MED') return 'medic';
+    if (cat === 'SCI') return 'scientist';
     return 'engineer';
 }
 
@@ -225,7 +197,7 @@ function buildSystemPrompt(ctx: PlannerContextSnapshot): string {
         '- rewardOnComplete.resources values should be balanced (4..24) relative to duration and cost.',
         '- Set goalFlag ONLY when the player plan directly executes the primary mission objective.',
         '- Optional requirementKind (prep_sensor|prep_rover|prep_supplies) and requirementUnits (1..4) if this task preps a mission requirement.',
-        'Return strict JSON with keys: replyText, task: { title, description, category (ENG|BIO|NAV|MED|SCI|GOAL), durationSols, upfrontCost, dailyCost, rewardOnComplete: { resources, radiationDelta, moraleDelta, goalFlag }, recommendedRole (engineer|botanist|pilot|medic), riskNote, requirementKind, requirementUnits }.',
+        `Return strict JSON with keys: replyText, task: { title, description, category (ENG|BIO|NAV|MED|SCI|GOAL), durationSols, upfrontCost, dailyCost, rewardOnComplete: { resources, radiationDelta, moraleDelta, goalFlag }, recommendedRole (${CREW_ROLES.join('|')}), riskNote, requirementKind, requirementUnits }.`,
     ].join('\n');
 }
 
@@ -427,14 +399,15 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     const disc = ctx.skillModifiers.aiCostDiscountMult;
     const scaleCost = (n: number) => Math.max(1, Math.round(n * disc));
     const stormPenalty = ctx.conditions.weather === 'Dust Storm' ? 1 : 0;
+    const moon = ctx.planet === 'moon';
 
     if (/(prep.*sensor|calibrate.*sensor|weather sensor|drill sensor|mast sensor|setup sensor)/.test(q)) {
         return {
             source: 'offline-fallback',
-            replyText: 'A.R.I.E.S. [Local Sim]: Weather sensor calibration takes 1 Sol and satisfies the Sensor requirement (1/1). Elena Vance (Engineer) cuts cost and speeds it up.',
+            replyText: 'A.R.I.E.S. [Local Sim]: Sensor calibration takes 1 Sol. Assign an Engineer for faster, cheaper work.',
             task: {
-                title: 'Prep Weather Sensor',
-                description: `Calibrate atmospheric barometer & wind anemometer for ${ctx.goal.coords}.`,
+                title: moon ? 'Prep Drill Sensor' : 'Prep Weather Sensor',
+                description: `Calibrate field instruments for ${ctx.goal.coords}.`,
                 category: 'ENG',
                 durationSols: 1,
                 upfrontCost: {},
@@ -444,7 +417,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
                     moraleDelta: 2,
                 },
                 recommendedRole: 'engineer',
-                riskNote: 'Required (1/1) before final mission completion.',
+                riskNote: 'Adds one Sensor preparation unit.',
                 requirementKind: 'prep_sensor',
                 requirementUnits: 1,
             },
@@ -454,7 +427,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     if (/(prep.*rover|check rover|service rover|fix rover|tune rover|stage rover)/.test(q)) {
         return {
             source: 'offline-fallback',
-            replyText: 'A.R.I.E.S. [Local Sim]: Rover pre-drive inspection takes 1 Sol and satisfies the Rover requirement (1/1). Maya Sterling (Pilot) cuts transit drain.',
+            replyText: 'A.R.I.E.S. [Local Sim]: Inspect the rover in 1 Sol. A Pilot reduces the daily cost.',
             task: {
                 title: 'Prep Mission Rover',
                 description: `Inspect rover suspension, heaters, and navigation guidance for ${ctx.goal.coords}.`,
@@ -467,7 +440,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
                     moraleDelta: 2,
                 },
                 recommendedRole: 'pilot',
-                riskNote: 'Required (1/1) before final mission completion.',
+                riskNote: 'Adds one Rover preparation unit.',
                 requirementKind: 'prep_rover',
                 requirementUnits: 1,
             },
@@ -477,7 +450,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     if (/(prep.*suppl|supply|supplies|pack.*ration|stage.*food|prep.*food|prep.*o2|prep.*oxy)/.test(q)) {
         return {
             source: 'offline-fallback',
-            replyText: 'A.R.I.E.S. [Local Sim]: Packing expedition food, water, and O2 canisters takes 1 Sol (+2 Prep Supplies progress). Kenji Sato boosts supply output.',
+            replyText: 'A.R.I.E.S. [Local Sim]: Pack food, water and O₂ in 1 Sol for +2 Prep Supplies. A Botanist boosts the yield.',
             task: {
                 title: 'Prep Mission Supplies',
                 description: 'Seal field rations, oxygen tanks, and thermal water packs for mission deploy.',
@@ -498,8 +471,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     }
 
     if (/(gather.*weather|weather data|wind|sample|sandstorm|storm sample|ice core|mission|goal|expedition)/.test(q)) {
-        const isMars = ctx.planet === 'mars';
-        const missionSols = Math.max(1, Math.round(ctx.goal.durationHours / 24));
+        const missionSols = Math.max(1, Math.ceil(ctx.goal.durationHours / 24));
         const missing = ctx.goal.requirements
             .filter((r) => r.kind !== 'assign_crew' && r.current < r.target)
             .map((r) => `${r.label} (${r.current}/${r.target})`);
@@ -510,18 +482,18 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
             source: 'offline-fallback',
             replyText: `A.R.I.E.S. [Local Sim]: "${ctx.goal.title}" queued for ${ctx.goal.durationHours}h (${missionSols} Sols) at ${ctx.goal.coords}.${warnText}`,
             task: {
-                title: isMars ? 'Gather Weather Data (48h)' : 'Extract Polar Ice Core (24h)',
+                title: ctx.goal.title,
                 description: `Operate field instrumentation at ${ctx.goal.coords} for ${ctx.goal.durationHours} hours.`,
                 category: 'GOAL',
                 durationSols: missionSols,
                 upfrontCost: { res: scaleCost(2) },
                 dailyCost: { energy: scaleCost(5), oxygen: scaleCost(4), food: scaleCost(1) },
                 rewardOnComplete: {
-                    resources: { res: 8, water: isMars ? 2 : 10 },
+                    resources: { res: 8, water: moon ? 10 : 2 },
                     moraleDelta: 12,
                     goalFlag: ctx.goal.requiredFlag,
                 },
-                recommendedRole: 'pilot',
+                recommendedRole: ctx.crew.some(member => member.role === 'pilot') ? 'pilot' : 'captain',
                 riskNote: stormPenalty ? 'Dust Storm active: Pilot strongly recommended.' : 'Requires all Mission Requirements completed.',
             },
         };
@@ -576,7 +548,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     if (/(water|ice|drill|condenser|recycle|melt)/.test(q)) {
         return {
             source: 'offline-fallback',
-            replyText: 'A.R.I.E.S. [Local Sim]: Subsurface ice extraction & distillation requires 2 Sols (+2 Prep Supplies). Assign an Engineer or Botanist for optimal recovery.',
+            replyText: 'A.R.I.E.S. [Local Sim]: Extract water in 2 Sols for +2 Prep Supplies. A Scientist improves the yield.',
             task: {
                 title: 'Permafrost Water Extraction',
                 description: 'Run thermal auger outside Airlock A and pump meltwater to cisterns.',
@@ -588,7 +560,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
                     resources: { water: 20, oxygen: 5 },
                     moraleDelta: 3,
                 },
-                recommendedRole: 'engineer',
+                recommendedRole: 'scientist',
                 riskNote: 'High heater power draw each Sol.',
                 requirementKind: 'prep_supplies',
                 requirementUnits: 2,

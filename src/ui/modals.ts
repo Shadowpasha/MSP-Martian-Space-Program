@@ -3,12 +3,14 @@ import {
     createButton,
     createDialog,
     createListView,
+    createScrollView,
     createTextInput,
     measureText,
     px,
     spawnUIEntity,
     TextAlign,
     TextVerticalAlign,
+    UINode,
     uiPlugin,
     UIPointerEvents,
     UIPositionType,
@@ -16,20 +18,20 @@ import {
     type Color,
     type DialogHandle,
     type Entity,
+    type FocusManagerState,
     type ListViewHandle,
     type TextInputHandle,
     type UIEventQueue,
     type World,
 } from 'esengine';
 import {
-    DEFAULT_MARS_SETUP,
-    MOON_TEST_SETUP,
-    type CargoInventory,
     type CrewMember,
-    type MissionSetupInput,
     type ResourcePool,
 } from '../contracts/gameContract';
+import { CARGO_ITEMS } from '../data/cargo';
+import { formatResource, resourceEntries } from '../data/missions';
 import {
+    evaluatePlanOffline,
     generateTaskWithGemini,
     getGeminiStatusLabel,
     preloadGeminiKey,
@@ -54,6 +56,7 @@ import {
     makeFramedBox,
     PALETTE,
     roleColor,
+    setNodeDisplayed,
     setText,
     setTextColor,
     setVisualColor,
@@ -72,8 +75,7 @@ export interface ModalsController {
     openCrewModal: (crewId: string) => void;
     openStationModal: (focus: 'sensor' | 'hydro' | 'rover' | 'cargo') => void;
     openEndReportModal: () => void;
-    closeAll: () => void;
-    isAnyOpen: () => boolean;
+    openSolReport: () => void;
     setPortraitTexture: (crewId: string, textureHandle: number) => void;
     setAiRobotTexture: (textureHandle: number) => void;
     tick: (elapsedSec: number) => void;
@@ -89,15 +91,23 @@ function formatPartialPool(p: Partial<ResourcePool>): string {
     return parts.length > 0 ? parts.join(', ') : 'None';
 }
 
+function centeredPanel(width: number, height: number) {
+    return {
+        position: UIPositionType.Absolute,
+        insetLeft: px((1280 - width) / 2), insetTop: px((720 - height) / 2), width: px(width), height: px(height),
+    };
+}
+
 export function createGameModals(opts: {
     world: World;
     events: UIEventQueue;
     parent: Entity;
+    focus: Pick<FocusManagerState, 'focus' | 'focusVisible'>;
     getState: () => OutpostGameState;
     onStateChanged: () => void;
-    onRestartRun: (setup: MissionSetupInput) => void;
+    onExit: (destination: 'menu' | 'mission' | 'moon') => void;
 }): ModalsController {
-    const { world, events, parent, getState, onStateChanged, onRestartRun } = opts;
+    const { world, events, parent, focus, getState, onStateChanged, onExit } = opts;
 
     // -------------------------------------------------------------------------
     // 1. Daily Update & Morning Report Modal (Centered MSP Style)
@@ -107,11 +117,11 @@ export function createGameModals(opts: {
         events,
         parent,
         backdropVisual: { color: PALETTE.scrim },
-        panelNode: { width: px(700), height: px(500) },
+        panelNode: centeredPanel(700, 500),
         panelVisual: { color: PALETTE.panelBorderLight },
         startHidden: true,
         closeOnBackdrop: false,
-        closeOnEscape: true,
+        closeOnEscape: false,
     });
 
     makeAbsBox(world, eventDlg.panelEntity, 2, 2, 696, 496, PALETTE.modalBg, true);
@@ -170,8 +180,9 @@ export function createGameModals(opts: {
                 if (!slot.choiceId) return;
                 const res = resolveDailyEventChoice(getState(), slot.choiceId);
                 if (res.ok) {
-                    eventDlg.close();
                     onStateChanged();
+                    refreshEventModal();
+                    focus.focus(evCloseBtn.entity, focus.focusVisible);
                 }
             },
         });
@@ -193,27 +204,28 @@ export function createGameModals(opts: {
         world,
         events,
         parent: eventDlg.panelEntity,
-        node: { position: UIPositionType.Absolute, insetLeft: px(568), insetTop: px(454), width: px(110), height: px(32) },
+        node: { position: UIPositionType.Absolute, insetLeft: px(480), insetTop: px(448), width: px(198), height: px(40) },
         states: buttonStates(),
         fadeDuration: 0.12,
-        onClick: () => eventDlg.close(),
+        onClick: () => {
+            if (!getState().currentEvent) eventDlg.close();
+        },
     });
-    makeAbsLabel(world, evCloseBtn.entity, 0, 0, 110, 32, 'Later', { fontSize: 12, bold: true, align: TextAlign.Center });
+    makeAbsLabel(world, evCloseBtn.entity, 0, 0, 198, 40, 'Continue to Planning', { fontSize: 14, bold: true, align: TextAlign.Center });
 
     function refreshEventModal(): void {
         const st = getState();
         const ev = st.currentEvent;
         setText(world, evSolLbl, `SOL ${st.sol} / ${st.goal.deadlineSol}  |  ${st.conditions.weather} ${st.conditions.temperatureC}C`);
-        setText(world, evReportLbl, st.lastSolReport.slice(0, 2).join('\n'));
+        setText(world, evReportLbl, st.sol === 1 && ev ? st.lastSolReport.join('\n') : `Mission: ${st.goal.title} · Due Sol ${st.goal.deadlineSol}`);
+        setNodeDisplayed(world, evCloseBtn.entity, !ev);
         if (!ev) {
-            setText(world, evBadgeLbl, 'ALL CLEAR');
-            setText(world, evTitleLbl, 'Daily Update Done!');
+            setText(world, evBadgeLbl, 'EVENT OUTCOME');
+            setText(world, evTitleLbl, st.lastEventChoiceLabel);
             setText(world, evPromptLbl, st.lastEventOutcome ?? 'All set for today! Issue tasks, drag crew, then tap END SOL.');
             for (const slot of evChoiceSlots) {
                 slot.choiceId = '';
-                slot.btn.setDisabled(true);
-                setText(world, slot.title, 'Done for this Sol');
-                setText(world, slot.sub, '');
+                setNodeDisplayed(world, slot.root, false);
             }
             return;
         }
@@ -223,6 +235,7 @@ export function createGameModals(opts: {
         for (let i = 0; i < 3; i++) {
             const slot = evChoiceSlots[i]!;
             const c = ev.choices[i];
+            setNodeDisplayed(world, slot.root, Boolean(c));
             if (!c) {
                 slot.choiceId = '';
                 slot.btn.setDisabled(true);
@@ -239,6 +252,34 @@ export function createGameModals(opts: {
         }
     }
 
+    const solReport = createDialog({
+        world, events, parent,
+        backdropVisual: { color: PALETTE.scrim },
+        panelNode: centeredPanel(760, 520),
+        panelVisual: { color: PALETTE.modalBg },
+        startHidden: true, closeOnBackdrop: false, closeOnEscape: false,
+    });
+    const solReportTitle = makeAbsLabel(world, solReport.panelEntity, 24, 20, 712, 36, '', { fontSize: 22, bold: true, color: PALETTE.amber });
+    const solReportReserves = makeAbsLabel(world, solReport.panelEntity, 24, 60, 712, 32, '', { fontSize: 13, bold: true, color: PALETTE.cyan });
+    const solReportScroll = createScrollView({
+        world, host: uiPlugin, parent: solReport.panelEntity,
+        node: { position: UIPositionType.Absolute, insetLeft: px(24), insetTop: px(104), width: px(712), height: px(332) },
+        viewportSize: { x: 712, y: 332 }, contentSize: { x: 712, y: 332 },
+        background: { color: PALETTE.bgDark }, direction: 'vertical',
+    });
+    const solReportText = makeAbsLabel(world, solReportScroll.content, 12, 12, 676, 332, '', {
+        fontSize: 13, verticalAlign: TextVerticalAlign.Top, wordWrap: true,
+    });
+    const solContinue = createButton({
+        world, events, parent: solReport.panelEntity,
+        node: { position: UIPositionType.Absolute, insetLeft: px(476), insetTop: px(456), width: px(260), height: px(44) },
+        states: buttonStates(PALETTE.goldNormal, PALETTE.goldHover, PALETTE.goldPressed),
+        onClick: () => getState().result ? openEndReportModal() : openEventModal(),
+    });
+    const solContinueLabel = makeAbsLabel(world, solContinue.entity, 0, 0, 260, 44, '', {
+        fontSize: 14, bold: true, color: PALETTE.darkInk, align: TextAlign.Center,
+    });
+
     // -------------------------------------------------------------------------
     // 2. A.R.I.E.S. Issue Tasks Modal (Centered MSP 2-Column Style)
     // -------------------------------------------------------------------------
@@ -247,7 +288,7 @@ export function createGameModals(opts: {
         events,
         parent,
         backdropVisual: { color: PALETTE.scrim },
-        panelNode: { width: px(844), height: px(552) },
+        panelNode: centeredPanel(844, 552),
         panelVisual: { color: PALETTE.panelBorderLight },
         startHidden: true,
     });
@@ -355,7 +396,7 @@ export function createGameModals(opts: {
             fadeDuration: 0.12,
             onClick: () => {
                 aiInput.setValue(qp.prompt);
-                void submitAiPlan(qp.prompt);
+                void submitAiPlan(qp.prompt, true);
             },
         });
         makeAbsBox(world, qBtn.entity, 0, 0, 107, 2, i === 3 ? PALETTE.amber : PALETTE.cyan, true);
@@ -502,7 +543,7 @@ export function createGameModals(opts: {
         setText(world, propRiskLbl, `Tip: ${p.riskNote}`);
     }
 
-    async function submitAiPlan(rawText: string): Promise<void> {
+    async function submitAiPlan(rawText: string, quickPlan = false): Promise<void> {
         const text = rawText.trim();
         if (!text || aiBusy) return;
         aiBusy = true;
@@ -513,30 +554,24 @@ export function createGameModals(opts: {
 
         try {
             const st = getState();
-            const res = await generateTaskWithGemini(
-                text,
-                {
-                    planet: st.planet,
-                    sol: st.sol,
-                    targetSol: st.targetSol,
-                    resources: st.resources,
-                    conditions: st.conditions,
-                    cargo: st.cargo,
-                    crew: st.crew,
-                    goal: st.goal,
-                    skillModifiers: st.skillModifiers,
-                },
-            );
+            const context = {
+                planet: st.planet, sol: st.sol, targetSol: st.targetSol,
+                resources: st.resources, conditions: st.conditions, cargo: st.cargo,
+                crew: st.crew, goal: st.goal, skillModifiers: st.skillModifiers,
+            };
+            const res = quickPlan ? evaluatePlanOffline(text, context) : await generateTaskWithGemini(text, context);
 
+            if (!world.valid(parent)) return;
             pendingProposal = res.task;
             appendChat('aries', res.replyText);
             refreshProposalCard();
         } catch (err) {
+            if (!world.valid(parent)) return;
             const msg = err instanceof Error ? err.message : 'Unexpected planner error';
             appendChat('aries', `A.R.I.E.S. error: ${msg}`);
         } finally {
             aiBusy = false;
-            aiSendBtn.setDisabled(false);
+            if (world.valid(parent)) aiSendBtn.setDisabled(false);
             setText(world, aiSendLbl, 'Ask AI');
         }
     }
@@ -549,7 +584,7 @@ export function createGameModals(opts: {
         events,
         parent,
         backdropVisual: { color: PALETTE.scrim },
-        panelNode: { width: px(580), height: px(490) },
+        panelNode: centeredPanel(580, 490),
         panelVisual: { color: PALETTE.panelBorderLight },
         startHidden: true,
     });
@@ -679,7 +714,7 @@ export function createGameModals(opts: {
         events,
         parent,
         backdropVisual: { color: PALETTE.scrim },
-        panelNode: { width: px(620), height: px(490) },
+        panelNode: centeredPanel(620, 490),
         panelVisual: { color: PALETTE.panelBorderLight },
         startHidden: true,
     });
@@ -732,36 +767,28 @@ export function createGameModals(opts: {
         color: PALETTE.green,
     });
 
-    const CARGO_ITEMS: Array<{ key: keyof CargoInventory; name: string; effect: string }> = [
-        { key: 'repairKits', name: 'Repair Kits', effect: '+12 O2, +6 PWR (or patch leaks)' },
-        { key: 'batteryPacks', name: 'Battery Packs', effect: '+22 Energy immediately' },
-        { key: 'medkits', name: 'Medkits', effect: '-12 Rad, +15 Health, +6 Morale' },
-        { key: 'seedPods', name: 'Seed Pods', effect: '+8 Food, +6 O2 (or cure blight)' },
-        { key: 'extraRations', name: 'Extra Rations', effect: '+10 Food, +5 Morale' },
-        { key: 'windSampler', name: 'Wind Sampler', effect: 'Mission Goal hardware (Event/AI)' },
-    ];
     const cargoSlots: Array<{ btn: ButtonHandle; lbl: Entity }> = [];
     for (let i = 0; i < CARGO_ITEMS.length; i++) {
         const item = CARGO_ITEMS[i]!;
         const col = i % 2;
         const row = Math.floor(i / 2);
         const x = 20 + col * 295;
-        const y = 242 + row * 64;
+        const y = 240 + row * 49;
         const btn = createButton({
             world,
             events,
             parent: stationDlg.panelEntity,
-            node: { position: UIPositionType.Absolute, insetLeft: px(x), insetTop: px(y), width: px(285), height: px(56) },
+            node: { position: UIPositionType.Absolute, insetLeft: px(x), insetTop: px(y), width: px(285), height: px(44) },
             states: buttonStates(),
             onClick: () => {
-                const res = consumeCargoDirectly(getState(), item.key);
+                const res = consumeCargoDirectly(getState(), item.id);
                 setText(world, stFeedbackLbl, res.text);
                 setTextColor(world, stFeedbackLbl, res.ok ? PALETTE.green : PALETTE.amber);
                 refreshStationModal();
                 onStateChanged();
             },
         });
-        const lbl = makeAbsLabel(world, btn.entity, 10, 4, 265, 48, '', { fontSize: 12, wordWrap: true });
+        const lbl = makeAbsLabel(world, btn.entity, 10, 2, 265, 40, '', { fontSize: 11, wordWrap: true });
         cargoSlots.push({ btn, lbl });
     }
 
@@ -792,7 +819,7 @@ export function createGameModals(opts: {
             setText(
                 world,
                 stInfoLbl,
-                `Assign Kenji Sato (Botanist) to Hydroponics / Supplies tasks for +45% Food & O2 yield and -25% Water cost.\n` +
+                'Assign a Botanist to boost Hydroponics and Supplies jobs.\n' +
                     `Current Reserves: Food ${st.resources.food}, Water ${st.resources.water}, Oxygen ${st.resources.oxygen}%.`,
             );
             setText(world, stQuickAiLbl, 'Issue Hydroponics Task');
@@ -805,7 +832,8 @@ export function createGameModals(opts: {
                 world,
                 stInfoLbl,
                 `${st.goal.description}\n` +
-                    `Requirements: ${reqLines}`,
+                    `Requirements: ${reqLines}\n` +
+                    resourceEntries(st.goal.minimumReserves).map(([key, amount]) => formatResource(key, amount)).join(' · '),
             );
             setText(world, stQuickAiLbl, 'Issue Mission / Rover Task');
         } else {
@@ -813,7 +841,7 @@ export function createGameModals(opts: {
             setText(
                 world,
                 stInfoLbl,
-                `Items shown below come from the Rocket Packing stage (currently seeded with starter manifest).\n` +
+                'Use the supplies packed before launch.\n' +
                     `Spending supplies here tops up reserves and adds +1 toward Prep Supplies.`,
             );
             setText(world, stQuickAiLbl, 'Open Issue Tasks');
@@ -821,9 +849,9 @@ export function createGameModals(opts: {
 
         for (let i = 0; i < CARGO_ITEMS.length; i++) {
             const item = CARGO_ITEMS[i]!;
-            const qty = st.cargo[item.key];
+            const qty = st.cargo[item.id];
             const slot = cargoSlots[i]!;
-            slot.btn.setDisabled(qty <= 0 || item.key === 'windSampler');
+            slot.btn.setDisabled(qty <= 0 || item.id === 'windSampler' || st.phase !== 'planning');
             setText(world, slot.lbl, `${item.name}  [x${qty}]\n${item.effect}`);
         }
     }
@@ -836,7 +864,7 @@ export function createGameModals(opts: {
         events,
         parent,
         backdropVisual: { color: PALETTE.scrim },
-        panelNode: { width: px(680), height: px(520) },
+        panelNode: centeredPanel(680, 520),
         panelVisual: { color: PALETTE.panelBorderLight },
         startHidden: true,
         closeOnBackdrop: false,
@@ -868,37 +896,19 @@ export function createGameModals(opts: {
         wordWrap: true,
     });
 
-    const endPlayAgainBtn = createButton({
-        world,
-        events,
-        parent: endDlg.panelEntity,
-        node: { position: UIPositionType.Absolute, insetLeft: px(24), insetTop: px(462), width: px(290), height: px(42) },
-        states: buttonStates(PALETTE.goldNormal, PALETTE.goldHover, PALETTE.goldPressed),
-        fadeDuration: 0.12,
-        onClick: () => {
-            endDlg.close();
-            onRestartRun(DEFAULT_MARS_SETUP);
-        },
+    const debriefActions = [['Main Menu', 'menu'], ['New Mission', 'mission'], ['Moon Test', 'moon']] as const;
+    debriefActions.forEach(([label, destination], index) => {
+        const primary = destination === 'mission';
+        const button = createButton({
+            world, events, parent: endDlg.panelEntity,
+            node: { position: UIPositionType.Absolute, insetLeft: px(24 + index * 212), insetTop: px(462), width: px(200), height: px(42) },
+            states: primary ? buttonStates(PALETTE.goldNormal, PALETTE.goldHover, PALETTE.goldPressed) : buttonStates(),
+            onClick: () => { endDlg.close(); onExit(destination); },
+        });
+        makeAbsLabel(world, button.entity, 0, 0, 200, 42, label, {
+            fontSize: 14, bold: true, align: TextAlign.Center, color: primary ? PALETTE.darkInk : PALETTE.textPrimary,
+        });
     });
-    makeAbsLabel(world, endPlayAgainBtn.entity, 0, 0, 290, 42, 'PLAY MARS AGAIN (15 SOLS)', {
-        fontSize: 13,
-        bold: true,
-        color: PALETTE.darkInk,
-        align: TextAlign.Center,
-    });
-
-    const endMoonBtn = createButton({
-        world,
-        events,
-        parent: endDlg.panelEntity,
-        node: { position: UIPositionType.Absolute, insetLeft: px(366), insetTop: px(462), width: px(290), height: px(42) },
-        states: buttonStates(PALETTE.primaryNormal, PALETTE.primaryHover, PALETTE.primaryPressed),
-        onClick: () => {
-            endDlg.close();
-            onRestartRun(MOON_TEST_SETUP);
-        },
-    });
-    makeAbsLabel(world, endMoonBtn.entity, 0, 0, 290, 42, 'TRY MOON MISSION (10 SOLS)', { fontSize: 13, bold: true, align: TextAlign.Center });
 
     function refreshEndModal(): void {
         const res = getState().result;
@@ -920,6 +930,7 @@ export function createGameModals(opts: {
 
     function closeAll(): void {
         eventDlg.close();
+        solReport.close();
         aiDlg.close();
         crewDlg.close();
         stationDlg.close();
@@ -930,18 +941,47 @@ export function createGameModals(opts: {
         closeAll();
         refreshProposalCard();
         void preloadGeminiKey().then((ready) => {
-            if (ready && aiDlg.isOpen()) refreshProposalCard();
+            if (ready && world.valid(parent) && aiDlg.isOpen()) refreshProposalCard();
         });
         if (prefillPrompt) aiInput.setValue(prefillPrompt);
         aiDlg.open();
     }
 
+    function openEventModal(): void {
+        closeAll();
+        refreshEventModal();
+        eventDlg.open();
+        const event = getState().currentEvent;
+        const first = event?.choices.findIndex(choice => isChoiceAvailable(getState(), choice).ok) ?? -1;
+        focus.focus(first >= 0 ? evChoiceSlots[first]!.btn.entity : evCloseBtn.entity, focus.focusVisible);
+    }
+
+    function openEndReportModal(): void {
+        closeAll();
+        refreshEndModal();
+        endDlg.open();
+    }
+
+    function openSolReport(): void {
+        closeAll();
+        const state = getState();
+        const lastSol = state.timeline[state.timeline.length - 1];
+        const reserves = resourceEntries(state.resources).map(([key, amount]) => formatResource(key, amount));
+        setText(world, solReportTitle, `Sol ${lastSol?.sol ?? state.sol} Report`);
+        setText(world, solReportReserves, [...reserves, `Morale ${state.conditions.morale}%`].join('  ·  '));
+        const report = state.lastSolReport.join('\n\n');
+        const height = Math.max(308, Math.ceil(measureText(report, { fontSize: 13, maxWidth: 676 }).height) + 16);
+        world.update(solReportText, UINode, node => { node.height = px(height); });
+        solReportScroll.setContentSize({ x: 712, y: height + 24 });
+        solReportScroll.scrollTo({ x: 0, y: 0 });
+        setText(world, solReportText, report);
+        setText(world, solContinueLabel, state.result ? 'Open Mission Debrief' : 'Next Sol Briefing');
+        solReport.open();
+        focus.focus(solContinue.entity, focus.focusVisible);
+    }
+
     return {
-        openEventModal: () => {
-            closeAll();
-            refreshEventModal();
-            eventDlg.open();
-        },
+        openEventModal,
         openAiModal,
         openCrewModal: (crewId: string) => {
             closeAll();
@@ -956,18 +996,8 @@ export function createGameModals(opts: {
             refreshStationModal();
             stationDlg.open();
         },
-        openEndReportModal: () => {
-            closeAll();
-            refreshEndModal();
-            endDlg.open();
-        },
-        closeAll,
-        isAnyOpen: () =>
-            eventDlg.isOpen() ||
-            aiDlg.isOpen() ||
-            crewDlg.isOpen() ||
-            stationDlg.isOpen() ||
-            endDlg.isOpen(),
+        openEndReportModal,
+        openSolReport,
         setPortraitTexture: (crewId, tex) => {
             crewPortraitMap.set(crewId, tex);
         },
