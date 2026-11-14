@@ -21,7 +21,7 @@ import { STORAGE_KEYS, type CrewMember } from '../contracts/gameContract';
 import {
     cancelHeld, chooseFocusedMission, clearHover, confirmCrew, cycleShelfTab, emptyBay, focusCrew, focusOffer,
     goTo, launch, moveCrewFocus, moveOfferFocus, moveShelfFocus, newPrepState, pickFocusedShelf, pickFromGrid,
-    pickFromShelf, placeHeldAt, rotateHeld, setHover, setShelfTab, toggleCrew, unpackAt, type PrepState,
+    pickFromShelf, placeHeldAt, removeHeldFromGrid, rotateHeld, setHover, setShelfTab, toggleCrew, unpackAt, type PrepState,
 } from './logic/flow';
 import { assetsReady, loadPrepAssets, type AssetsState } from './ui/assets';
 import { Ui } from './ui/kit';
@@ -148,11 +148,13 @@ function handleInput(s: PrepState, inp: InputLike): void {
     }
 
     // Drag and drop: releasing away from where the press started drops the item.
-    if (drag === 'pending') {
+    if (drag === 'pending' && !inp.isMouseButtonReleased(0)) {
         drag = { x: inp.mouseX, y: inp.mouseY };
     } else if (drag && inp.isMouseButtonReleased(0)) {
-        const moved = Math.hypot(inp.mouseX - drag.x, inp.mouseY - drag.y) > DRAG_THRESHOLD_PX;
+        const moved = drag !== 'pending' && Math.hypot(inp.mouseX - drag.x, inp.mouseY - drag.y) > DRAG_THRESHOLD_PX;
         drag = null;
+        // A click (no drag) on a packed item takes it out of the rocket.
+        if (!moved && s.held?.from.kind === 'grid') removeHeldFromGrid(s);
         if (moved && s.held) {
             if (s.hover) {
                 // A drag ends empty-handed; click-packing keeps supplies in hand instead.
