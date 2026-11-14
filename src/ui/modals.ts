@@ -62,6 +62,7 @@ import {
     setVisualColor,
     setVisualTexture,
 } from './theme';
+import { playSfx } from '../audio/soundManager';
 
 export interface ChatBubbleMsg {
     id: number;
@@ -190,6 +191,7 @@ export function createGameModals(opts: {
                 if (!slot.choiceId) return;
                 const res = resolveDailyEventChoice(getState(), slot.choiceId);
                 if (res.ok) {
+                    playSfx('confirm');
                     eventMode = 'outcome';
                     onStateChanged();
                     refreshEventModal();
@@ -240,7 +242,10 @@ export function createGameModals(opts: {
         node: { position: UIPositionType.Absolute, insetLeft: px(170), insetTop: px(400), width: px(360), height: px(48) },
         states: buttonStates(PALETTE.goldNormal, PALETTE.goldHover, PALETTE.goldPressed),
         fadeDuration: 0.12,
-        onClick: () => eventDlg.close(),
+        onClick: () => {
+            playSfx('click');
+            eventDlg.close();
+        },
     });
     makeAbsLabel(world, evOutcomeContinueBtn.entity, 0, 0, 360, 48, 'AWESOME! START PLANNING ->', {
         fontSize: 14,
@@ -257,7 +262,10 @@ export function createGameModals(opts: {
         states: buttonStates(),
         fadeDuration: 0.12,
         onClick: () => {
-            if (!getState().currentEvent) eventDlg.close();
+            if (!getState().currentEvent) {
+                playSfx('close');
+                eventDlg.close();
+            }
         },
     });
     makeAbsLabel(world, evCloseBtn.entity, 0, 0, 198, 40, 'Continue to Planning', { fontSize: 14, bold: true, align: TextAlign.Center });
@@ -397,7 +405,10 @@ export function createGameModals(opts: {
         node: { position: UIPositionType.Absolute, insetLeft: px(748), insetTop: px(15), width: px(78), height: px(32) },
         states: buttonStates(),
         fadeDuration: 0.12,
-        onClick: () => aiDlg.close(),
+        onClick: () => {
+            playSfx('close');
+            aiDlg.close();
+        },
     });
     makeAbsLabel(world, aiCloseBtn.entity, 0, 0, 78, 32, 'Close', { fontSize: 12, bold: true, align: TextAlign.Center });
 
@@ -478,6 +489,7 @@ export function createGameModals(opts: {
             states: buttonStates(PALETTE.btnNormal, PALETTE.primaryNormal, PALETTE.btnPressed),
             fadeDuration: 0.12,
             onClick: () => {
+                playSfx('select');
                 aiInput.setValue(qp.prompt);
                 void submitAiPlan(qp.prompt, true);
             },
@@ -570,6 +582,7 @@ export function createGameModals(opts: {
         onClick: () => {
             if (!pendingProposal) return;
             enqueueTask(getState(), pendingProposal, 'ai');
+            playSfx('confirm');
             pendingProposal = null;
             refreshProposalCard();
             aiDlg.close();
@@ -636,6 +649,7 @@ export function createGameModals(opts: {
         aiInput.setValue('');
 
         try {
+            playSfx('select');
             const st = getState();
             const context = {
                 planet: st.planet, sol: st.sol, targetSol: st.targetSol,
@@ -712,6 +726,7 @@ export function createGameModals(opts: {
                 const slot = crewTaskSlotBtns[i]!;
                 if (!slot.taskId || !inspectedCrewId) return;
                 assignCrewToTask(getState(), inspectedCrewId, slot.taskId);
+                playSfx('drop');
                 refreshCrewModal();
                 onStateChanged();
             },
@@ -729,6 +744,7 @@ export function createGameModals(opts: {
         onClick: () => {
             if (!inspectedCrewId) return;
             assignCrewToTask(getState(), inspectedCrewId, null);
+            playSfx('click');
             refreshCrewModal();
             onStateChanged();
         },
@@ -741,7 +757,10 @@ export function createGameModals(opts: {
         parent: crewDlg.panelEntity,
         node: { position: UIPositionType.Absolute, insetLeft: px(460), insetTop: px(442), width: px(100), height: px(34) },
         states: buttonStates(),
-        onClick: () => crewDlg.close(),
+        onClick: () => {
+            playSfx('close');
+            crewDlg.close();
+        },
     });
     makeAbsLabel(world, crewCloseBtn.entity, 0, 0, 100, 34, 'Close', { fontSize: 12, align: TextAlign.Center });
 
@@ -866,6 +885,7 @@ export function createGameModals(opts: {
             states: buttonStates(),
             onClick: () => {
                 const res = consumeCargoDirectly(getState(), item.id);
+                playSfx(res.ok ? 'confirm' : 'error');
                 setText(world, stFeedbackLbl, res.text);
                 setTextColor(world, stFeedbackLbl, res.ok ? PALETTE.green : PALETTE.amber);
                 refreshStationModal();
@@ -882,7 +902,10 @@ export function createGameModals(opts: {
         parent: stationDlg.panelEntity,
         node: { position: UIPositionType.Absolute, insetLeft: px(500), insetTop: px(444), width: px(100), height: px(32) },
         states: buttonStates(),
-        onClick: () => stationDlg.close(),
+        onClick: () => {
+            playSfx('close');
+            stationDlg.close();
+        },
     });
     makeAbsLabel(world, stCloseBtn.entity, 0, 0, 100, 32, 'Close', { fontSize: 12, align: TextAlign.Center });
 
@@ -1163,6 +1186,7 @@ export function createGameModals(opts: {
 
     function openAiModal(prefillPrompt?: string): void {
         closeAll();
+        playSfx('open');
         refreshProposalCard();
         void preloadGeminiKey().then((ready) => {
             if (ready && world.valid(parent) && aiDlg.isOpen()) refreshProposalCard();
@@ -1174,6 +1198,7 @@ export function createGameModals(opts: {
     function openEventModal(): void {
         closeAll();
         eventMode = getState().currentEvent ? 'choice' : 'outcome';
+        playSfx(getState().currentEvent ? 'alert' : 'open');
         refreshEventModal();
         eventDlg.open();
         const event = getState().currentEvent;
@@ -1218,12 +1243,14 @@ export function createGameModals(opts: {
         openAiModal,
         openCrewModal: (crewId: string) => {
             closeAll();
+            playSfx('open');
             inspectedCrewId = crewId;
             refreshCrewModal();
             crewDlg.open();
         },
         openStationModal: (focusTarget) => {
             closeAll();
+            playSfx('open');
             currentStationFocus = focusTarget;
             setText(world, stFeedbackLbl, '');
             refreshStationModal();
@@ -1231,10 +1258,12 @@ export function createGameModals(opts: {
         },
         openHelpModal: () => {
             closeAll();
+            playSfx('open');
             helpDlg.open();
         },
         openIdleConfirmModal: (message, onConfirm) => {
             closeAll();
+            playSfx('alert');
             pendingEndConfirm = onConfirm;
             setText(world, confirmEndMsgLbl, message);
             confirmEndDlg.open();

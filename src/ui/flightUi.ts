@@ -4,6 +4,7 @@ import {
     type AssetsData, type Color, type Entity, type FocusManagerState, type InputState, type UIEventQueue, type World,
 } from 'esengine';
 import { makeAbsBox, setNodeDisplayed, setText, setTextColor, setVisualColor } from './theme';
+import { playSfx } from '../audio/soundManager';
 
 export type Bounds = readonly [x: number, y: number, width: number, height: number];
 
@@ -175,7 +176,11 @@ export function makeFlightUi(
                 normal: { color: resting }, hover: { color: tone === 'hero' ? palette.white : palette.hover },
                 pressed: { color: palette.pressed }, disabled: { color: palette.edge },
             },
-            fadeDuration: options.reducedMotion ? 0 : 0.1, onClick,
+            fadeDuration: options.reducedMotion ? 0 : 0.1,
+            onClick: () => {
+                playSfx(tone === 'primary' || tone === 'hero' ? 'confirm' : 'click');
+                onClick();
+            },
         });
         const surface = box(handle.entity, [2, 2, w - 4, h - 4],
             tone === 'hero' ? palette.teal : tone === 'primary' ? palette.amber : tone === 'tile' ? palette.well : palette.raised);

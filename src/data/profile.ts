@@ -8,6 +8,7 @@ export interface PlaytestProfile {
     awardedRuns: string[];
     reducedMotion: boolean;
     highContrast: boolean;
+    soundEnabled: boolean;
 }
 
 const CREW_IDS = new Set(AVAILABLE_CREW.map(member => member.id));
@@ -28,6 +29,7 @@ export function loadProfile(stored: unknown, legacySkills: unknown, preferReduce
         awardedRuns: strings(saved.awardedRuns),
         reducedMotion: typeof saved.reducedMotion === 'boolean' ? saved.reducedMotion : preferReducedMotion,
         highContrast: saved.highContrast === true,
+        soundEnabled: saved.soundEnabled !== false,
     };
 }
 

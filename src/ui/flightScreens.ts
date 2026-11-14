@@ -307,12 +307,13 @@ export function showPreparedManifest(ui: FlightUi, offer: MissionOffer, problem:
     ui.button(summary, [20, 524, 368, 48], onLaunch, { label: 'Launch Mission', tone: 'primary', disabled: Boolean(problem) });
 }
 
-export function showSettings(ui: FlightUi, profile: PlaytestProfile, change: (field: 'reducedMotion' | 'highContrast') => void): void {
+export function showSettings(ui: FlightUi, profile: PlaytestProfile, change: (field: 'reducedMotion' | 'highContrast' | 'soundEnabled') => void): void {
     const { root, palette: p } = ui;
-    const panel = ui.frame(root, [248, 108, 1016, 284]);
+    const panel = ui.frame(root, [248, 108, 1016, 360]);
     for (const [index, [field, title, description]] of ([
         ['reducedMotion', 'Reduced Motion', 'Keep status lights and interface transitions steady.'],
         ['highContrast', 'High Contrast', 'Brighten text, outlines, and focus markers.'],
+        ['soundEnabled', 'Music & Sound Effects', 'Play ambient Mars music and UI sound effects.'],
     ] as const).entries()) {
         const y = 28 + index * 104;
         ui.label(panel, [24, y, 600, 40], title, { display: true, size: 28 });
