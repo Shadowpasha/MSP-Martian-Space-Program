@@ -19,6 +19,9 @@ import {
 } from '../data/cargo';
 import { FOOD_PER_CREW_PER_SOL, OXYGEN_PER_SOL, WATER_PER_CREW_PER_SOL } from '../data/supplyRates';
 import { type FlightUi } from './flightUi';
+import { play } from './feedback';
+import { burst } from './fx';
+import { easeOutBack, makeMotion } from './motion';
 
 const CARGO_COLORS: Record<CargoItemId, number> = {
     windSampler: 0xd39e55, repairKits: 0xcc745e, batteryPacks: 0xe1bd65, medkits: 0xcf7c8c,
@@ -94,6 +97,7 @@ export function showCargoPacker(
     launchProblem: (placements: CargoPlacement[]) => string | null, onLaunch: () => void,
 ): (input: InputState) => boolean {
     const { root, palette: p } = ui;
+    const motion = makeMotion(ui.world, ui.reducedMotion);
     const bay = ui.frame(root, [248, 108, 576, 596]);
     const inventory = ui.frame(root, [840, 108, 424, 596]);
     ui.label(bay, [20, 12, 332, 40], 'Cargo Bay', { display: true, size: 28 });
@@ -119,7 +123,7 @@ export function showCargoPacker(
         // onClick only acts for keyboard (Enter); pointer input goes through 'press' below.
         const button = ui.button(grid, [12 + x * STEP, 8 + y * STEP, PIECE, PIECE], () => {
             if (ui.hasKeyboardFocus(button.entity)) pressCell(x, y, true);
-        }, { tone: 'tile' });
+        }, { tone: 'tile', still: true });
         return { button, x, y };
     });
     const rotate = ui.button(bay, [20, 460, 164, 44], rotateHeld, { label: 'Rotate (R)' });
@@ -143,7 +147,7 @@ export function showCargoPacker(
         const slot = CARGO_ITEMS.filter(other => tabOf(other.id) === tabOf(item.id)).indexOf(item);
         const button = ui.button(inventory, [16, 94 + slot * ROW, 384, ROW - 6], () => {
             if (ui.hasKeyboardFocus(button.entity)) pick(item.id, true);
-        });
+        }, { quiet: true });
         ui.icon(button.entity, 10, 12, 32, item.id, p.amber);
         ui.label(button.entity, [54, 4, 200, 26], item.name, { display: true, size: 18 });
         ui.label(button.entity, [54, 28, 258, 36], item.effect, { size: 13, color: p.secondary, wrap: true, top: true });
@@ -168,7 +172,8 @@ export function showCargoPacker(
         ui.label(inventory, [44, y, 70, 22], key === 'oxygen' ? 'O₂' : key[0]!.toUpperCase() + key.slice(1), { size: 14 });
         const segs = Array.from({ length: 12 }, (_, i) => ui.box(inventory, [116 + i * 13, y + 6, 11, 10], p.well));
         const days = ui.label(inventory, [276, y, 124, 22], '', { size: 13, center: true });
-        return { key, segs, days };
+        // `shown` steps towards `target` one segment at a time, so the meter visibly fills or drains.
+        return { key, segs, days, shown: 0, target: 0, tone: p.good };
     });
 
     // The checklist: which NEEDED items are still missing, or that everything is ready.
@@ -177,6 +182,16 @@ export function showCargoPacker(
 
     const piecesLayer = ui.box(grid, [0, 0, 520, 340]);
     let pieces = ui.box(piecesLayer, [0, 0, 520, 340]);
+    /** The placements the pieces layer was last drawn from; it is only rebuilt when they change. */
+    let drawn: CargoPlacement[] | null = null;
+    /** The piece that was just packed or moved: it drops into its cells with a small bounce. */
+    let dropId: number | null = null;
+    /** Set while the dropped piece is drawn, so its landing gets a sound and a dust puff. */
+    let landed = false;
+    /** How many NEEDED items were missing last time, so finishing the list can be celebrated once. */
+    let stillMissing = -1;
+    /** Which NEEDED tags were already PACKED, so only a fresh change hops. */
+    const wasPacked = new Map<CargoItemId, boolean>();
     const guides = ui.box(grid, [0, 0, 520, 340]);
     const markers = cells.map(cell => ({
         ...cell,
@@ -242,7 +257,7 @@ export function showCargoPacker(
         // Lift it out; a click (no drag) on release means "take it out of the rocket".
         commit(placements.filter(piece => piece.id !== hit.id));
         held = { item: hit.item, rotation: hit.rotation, from: hit };
-        if (keyboard) { held = null; say(`${CARGO_BY_ID[hit.item].name} returned to inventory.`, false); return; }
+        if (keyboard) { held = null; play('blip', 0.8); say(`${CARGO_BY_ID[hit.item].name} returned to inventory.`, false); return; }
         drag = { ...lastMouse };
         say(`Moving ${CARGO_BY_ID[hit.item].name}: drop it in a new spot.`, false);
     }
@@ -254,6 +269,7 @@ export function showCargoPacker(
         const next: CargoPlacement = { id, item: held.item, x, y, rotation: held.rotation };
         const problem = placementProblem(placements, next);
         if (problem) { say(shortProblem(problem), true); return false; }
+        dropId = id;
         commit([...placements, next]);
         if (!held.from) nextId++;
         const name = CARGO_BY_ID[held.item].name;
@@ -291,6 +307,7 @@ export function showCargoPacker(
     }
 
     function say(text: string, isError: boolean): void {
+        if (isError) play('buzz');
         feedback = text;
         error = isError;
         refresh();
@@ -328,12 +345,24 @@ export function showCargoPacker(
     }
 
     function refresh(): void {
-        ui.world.despawn(pieces);
-        pieces = ui.box(piecesLayer, [0, 0, 520, 340]);
+        const rebuild = drawn !== placements;
+        if (rebuild) {
+            ui.world.despawn(pieces);
+            pieces = ui.box(piecesLayer, [0, 0, 520, 340]);
+            drawn = placements;
+        }
         let occupied = 0;
         for (const piece of placements) {
             const footprint = occupiedCells(piece);
             occupied += footprint.length;
+            if (!rebuild) continue;
+            // Each piece gets its own layer so it can move on its own.
+            const layer = ui.box(pieces, [0, 0, 520, 340]);
+            if (piece.id === dropId) {
+                motion.enter(layer, 0, 0, { dy: -14, duration: 280, ease: easeOutBack });
+                dropId = null;
+                landed = true;
+            }
             const base = cargoColor(piece.item, 0.44);
             const outline = cargoColor(piece.item, 0.91);
             const detail = cargoColor(piece.item, 0.55);
@@ -343,26 +372,35 @@ export function showCargoPacker(
                 const top = 8 + y * STEP;
                 const right = contains(x + 1, y);
                 const down = contains(x, y + 1);
-                ui.box(pieces, [left, top, PIECE + (right ? 8 : 0), PIECE + (down ? 8 : 0)], base);
-                if (right && down && contains(x + 1, y + 1)) ui.box(pieces, [left + PIECE, top + PIECE, 8, 8], base);
-                if (!contains(x - 1, y)) ui.box(pieces, [left, top, 4, PIECE + (down ? 8 : 0)], outline);
-                if (!contains(x, y - 1)) ui.box(pieces, [left, top, PIECE + (right ? 8 : 0), 4], outline);
-                if (!right) ui.box(pieces, [left + PIECE - 4, top, 4, PIECE + (down ? 8 : 0)], outline);
-                if (!down) ui.box(pieces, [left, top + PIECE - 4, PIECE + (right ? 8 : 0), 4], outline);
+                ui.box(layer, [left, top, PIECE + (right ? 8 : 0), PIECE + (down ? 8 : 0)], base);
+                if (right && down && contains(x + 1, y + 1)) ui.box(layer, [left + PIECE, top + PIECE, 8, 8], base);
+                if (!contains(x - 1, y)) ui.box(layer, [left, top, 4, PIECE + (down ? 8 : 0)], outline);
+                if (!contains(x, y - 1)) ui.box(layer, [left, top, PIECE + (right ? 8 : 0), 4], outline);
+                if (!right) ui.box(layer, [left + PIECE - 4, top, 4, PIECE + (down ? 8 : 0)], outline);
+                if (!down) ui.box(layer, [left, top + PIECE - 4, PIECE + (right ? 8 : 0), 4], outline);
                 if (right && down && !contains(x + 1, y + 1)) {
-                    ui.box(pieces, [left + PIECE, top + PIECE - 4, 8, 4], outline);
-                    ui.box(pieces, [left + PIECE - 4, top + PIECE, 4, 8], outline);
+                    ui.box(layer, [left + PIECE, top + PIECE - 4, 8, 4], outline);
+                    ui.box(layer, [left + PIECE - 4, top + PIECE, 4, 8], outline);
                 }
-                ui.box(pieces, [left + 12, top + 12, 4, 4], detail);
-                ui.box(pieces, [left + 60, top + 60, 4, 4], detail);
+                ui.box(layer, [left + 12, top + 12, 4, 4], detail);
+                ui.box(layer, [left + 60, top + 60, 4, 4], detail);
             }
             // Icon + name centred on the whole footprint, so a piece reads as one object.
             const cx = footprint.reduce((a, [x]) => a + x, 0) / footprint.length;
             const cy = footprint.reduce((a, [, y]) => a + y, 0) / footprint.length;
             const px = Math.round(12 + cx * STEP + PIECE / 2);
             const py = Math.round(8 + cy * STEP + PIECE / 2);
-            ui.icon(pieces, px - 16, py - 26, 32, piece.item, p.white);
-            ui.label(pieces, [px - 60, py + 8, 120, 22], CARGO_BY_ID[piece.item].shortName, { display: true, size: 15, center: true, color: p.white });
+            ui.icon(layer, px - 16, py - 26, 32, piece.item, p.white);
+            if (landed) {
+                // It lands with a thud and a little puff of dust at its feet.
+                landed = false;
+                play('thunk');
+                const bottom = Math.round(8 + Math.max(...footprint.map(([, fy]) => fy)) * STEP + PIECE);
+                motion.after(200, () => burst(ui, motion, grid, px, bottom - 6, {
+                    colors: [p.secondary, p.muted], count: 8, speed: 0.09, gravity: 0.0002, life: 420, size: 3, upward: true,
+                }));
+            }
+            ui.label(layer, [px - 60, py + 8, 120, 22], CARGO_BY_ID[piece.item].shortName, { display: true, size: 15, center: true, color: p.white });
         }
 
         const counts = packedInventory(placements);
@@ -376,9 +414,13 @@ export function showCargoPacker(
                 const done = counts[item.id] >= need;
                 ui.fill(tag, done ? p.good : p.amber);
                 ui.setText(tagText, done ? 'PACKED' : 'NEEDED');
+                if (done && wasPacked.get(item.id) === false) { motion.hop(tag, 254, 8, 6); play('chime'); }
+                wasPacked.set(item.id, done);
             }
         }
         const missing = CARGO_ITEMS.filter(item => counts[item.id] < (required[item.id] ?? 0));
+        if (missing.length === 0 && stillMissing > 0) motion.after(300, () => play('success'));
+        stillMissing = missing.length;
         for (const t of tabs) {
             const active = t.name === tab;
             ui.fill(t.button.surface, active ? p.amber : p.raised);
@@ -396,8 +438,10 @@ export function showCargoPacker(
         const lastsBy = supplyLasts(setup, placements);
         for (const meter of meters) {
             const { lasts, deadline, ok } = lastsBy.find(entry => entry.key === meter.key)!;
-            const filled = Math.min(meter.segs.length, Math.round((lasts / deadline) * meter.segs.length));
-            meter.segs.forEach((seg, i) => ui.fill(seg, i < filled ? (ok ? p.good : p.amber) : p.well));
+            meter.target = Math.min(meter.segs.length, Math.round((lasts / deadline) * meter.segs.length));
+            meter.tone = ok ? p.good : p.amber;
+            if (motion.reducedMotion) meter.shown = meter.target;
+            paintMeter(meter);
             ui.setText(meter.days, ok ? 'whole trip ✓' : `${lasts} of ${deadline} sols`);
             ui.textColor(meter.days, ok ? p.good : p.amber);
         }
@@ -416,10 +460,27 @@ export function showCargoPacker(
         empty.setDisabled(placements.length === 0);
         preview();
     }
+    function paintMeter(meter: typeof meters[number]): void {
+        meter.segs.forEach((seg, i) => ui.fill(seg, i < meter.shown ? meter.tone : p.well));
+    }
+    let lastMeterStep = 0;
+    function stepMeters(): void {
+        const time = Date.now();
+        if (time - lastMeterStep < 45) return;
+        lastMeterStep = time;
+        for (const meter of meters) {
+            if (meter.shown === meter.target) continue;
+            meter.shown += meter.shown < meter.target ? 1 : -1;
+            paintMeter(meter);
+        }
+    }
+
     refresh();
 
     // Per-frame input. Returns true when it used Escape, so the page does not navigate away.
     return input => {
+        motion.tick();
+        stepMeters();
         if (input.isKeyPressed('KeyR') || input.isMouseButtonPressed(2)) rotateHeld();
         if (drag && input.isMouseButtonReleased(0)) {
             const moved = Math.hypot(input.mouseX - drag.x, input.mouseY - drag.y) > DRAG_THRESHOLD_PX;
@@ -428,6 +489,7 @@ export function showCargoPacker(
                 // A click on a packed item: it goes back to the inventory.
                 const name = CARGO_BY_ID[held.item].name;
                 held = null;
+                play('blip', 0.8);
                 say(`${name} returned to inventory.`, false);
             } else if (held && moved) {
                 if (!hover || !placeAt(hover.x, hover.y)) {

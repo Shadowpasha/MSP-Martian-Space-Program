@@ -4,7 +4,7 @@ import { AVAILABLE_CREW, DEFAULT_CREW, DEFAULT_MARS_SETUP, SKILL_TREE_UPGRADES, 
 import { packedInventory, placementProblem, rotatedCells, type CargoPlacement } from '../src/data/cargo';
 import { DAILY_EVENTS } from '../src/data/events';
 import { buildLaunchSetup, launchProblem, missionOffers } from '../src/data/missions';
-import { awardResearch, loadProfile, purchaseProblem, purchaseUpgrade } from '../src/data/profile';
+import { awardResearch, loadProfile, purchaseProblem, purchaseUpgrade, resetUpgrades, spentResearch } from '../src/data/profile';
 import {
     advanceSol, assignCrewToTask, computeTaskEfficiency, consumeCargoDirectly, createInitialGameState, enqueueTask,
     isChoiceAvailable, resolveDailyEventChoice, type OutpostGameState,
@@ -216,4 +216,17 @@ test('Mission Prep goals (oxygen, crops, radiation, ice) can be completed in the
         }
         assert.equal(sim.goal.completed, true, `${offer.title}: goal completed`);
     }
+});
+
+test('resetting upgrades refunds every point spent and clears the tree', () => {
+    const start = { ...loadProfile(null, [], false), researchPoints: 40 };
+    const tier1 = SKILL_TREE_UPGRADES.find(node => node.id === 'solar_mppt')!;
+    const tier2 = SKILL_TREE_UPGRADES.find(node => node.prerequisites.includes('solar_mppt'))!;
+    const bought = purchaseUpgrade(purchaseUpgrade(start, tier1), tier2);
+    assert.deepEqual(bought.upgradeIds, [tier1.id, tier2.id]);
+    assert.equal(spentResearch(bought), tier1.cost + tier2.cost);
+    const reset = resetUpgrades(bought);
+    assert.deepEqual(reset.upgradeIds, []);
+    assert.equal(reset.researchPoints, 40);
+    assert.equal(resetUpgrades(reset), reset, 'nothing to reset leaves the profile unchanged');
 });
