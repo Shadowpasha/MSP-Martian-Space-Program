@@ -4,7 +4,8 @@ import type { ResourcePool } from '../contracts/gameContract';
 import { CARGO_ITEMS } from '../data/cargo';
 import { RESOURCE_LABELS } from '../data/missions';
 import { defaultLoad, dispatchProblem, expeditionFor, dispatchRover, emergencyReturn, loadSlots, localArea, PACK_UNITS, ROVER_SLOTS,
-    STORM_DRAW, tripPlan, useLocalCargo, type Area, type RoverLoad, type TharsisState } from '../simulation/tharsis';
+    peakRoverBudget, roverLoadStock, stormReserve, toggleFieldRest, tripPlan, useLocalCargo, type Area, type RoverLoad, type TharsisState } from '../simulation/tharsis';
+import { FIELD_REST_MORALE } from '../simulation/tharsisConditions';
 import { chooseFieldCrew } from '../simulation/tharsisWork';
 import type { FlightUi } from './flightUi';
 import type { RunButton } from './tharsisFlight';
@@ -25,7 +26,7 @@ export function showRoverChecklist({ state, ui, content, button, change, draft, 
     const p = ui.palette;
     const run = state.tharsis;
     const trip = tripPlan(state);
-    ui.label(content, [22, 61, 1116, 27], `${trip.leg === 1 ? 'Pilot' : 'Backup driver'} · ${trip.leg} Sol per leg · ${trip.sols} Sol round trip · Latest departure Sol ${trip.latest} · Projected return Sol ${trip.returnSol}`, { size: 15, color: p.cyan });
+    ui.label(content, [22, 61, 1116, 27], `${trip.hasPilot ? 'Pilot' : 'Backup driver'} · ${trip.leg} Sol per leg · ${trip.sols} Sol round trip · Latest departure Sol ${trip.latest} · Clean-trip return Sol ${trip.returnSol}`, { size: 15, color: p.cyan });
     const pair = ui.frame(content, [20, 102, 1136, 96], p.ink);
     ui.label(pair, [12, 4, 250, 30], `Travelers   ${run.fieldPair.length}/2`, { display: true, size: 23 });
     ui.label(pair, [12, 41, 240, 38], 'Changing crew reopens suit certification.', { size: 13, color: p.secondary, wrap: true });
@@ -57,7 +58,10 @@ export function showRoverChecklist({ state, ui, content, button, change, draft, 
         button(`bulk-${key}-plus`, tanks, [391, y, 42, 32], () => adjust(1), { label: '+', disabled: draft.resources[key] >= Math.floor(state.resources[key]) });
         button(`bulk-${key}-pack`, tanks, [442, y, 79, 32], () => adjust(PACK_UNITS[key]), { label: '+ Pack', disabled: draft.resources[key] >= Math.floor(state.resources[key]) });
     });
-    ui.label(tanks, [12, 261, 508, 25], 'Per Sol   2 Food · 2 Water · 3 O₂ · 4 Power', { size: 14, color: p.secondary });
+    const upkeepLine = (cost: ResourcePool) => `${cost.food} Food · ${cost.water} Water · ${cost.oxygen} O₂ · ${cost.energy} Power`;
+    ui.label(tanks, [12, 253, 508, 20], `Clear per Sol   ${upkeepLine(trip.perSol)}`, { size: 13, color: p.secondary });
+    const peak = peakRoverBudget(state);
+    ui.label(tanks, [12, 276, 508, 20], `Storm peak   ${upkeepLine(peak.upkeep)}${peak.restricted ? ' · Shelter' : ''}`, { size: 13, color: p.amber });
 
     rosterItems(state).forEach((item, index) => {
         const y = 40 + index * 30;
@@ -71,9 +75,19 @@ export function showRoverChecklist({ state, ui, content, button, change, draft, 
 
     const problem = dispatchProblem(state, draft);
     const slots = loadSlots(draft);
-    const weatherNote = state.conditions.weather === 'Dust Haze' ? ' · Opacity rising' : '';
-    ui.label(content, [24, 526, 700, 30], `${slots}/${ROVER_SLOTS} slots · ${run.completed.harden ? 'Rover hardened' : 'Standard rover'} · Storm draw +${STORM_DRAW.energy} Power and +${STORM_DRAW.oxygen} O₂/Sol${weatherNote}`, { size: 14, color: slots > ROVER_SLOTS ? p.bad : p.amber });
-    ui.label(content, [24, 561, 700, 42], problem ?? 'Ready to dispatch. A delay can move the projected return past the deadline.', { size: 15, color: problem ? p.secondary : p.good, wrap: true });
+    const extra = stormReserve(state);
+    const weatherNote = extra.energy || extra.oxygen ? `Storm reserve up to +${extra.energy} Power / +${extra.oxygen} O₂` :
+        run.completed.harden ? 'Rover hardened' : 'Standard rover shelters during storms';
+    ui.label(content, [24, 526, 700, 30], `${slots}/${ROVER_SLOTS} slots · ${weatherNote}`, { size: 14, color: slots > ROVER_SLOTS ? p.bad : p.amber });
+    const packed = roverLoadStock(draft);
+    const missingPower = Math.max(0, trip.cleanCost.energy + extra.energy - packed.energy);
+    const missingOxygen = Math.max(0, trip.cleanCost.oxygen + extra.oxygen + 1 - packed.oxygen);
+    const gaps = [missingPower && `${missingPower} Power`, missingOxygen && `${missingOxygen} O₂`].filter(Boolean).join(' and ');
+    const loadNote = slots > ROVER_SLOTS ? `Load exceeds ${ROVER_SLOTS} slots. Pack consumables in place of some bulk stock.` : problem;
+    const warning = !loadNote && gaps && `Storm reserve needs ${gaps} more. Loaded supplies cover the clear-weather trip.`;
+    ui.label(content, [24, 561, 700, 42], loadNote || warning || 'Ready to dispatch. Delays can move the return past the deadline.', {
+        size: 15, color: loadNote ? p.secondary : warning ? p.amber : p.good, wrap: true,
+    });
     button('reset-load', content, [738, 540, 190, 50], reset, { label: 'Clean-trip load' });
     button('dispatch', content, [940, 540, 216, 50], () => change(() => {
         const result = dispatchRover(state, draft);
@@ -111,6 +125,14 @@ export function showStorage({ state, ui, content, button, change, area, open }: 
         button('rover-checklist', content, [266, 540, 216, 50], () => open('roverChecklist'), { label: 'Open rover checklist', tone: 'hero', disabled: Boolean(state.tharsis.rover) });
     } else {
         const rover = state.tharsis.rover!;
+        const forcedRest = local.crew.some(member => member.morale < FIELD_REST_MORALE);
+        button('field-rest', content, [22, 540, 230, 50], () => change(() => toggleFieldRest(state)), {
+            label: forcedRest ? 'Field rest required' : rover.resting ? 'Cancel field rest' : 'Rest for one Sol',
+            disabled: forcedRest, tone: rover.resting ? 'hero' : 'plain',
+        });
+        ui.label(content, [268, 526, 550, 65], 'Rest restores Morale and uses supplies. Travel pauses and a partial survey window resets.', {
+            size: 14, color: p.secondary, wrap: true,
+        });
         button('return', content, [840, 540, 314, 50], () => change(() => emergencyReturn(state) ?? 'Emergency return requested.'), {
             label: rover.phase === 'returning' ? 'Return underway' : 'Order emergency return', disabled: rover.phase === 'returning', tone: 'primary',
         });

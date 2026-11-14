@@ -389,12 +389,13 @@ export function showCargoPacker(
                 ui.box(layer, [left + 12, top + 12, 4, 4], detail);
                 ui.box(layer, [left + 60, top + 60, 4, 4], detail);
             }
-            // Icon + name centred on the whole footprint, so a piece reads as one object.
             const cx = footprint.reduce((a, [x]) => a + x, 0) / footprint.length;
-            const cy = footprint.reduce((a, [, y]) => a + y, 0) / footprint.length;
             const px = Math.round(12 + cx * STEP + PIECE / 2);
-            const py = Math.round(8 + cy * STEP + PIECE / 2);
-            ui.icon(layer, px - 16, py - 26, 32, piece.item, p.white);
+            const [labelX, labelY] = [...footprint].sort(([ax, ay], [bx, by]) => ay - by || ax - bx)[0]!;
+            let labelWidth = PIECE;
+            while (contains(labelX + Math.round(labelWidth / STEP), labelY)) labelWidth += STEP;
+            ui.label(layer, [16 + labelX * STEP, 28 + labelY * STEP, labelWidth - 8, 36], CARGO_BY_ID[piece.item].shortName,
+                { display: true, size: 16, fit: 12, center: true, color: p.white });
             if (landed) {
                 // It lands with a thud and a little puff of dust at its feet.
                 landed = false;
@@ -404,7 +405,6 @@ export function showCargoPacker(
                     colors: [p.secondary, p.muted], count: 8, speed: 0.09, gravity: 0.0002, life: 420, size: 3, upward: true,
                 }));
             }
-            ui.label(layer, [px - 60, py + 8, 120, 22], CARGO_BY_ID[piece.item].shortName, { display: true, size: 15, center: true, color: p.white });
         }
 
         const counts = packedInventory(placements);

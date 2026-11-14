@@ -8,10 +8,11 @@ import { discussWork, draftSurveyBriefing, type DiscussionMessage, type TaskDraf
 import { advanceSol, commitBriefing, continueAfterOutcome, continueAfterReport, createInitialGameState, isTharsis } from '../simulation/solEngine';
 import { defaultLoad, expeditionFor, fieldCrew, fieldReturnEstimate, resourceForecast, roverPosition, stormDay, type RoverLoad } from '../simulation/tharsis';
 import { resolveBriefing, choiceBlock, commitmentLabel } from '../simulation/tharsisEvents';
-import { acceptCustomWork, acceptWork, assignWork, findOrder, LOW_MORALE, stationCrew } from '../simulation/tharsisWork';
+import { dutyMoraleLoss, FIELD_REST_MORALE, LOW_MORALE, radiationEffects, REST_MORALE, SEVERE_MORALE } from '../simulation/tharsisConditions';
+import { acceptCustomWork, acceptWork, assignWork, findOrder, stationCrew } from '../simulation/tharsisWork';
 import { makeFlightUi, type Bounds, type FlightArt, type FlightUi } from './flightUi';
 import { showRoverChecklist, showStorage } from './tharsisManifest';
-import { RESOURCE_KEYS, resourceRate, runway, showResources, signed } from './tharsisResources';
+import { RESOURCE_KEYS, resourceRate, runway, showConditions, showResources, signed } from './tharsisResources';
 import { showTerminal, type TerminalStatus } from './tharsisTerminal';
 import { showWorkConsole, type WorkPanel } from './tharsisWorkConsole';
 import { makeAbsBox } from './theme';
@@ -19,7 +20,7 @@ import { makeAbsBox } from './theme';
 const STATION = 'assets/textures/tharsis_station.png';
 const SITE = 'assets/textures/tharsis_site.png';
 const ROOM_NAMES = ['Rover Bay', 'Instrument Lab', 'Life Support', 'Storage'] as const;
-type Panel = WorkPanel | 'roverChecklist' | 'cargo' | 'roverCargo' | 'log' | 'aries' | 'resources';
+type Panel = WorkPanel | 'roverChecklist' | 'cargo' | 'roverCargo' | 'log' | 'aries' | 'resources' | 'conditions';
 
 interface Options {
     world: World;
@@ -203,8 +204,10 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             void draftSurveyBriefing(state, operation.signal).then(briefing => {
                 if (!world.valid(root) || operation.signal.aborted) return;
                 pendingBriefing = null;
-                if (briefing) commitBriefing(state, sol, briefing);
-                else terminalStatus = 'unavailable';
+                if (briefing) {
+                    commitBriefing(state, sol, briefing);
+                    terminalStatus = 'connected';
+                } else terminalStatus = 'unavailable';
                 dirty = true;
             });
         }
@@ -260,13 +263,17 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             const morale = index === 1;
             ui.box(monitor, [x - 10, 12, 2, 52], p.teal);
             ui.label(monitor, [x, 4, 105, 22], morale ? 'Morale' : 'Radiation', { size: 14, color: p.secondary });
-            ui.label(monitor, [x, 31, 106, 28], `${value}${morale ? '%' : ' mSv'}`, { display: true, size: 23, color: (morale ? value < LOW_MORALE : value >= 50) ? p.bad : p.cyan });
+            const caution = morale ? value < LOW_MORALE : radiationEffects(value).health > 0;
+            ui.label(monitor, [x, 25, 108, 26], `${value}${morale ? '%' : ' mSv'}`, { display: true, size: 23, color: caution ? p.bad : p.cyan });
+            if (forecast) ui.label(monitor, [x, 56, 108, 16],
+                morale ? value < SEVERE_MORALE ? 'Severe strain' : caution ? 'Low' : 'Steady' : radiationEffects(value).level,
+                { size: 12, color: caution ? p.amber : p.secondary });
         });
 
         const telemetry = ui.frame(root, [12, 108, 504, 46], p.ink, day ? p.rust : p.edge);
-        const weather = day ? `STORM ${day}/3 · Solar particle alert` : weatherAtSol === 'Dust Haze'
-            ? 'Dust haze · Opacity rising at the ridge' : `${weatherAtSol}${run.phase !== 'report' ? ` · ${state.conditions.temperatureC} °C` : ''}`;
-        ui.label(telemetry, [12, 0, 480, 38], weather, { size: 16, color: day ? p.amber : p.text });
+        const weather = `${weatherAtSol}${day ? ` ${day}/3` : ''}${run.phase !== 'report' ? ` · ${local.conditions.temperatureC} °C` : ''}`;
+        ui.label(telemetry, [12, 0, 326, 38], weather, { size: 16, color: day || weatherAtSol === 'Dust Haze' ? p.amber : p.text });
+        if (interactive) button('conditions', telemetry, [342, 3, 152, 34], () => open('conditions'), { label: 'Conditions', labelSize: 14 });
         if (interactive) {
             button('station', root, [928, 108, 152, 44], () => { view = 'station'; dirty = true; }, { label: 'Station', tone: !atSite ? 'hero' : 'plain' });
             button('expedition', root, [1088, 108, 180, 44], () => { view = 'expedition'; dirty = true; }, { label: 'Expedition', tone: atSite ? 'hero' : 'plain' });
@@ -281,13 +288,16 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             const card = ui.frame(root, [24, 280, 416, 220], p.ink, p.teal);
             const eta = fieldReturnEstimate(state);
             const { site, surveyHours } = expeditionFor(state);
+            const dockStatus = !rover ? `Return by Sol ${state.goal.deadlineSol}` :
+                eta === null ? 'Critical exposure projected' : `Projected dock Sol ${eta}`;
+            const dockRisk = rover && (eta === null || eta > state.goal.deadlineSol);
             const leg = rover?.phase === 'outbound' ? `En route to ${site} · ${rover.travelLeft} Sol left` : rover?.phase === 'returning' ? `Returning · ${rover.travelLeft} Sol left` :
                 rover?.phase === 'site' ? `At ${site} · Survey active` : run.returnedWithData ? 'Docked · Data recovered' : `Docked · Readying for ${site}`;
             ui.label(card, [16, 8, 368, 44], rover ? 'Rover telemetry' : `${site[0]!.toUpperCase()}${site.slice(1)} overlook`, { display: true, size: 26, fit: 18, color: p.cyan });
             ui.label(card, [16, 58, 368, 38], leg, { wrap: true, size: 15 });
             ui.label(card, [16, 104, 368, 24], fieldCrew(state).map(member => member.name.split(' ')[0]).join(' + ') || 'No field crew selected', { color: p.secondary });
             ui.label(card, [16, 144, 368, 28], `${run.hours}/${surveyHours} consecutive hours`, { color: run.hours === surveyHours ? p.good : p.amber });
-            ui.label(card, [16, 174, 368, 25], `${run.completed.harden ? 'Hardened' : 'Standard rover'} · ${eta ? `Earliest dock Sol ${eta}` : `Return by Sol ${state.goal.deadlineSol}`}`, { size: 14, color: eta && eta > state.goal.deadlineSol ? p.bad : p.secondary });
+            ui.label(card, [16, 174, 368, 25], `${run.completed.harden ? 'Hardened' : 'Standard rover'} · ${dockStatus}`, { size: 14, color: dockRisk ? p.bad : p.secondary });
             const route = ui.frame(root, [24, 176, 416, 80], p.ink, p.teal);
             ui.label(route, [12, 0, 140, 28], 'STATION', { size: 13, color: p.secondary });
             ui.label(route, [240, 0, 152, 28], expeditionFor(state).site.replace(/^the /, '').toUpperCase(), { size: 13, color: p.secondary, fit: 10 });
@@ -320,7 +330,8 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             const streak = run.dutyStreak[member.id] ?? 0;
             ui.label(card, [44, 32, 68, 18], `${member.health} HP`, { size: 11, color: p.secondary });
             ui.label(card, [44, 48, 70, 17], `${member.morale}% Morale`, { size: 10, color: member.morale < LOW_MORALE ? p.bad : p.good });
-            ui.label(card, [5, 67, 106, 20], member.health <= 0 ? 'Incapacitated' : field ? 'Expedition' : active ? streak ? `${streak} Sols on duty` : 'Assigned' : 'Rest next Sol', { center: true, size: 12, color: member.health <= 0 ? p.bad : field ? p.cyan : active ? p.amber : p.muted });
+            const duty = field ? 'Expedition' : 'Assigned';
+            ui.label(card, [5, 67, 106, 20], member.health <= 0 ? 'Incapacitated' : field || active ? streak ? `Duty streak ${streak}` : duty : 'Rest next Sol', { center: true, size: 12, color: member.health <= 0 ? p.bad : field ? p.cyan : active ? p.amber : p.muted });
         });
         const ops = ui.frame(root, [892, 572, 376, 136], p.ink, p.teal);
         if (interactive) {
@@ -331,15 +342,17 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             button('endSol', ops, [91, 64, 269, 52], endSol, { label: 'End Sol', tone: 'primary' });
         } else ui.label(ops, [12, 17, 344, 92], 'Operations control', { display: true, size: 26, center: true, color: p.cyan });
         if (interactive && moraleInfo) {
-            const morale = ui.frame(root, [371, 366, 492, 192], p.ink, p.teal);
+            const morale = ui.frame(root, [371, 334, 504, 224], p.ink, p.teal);
             ui.label(morale, [14, 8, 454, 31], 'Crew Morale', { display: true, size: 23 });
-            ui.label(morale, [14, 46, 450, 58], 'Consecutive working Sols lower Morale. A Sol off duty restores 7 points and resets the streak.', { size: 15, wrap: true, top: true });
-            ui.label(morale, [14, 111, 450, 55], `Below ${LOW_MORALE}% Morale, a crew member works 20% slower. Unassign a lead in Tasks to give them a break.`, { size: 15, wrap: true, color: p.amber, top: true });
+            ui.label(morale, [14, 48, 470, 50], `Working costs ${dutyMoraleLoss(1)} to ${dutyMoraleLoss(4)} points per Sol as the duty streak grows. A rest Sol restores ${REST_MORALE} and resets the streak.`, { size: 15, wrap: true, top: true });
+            ui.label(morale, [14, 103, 470, 52], `Pace drops 25% below ${LOW_MORALE}% Morale and 50% below ${SEVERE_MORALE}%. Field crew must rest below ${FIELD_REST_MORALE}%.`, { size: 15, wrap: true, color: p.amber, top: true });
+            ui.label(morale, [14, 160, 470, 46], 'Unassign leads in Scheduled tasks or plan a field rest in Expedition supplies.', { size: 14, wrap: true, color: p.secondary, top: true });
         }
         if (!forecast) return;
-        const tooltip = ui.frame(root, [524, 104, 394, 90], p.ink, p.cyan);
-        const tipTitle = ui.label(tooltip, [12, 2, 360, 29], '', { display: true, size: 19, color: p.cyan });
-        const tipText = ui.label(tooltip, [12, 34, 360, 30], '', { size: 14, color: p.text });
+        const tooltip = ui.group(root, [524, 104, 394, 90]);
+        const tipFrame = ui.frame(tooltip, [0, 0, 394, 90], p.ink, p.cyan);
+        const tipTitle = ui.label(tipFrame, [12, 2, 360, 29], '', { display: true, size: 19, color: p.cyan });
+        const tipText = ui.label(tipFrame, [12, 34, 360, 30], '', { size: 14, color: p.text });
         ui.show(tooltip, false);
         function reveal(entity: Entity, key: keyof ResourcePool) {
             tooltipTarget = entity;
@@ -425,7 +438,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         if (!planning) phaseOverlay();
         else if (panel) {
             const titles: Partial<Record<Panel, string>> = { roverChecklist: 'Rover Checklist', cargo: 'Station storage', roverCargo: 'Expedition supplies',
-                log: 'Mission log', aries: 'A.R.I.E.S. Terminal', assignments: 'Scheduled tasks', resources: 'Resource management' };
+                log: 'Mission log', aries: 'A.R.I.E.S. Terminal', assignments: 'Scheduled tasks', resources: 'Resource management', conditions: 'Environmental conditions' };
             const title = titles[panel] ?? 'Work orders';
             const content = console([48, 28, 1184, 664], title);
             button('close', content, [1028, 12, 120, 42], () => open(null), { label: 'Close' });
@@ -447,6 +460,10 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             } else if (panel === 'resources') {
                 showResources(ui, content, button, state, view === 'expedition' ? 'rover' : 'station', selectedResource, resourcePage,
                     key => { selectedResource = key; resourcePage = 0; dirty = true; }, page => { resourcePage = page; dirty = true; });
+            } else if (panel === 'conditions') {
+                showConditions(ui, content, button, state, view === 'expedition' ? 'rover' : 'station',
+                    area => { view = area === 'rover' ? 'expedition' : 'station'; dirty = true; },
+                    area => open(area === 'rover' ? 'roverCargo' : 'life'));
             } else if (panel === 'log') {
                 const lines = state.dailyLog.slice(-9).reverse();
                 lines.forEach((entry, index) => ui.label(content, [24, 84 + index * 52, 1120, 48], `SOL ${entry.sol}   ${entry.text}`, { size: 16, wrap: true, color: entry.kind === 'warn' ? ui.palette.amber : ui.palette.text }));
@@ -485,6 +502,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
                 node.insetLeft = px(card.home[0]);
                 node.insetTop = px(card.home[1]);
             });
+            dragged.delete(card.entity);
             dirty = true;
         }
     };

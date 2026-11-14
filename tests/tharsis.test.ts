@@ -4,7 +4,7 @@ import { AVAILABLE_CREW, DEFAULT_CREW, type CrewMember } from '../src/contracts/
 import { WEATHER_SURVEY } from '../src/data/missions';
 import { CHECKLIST, ORDER_BY_ID, type Technique } from '../src/data/tharsisOrders';
 import { advanceSol, commitBriefing, continueAfterOutcome, continueAfterReport, createInitialGameState, isTharsis } from '../src/simulation/solEngine';
-import { applyForecast, defaultLoad, dispatchProblem, dispatchRover, emergencyReturn, loadSlots, resourceForecast, stormDay, tripPlan, useLocalCargo, type TharsisState } from '../src/simulation/tharsis';
+import { applyForecast, defaultLoad, dispatchProblem, dispatchRover, emergencyReturn, fieldCrew, fieldReturnEstimate, loadSlots, resourceForecast, stormDay, stormReserve, toggleFieldRest, tripPlan, useLocalCargo, type TharsisState } from '../src/simulation/tharsis';
 import { choiceBlock, resolveBriefing, validateBriefing } from '../src/simulation/tharsisEvents';
 import { acceptCustomWork, acceptWork, assignWork, chooseFieldCrew, findOrder, orderBlock, updateChecklist, workQuote } from '../src/simulation/tharsisWork';
 import { awardResearch, loadProfile } from '../src/data/profile';
@@ -87,6 +87,28 @@ test('manifest validation is atomic and changes to the travelers invalidate thei
     assert.equal(tripPlan(state).latest, 11);
     assert.equal(state.tharsis.completed.suits, undefined);
     assert.match(dispatchRover(state, defaultLoad(state))!, /field crew checks/);
+});
+
+test('queued hardening waits until the rover is docked again', () => {
+    const state = survey();
+    setDeparture(state, 12);
+    const harden = ORDER_BY_ID.get('harden')!;
+    assert.equal(acceptWork(state, harden, ['specialist']), null);
+    assert.equal(assignWork(state, harden.id, 'crew_engineer'), null);
+    assert.equal(dispatchRover(state, defaultLoad(state)), null);
+    assert.match(acceptWork(state, harden, ['specialist'], true)!, /dock the rover/i);
+    assert.match(resourceForecast(state, 'station').tasks[0]?.hold ?? '', /dock the rover/i);
+    step(state);
+    assert.equal(state.tharsis.completed.harden, undefined);
+    assert.equal(state.tharsis.work[0]?.progress, 0);
+
+    assert.equal(emergencyReturn(state), null);
+    step(state);
+    assert.equal(state.tharsis.rover, null);
+    assert.equal(state.tharsis.completed.harden, undefined);
+    const sol = state.sol;
+    step(state);
+    assert.equal(state.tharsis.completed.harden, sol);
 });
 
 test('a Sol 13 departure can dock on Sol 16 and award one debrief', () => {
@@ -226,6 +248,132 @@ test('storm seeds create three consecutive sols and protected field operations c
     }
 });
 
+test('dust haze and the storm peak draw down solar, heating and filter reserves', () => {
+    const state = survey();
+    setDeparture(state, state.tharsis.stormStart - 1);
+    const haze = resourceForecast(state, 'station');
+    assert.equal(haze.passive.energy, 4);
+    assert.equal(haze.filterOxygen, 1);
+    assert.equal(haze.heating, 0);
+    state.sol += 2;
+    applyForecast(state, state.tharsis);
+    const peak = resourceForecast(state, 'station');
+    assert.equal(peak.passive.energy, 0);
+    assert.equal(peak.heating, 2);
+    assert.equal(peak.filterOxygen, 3);
+    const solar = findOrder(state, 'solar')!;
+    const work = findOrder(state, 'spares')!;
+    state.tharsis.shelter = 'essential';
+    state.conditions.radiation = 0;
+    assert.equal(acceptWork(state, solar, ['specialist']), null);
+    assert.equal(assignWork(state, solar.id, 'crew_engineer'), null);
+    assert.equal(acceptWork(state, work, []), null);
+    assert.equal(assignWork(state, work.id, 'crew_pilot'), null);
+    state.resources.energy = 2;
+    const sheltered = resourceForecast(state, 'station');
+    assert.ok(sheltered.dose < peak.dose);
+    assert.ok(sheltered.upkeep.energy < peak.upkeep.energy);
+    assert.ok(sheltered.tasks.every(task => task.hold === 'station heating shortfall'));
+    const health = state.crew[0]!.health;
+    assert.equal(advanceSol(state).advanced, true);
+    assert.equal(state.resources.energy, 0);
+    assert.equal(state.crew[0]!.health, health - 14);
+    assert.ok(state.lastSolReport.some(line => line.includes('insufficient heating power')));
+    assert.equal(state.tharsis.completed.spares, undefined);
+});
+
+test('loading advice uses a worst-case reserve until the first visible warning', () => {
+    const early = survey(1);
+    const late = survey(2);
+    for (const state of [early, late]) {
+        setDeparture(state, 7);
+        state.tharsis.completed.harden = 1;
+        assert.equal(state.conditions.weather, 'Clear');
+    }
+    assert.deepEqual(stormReserve(early), stormReserve(late));
+    assert.ok(stormReserve(late).oxygen > 0);
+    late.sol = late.tharsis.stormStart + 3;
+    applyForecast(late, late.tharsis);
+    assert.deepEqual(stormReserve(late), { energy: 0, oxygen: 0 });
+});
+
+test('high radiation persists after the storm and stops exposed work at dangerous levels', () => {
+    const state = survey();
+    setDeparture(state, 12);
+    state.conditions.radiation = 80;
+    const solar = findOrder(state, 'solar')!;
+    assert.equal(acceptWork(state, solar, ['specialist']), null);
+    assert.equal(assignWork(state, solar.id, 'crew_engineer'), null);
+    assert.equal(resourceForecast(state, 'station').tasks[0]?.hold, 'radiation above exterior work limit');
+    const health = state.crew[0]!.health;
+    step(state);
+    assert.equal(state.conditions.radiation, 77);
+    assert.equal(state.crew[0]!.health, health - 12);
+    assert.equal(state.tharsis.completed.solar, undefined);
+    assert.equal(useLocalCargo(state, 'station', 'medkits'), null);
+    assert.equal(resourceForecast(state, 'station').tasks[0]?.hold, undefined);
+});
+
+test('the docking forecast includes radiation holds and the lost survey window', () => {
+    const state = survey();
+    setDeparture(state, 12);
+    assert.equal(dispatchRover(state, defaultLoad(state)), null);
+    step(state);
+    step(state);
+    const rover = state.tharsis.rover!;
+    rover.conditions.radiation = 78;
+    assert.equal(state.tharsis.hours, 24);
+    assert.equal(fieldReturnEstimate(state), 17);
+    assert.equal(state.tharsis.hours, 24);
+    assert.equal(rover.conditions.radiation, 78);
+    step(state);
+    assert.equal(state.tharsis.hours, 0);
+    assert.match(state.lastSolReport.join(' '), /radiation above field work limit/);
+    assert.equal(fieldReturnEstimate(state), 17);
+});
+
+test('the docking forecast includes an approaching storm after its warning is visible', () => {
+    const state = survey(1);
+    setDeparture(state, 7);
+    state.conditions.radiation = 0;
+    assert.equal(dispatchRover(state, defaultLoad(state)), null);
+    assert.equal(fieldReturnEstimate(state), 10);
+    step(state);
+    assert.equal(state.conditions.weather, 'Dust Haze');
+    assert.equal(fieldReturnEstimate(state), 14);
+
+    state.tharsis.rover!.conditions.radiation = 40;
+    assert.equal(fieldReturnEstimate(state), null);
+});
+
+test('field rest spends rover stock, restores Morale and resets an incomplete sample', () => {
+    const state = survey();
+    setDeparture(state, 12);
+    const load = defaultLoad(state);
+    load.resources.food += 2;
+    load.resources.water += 2;
+    load.resources.oxygen += 3;
+    load.resources.energy += 2;
+    assert.equal(dispatchRover(state, load), null);
+    step(state);
+    step(state);
+    const crew = fieldCrew(state);
+    const morale = crew[0]!.morale;
+    const oxygen = state.tharsis.rover!.resources.oxygen;
+    const stock = state.resources.oxygen;
+    assert.equal(state.tharsis.hours, 24);
+    assert.equal(toggleFieldRest(state), null);
+    assert.equal(resourceForecast(state, 'rover').upkeep.energy, 2);
+    assert.equal(fieldReturnEstimate(state), 17);
+    assert.equal(advanceSol(state).advanced, true);
+    assert.equal(state.tharsis.hours, 0);
+    assert.equal(state.tharsis.rover!.resources.oxygen, oxygen - 3);
+    assert.equal(state.resources.oxygen, stock - 3);
+    assert.equal(state.tharsis.rover!.resting, false);
+    assert.equal(crew[0]!.morale, Math.min(100, morale + 12));
+    assert.match(state.lastSolReport.join(' '), /planned field rest/);
+});
+
 test('Gemini choices are validated, hidden until committed, location-scoped, and committed once', () => {
     const state = survey();
     setDeparture(state, 6);
@@ -244,6 +392,9 @@ test('Gemini choices are validated, hidden until committed, location-scoped, and
     assert.equal(validateBriefing(unavailable, state), null);
     unavailable.choices[1]!.cargo = 'windSampler';
     assert.equal(validateBriefing(unavailable, state), null);
+    const titleAtLimit = `Gemini ${'X'.repeat(41)}`;
+    assert.equal(validateBriefing({ ...value, title: titleAtLimit }, state)?.title, `A.R.I.E.S. ${'X'.repeat(41)}`);
+    assert.equal(validateBriefing({ ...value, title: titleAtLimit + 'X' }, state), null);
     const accepted = validateBriefing(value, state)!;
     assert.ok(accepted);
     assert.equal(commitBriefing(state, state.sol - 1, accepted), false);
@@ -333,23 +484,43 @@ test('consecutive shifts lower individual Morale and a rest Sol restores it', ()
     const state = survey();
     plan(state);
     const member = state.crew.find(crew => crew.role === 'engineer')!;
-    const greens = findOrder(state, 'greens')!;
-    member.morale = 47;
+    member.morale = 65;
     const air = findOrder(state, 'air')!;
     const work = () => { assert.equal(acceptWork(state, air, ['specialist']), null); assert.equal(assignWork(state, air.id, member.id), null); step(state); };
+    const pace = () => workQuote(air, [], member, state.skillModifiers).rate;
+    const normal = pace();
     work();
     assert.equal(state.tharsis.dutyStreak[member.id], 1);
     work();
     assert.equal(state.tharsis.dutyStreak[member.id], 2);
-    assert.equal(member.morale, 45);
+    assert.equal(member.morale, 60.5);
     work();
-    assert.equal(member.morale, 41);
-    const low = workQuote(greens, [], member, state.skillModifiers).rate;
+    assert.equal(member.morale, 54.5);
+    const low = pace();
+    assert.ok(low < normal, 'fatigue reduces specialist work pace');
     assert.equal(advanceSol(state).advanced, true);
     assert.equal(state.tharsis.dutyStreak[member.id], 0);
-    assert.equal(member.morale, 48);
-    assert.ok(workQuote(greens, [], member, state.skillModifiers).rate > low);
-    assert.match(state.lastSolReport.join(' '), /Kalpana \+7 \(rest\)/);
+    assert.equal(member.morale, 66.5);
+    assert.equal(pace(), normal);
+    assert.match(state.lastSolReport.join(' '), /Kalpana \+12 \(rest\)/);
+    member.morale = 30;
+    assert.ok(pace() < low, 'severe Morale loss slows the same shift further');
+});
+
+test('the resource forecast counts the final fractional shift as finishing this Sol', () => {
+    const crew = DEFAULT_CREW.map(member => member.role === 'engineer' ? { ...member, morale: 57 } : member);
+    const state = survey(0, crew);
+    plan(state);
+    const water = ORDER_BY_ID.get('water')!;
+    assert.equal(acceptWork(state, water, ['conserve']), null);
+    assert.equal(assignWork(state, water.id, 'crew_engineer'), null);
+    for (let i = 0; i < 4; i++) step(state);
+    assert.equal(state.tharsis.work[0]?.progress, 2.4);
+    const flow = resourceForecast(state, 'station').tasks[0];
+    assert.equal(flow?.remaining, 1);
+    assert.equal(flow?.yield?.water, 19);
+    step(state);
+    assert.ok(state.lastSolReport.includes('Recover potable water complete · Kalpana · +19 Water.'));
 });
 
 test('a live briefing can accompany authored storm warnings without replacing the storm', async t => {
@@ -368,6 +539,8 @@ test('a live briefing can accompany authored storm warnings without replacing th
         assert.equal(snapshot.area, 'station');
         assert.equal(snapshot.lastSol, 7);
         assert.equal(snapshot.stormDay, 1);
+        assert.equal(snapshot.conditions.temperatureC, -76);
+        assert.equal(snapshot.dailyBudget.heating, 2);
         return Response.json({ text: JSON.stringify({ title: 'Bus fault', observation: 'One solar branch draws current with the relay off.', system: 'solar power', choices: [
             { action: 'Isolate branch', detail: 'Open the local breaker.', result: 'The fault stopped drawing power.', commitment: 'none', cargo: 'none', effects: [{ id: 'power_saved', severity: 1 }] },
             { action: 'Retry the inverter', detail: 'Run the same startup sequence.', result: 'The faulty branch consumed reserves.', commitment: 'power', cargo: 'none', effects: [{ id: 'power_loss', severity: 1 }] },
@@ -425,9 +598,10 @@ function runSurvey(crew: CrewMember[], seed: number, strategy: 'prepared' | 'car
         }
         if (!run.rover && !run.returnedWithData) {
             const load = defaultLoad(state);
-            if (strategy !== 'unprepared' && run.completed.harden && state.sol <= run.stormStart + 2) {
-                load.resources.oxygen += 6;
-                load.resources.energy += 6;
+            if (strategy !== 'unprepared') {
+                const extra = stormReserve(state);
+                load.resources.oxygen += extra.oxygen;
+                load.resources.energy += extra.energy;
             }
             dispatchRover(state, load);
         }

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_CREW, type CrewMember, type MissionSetupInput } from '../src/contracts/gameContract';
+import { AVAILABLE_CREW, DEFAULT_CREW, type CrewMember, type MissionSetupInput } from '../src/contracts/gameContract';
 import { EXPEDITIONS } from '../src/data/expeditions';
 import { WEATHER_SURVEY } from '../src/data/missions';
 import { expeditionSetup, NASA_MISSIONS } from '../src/data/nasaMissions';
 import { ORDER_BY_ID, type Technique } from '../src/data/tharsisOrders';
 import { advanceSol, continueAfterOutcome, continueAfterReport, createInitialGameState, isTharsis } from '../src/simulation/solEngine';
-import { defaultLoad, dispatchRover, stormDay, useLocalCargo, type TharsisState } from '../src/simulation/tharsis';
+import { applyForecast, defaultLoad, dispatchRover, loadSlots, resourceForecast, ROVER_SLOTS, stormDay, stormReserve, tripPlan, useLocalCargo, type TharsisState } from '../src/simulation/tharsis';
 import { choiceBlock, resolveBriefing } from '../src/simulation/tharsisEvents';
 import { acceptWork, assignWork, chooseFieldCrew, orderBlock } from '../src/simulation/tharsisWork';
 
@@ -35,7 +35,7 @@ function run(setup: MissionSetupInput, seed: number, strategy: 'prepared' | 'unp
     assert.ok(isTharsis(state));
     const trip = state.tharsis;
     const instrument = EXPEDITIONS[trip.expedition].instrument;
-    state.cargo = { windSampler: 0, repairKits: 1, medkits: 0, seedPods: 2, extraRations: 2, batteryPacks: 1, waterCanisters: 3, oxygenTanks: 1, [instrument]: 1 };
+    state.cargo = { windSampler: 0, repairKits: 1, medkits: 0, seedPods: 2, extraRations: 2, batteryPacks: 2, waterCanisters: 2, oxygenTanks: 1, [instrument]: 1 };
     const pilot = state.crew.find(member => member.role === 'pilot');
     const first = pilot ?? state.crew.find(member => member.role === 'captain') ?? state.crew[0]!;
     const second = state.crew.find(member => member !== first && member.role === 'medic') ?? state.crew.find(member => member !== first)!;
@@ -43,6 +43,11 @@ function run(setup: MissionSetupInput, seed: number, strategy: 'prepared' | 'unp
     chooseFieldCrew(state, first.id);
     chooseFieldCrew(state, second.id);
     while (!state.result) {
+        if (strategy === 'prepared' && trip.rover) {
+            const { upkeep } = resourceForecast(state, 'rover');
+            if (trip.rover.resources.energy < upkeep.energy) useLocalCargo(state, 'rover', 'batteryPacks');
+            if (trip.rover.resources.oxygen <= upkeep.oxygen || trip.rover.resources.food < upkeep.food) useLocalCargo(state, 'rover', 'seedPods');
+        }
         trip.shelter = strategy !== 'unprepared' && (state.conditions.weather === 'Dust Haze' || stormDay(state) > 0) ? 'essential' : 'off';
         if (state.resources.energy < 35) useLocalCargo(state, 'station', 'batteryPacks');
         if (state.resources.oxygen < 53) {
@@ -73,11 +78,22 @@ function run(setup: MissionSetupInput, seed: number, strategy: 'prepared' | 'unp
         }
         if (!trip.rover && !trip.returnedWithData) {
             const load = defaultLoad(state);
-            if (strategy !== 'unprepared' && trip.completed.harden && state.sol <= trip.stormStart + 2) {
-                load.resources.oxygen += 6;
-                load.resources.energy += 6;
+            if (strategy !== 'unprepared') {
+                const extra = stormReserve(state);
+                load.resources.oxygen += extra.oxygen;
+                load.resources.energy += extra.energy;
+                // A long route needs compact cargo to fit the storm reserve.
+                if (loadSlots(load) > ROVER_SLOTS) {
+                    load.resources.energy -= 44;
+                    load.cargo.batteryPacks = 2;
+                    load.resources.oxygen -= 6;
+                    load.cargo.seedPods = 1;
+                    load.resources.food -= 8;
+                }
             }
-            dispatchRover(state, load);
+            const reason = dispatchRover(state, load);
+            if (strategy === 'prepared' && trip.completed.suits && state.sol <= tripPlan(state).latest) assert.equal(reason, null, `${trip.expedition} seed ${seed}, Sol ${state.sol}`);
+            if (!reason && load.cargo.batteryPacks) useLocalCargo(state, 'rover', 'batteryPacks');
         }
         assert.equal(advanceSol(state).advanced, true);
         if (!state.result) plan(state);
@@ -116,8 +132,43 @@ test('a prepared crew wins every seed of both new expeditions, an unprepared cre
 });
 
 test('the solar storm keeps solar power but raises station radiation faster than dust', () => {
-    const solar = run(setupFor('radiation_detective'), 0, 'prepared');
-    const weathers = new Set(solar.timeline.map(sol => sol.weather));
-    assert.ok(weathers.has('Solar Flare'), [...weathers].join(','));
-    assert.ok(!weathers.has('Dust Storm'));
+    const solar = createInitialGameState(setupFor('radiation_detective'), [], 0);
+    const dust = createInitialGameState(WEATHER_SURVEY, [], 0);
+    assert.ok(isTharsis(solar) && isTharsis(dust));
+    for (const state of [solar, dust]) {
+        state.sol = state.tharsis.stormStart + 1;
+        applyForecast(state, state.tharsis);
+    }
+    const solarBudget = resourceForecast(solar, 'station');
+    const dustBudget = resourceForecast(dust, 'station');
+    assert.equal(solar.conditions.weather, 'Solar Flare');
+    assert.equal(solarBudget.passive.energy, 8);
+    assert.equal(solarBudget.heating, 0);
+    assert.ok(solarBudget.dose > dustBudget.dose);
+});
+
+test('the crater rim needs heater Power even in clear conditions', () => {
+    const ice = createInitialGameState(setupFor('ice_hunter'), [], 0);
+    assert.ok(isTharsis(ice));
+    assert.equal(resourceForecast(ice, 'station').heating, 1);
+    assert.equal(tripPlan(ice).perSol.energy, 5);
+    ice.sol = ice.tharsis.stormStart + 1;
+    applyForecast(ice, ice.tharsis);
+    assert.equal(ice.conditions.temperatureC, -90);
+    assert.equal(resourceForecast(ice, 'station').heating, 3);
+});
+
+test('every starting crew can pack enough storm reserves on the longer expedition routes', () => {
+    for (const id of ['radiation_detective', 'ice_hunter']) {
+        const setup = setupFor(id);
+        for (let i = 0; i < AVAILABLE_CREW.length; i++) {
+            for (let j = i + 1; j < AVAILABLE_CREW.length; j++) {
+                const crew = AVAILABLE_CREW.filter((_, index) => index !== i && index !== j);
+                for (let seed = 0; seed < 3; seed++) {
+                    const state = run(setup, seed, 'prepared', crew);
+                    assert.equal(state.result?.outcome, 'victory', `${id} ${crew.map(member => member.role)} seed ${seed}: ${state.result?.reason}`);
+                }
+            }
+        }
+    }
 });

@@ -3,7 +3,8 @@ import { formatResource, resourceEntries } from '../data/missions';
 import { STATION_EQUIPMENT } from '../data/tharsisEquipment';
 import { TECHNIQUES, WORK_ORDERS, type Technique, type WorkOrder } from '../data/tharsisOrders';
 import { cycleShelter, type TharsisState } from '../simulation/tharsis';
-import { acceptWork, assignWork, cancelWork, equipmentBlock, LOW_MORALE, orderBlock, preferredLead, scheduledOrder, stationCrew, workDraftBlock, workQuote } from '../simulation/tharsisWork';
+import { LOW_MORALE, moralePace } from '../simulation/tharsisConditions';
+import { acceptWork, assignWork, cancelWork, equipmentBlock, orderBlock, preferredLead, scheduledOrder, stationCrew, workDraftBlock, workQuote } from '../simulation/tharsisWork';
 import type { Bounds, FlightUi } from './flightUi';
 import type { RunButton } from './tharsisFlight';
 
@@ -156,8 +157,9 @@ function drawAssignments(options: ConsoleOptions, inspector: Entity, order: Work
         ui.image(control.entity, [8, 8, 44, 56], member.portraitPath);
         ui.label(control.entity, [57, 8, 102, 24], member.name.split(' ')[0]!, { display: true, size: 19 });
         ui.label(control.entity, [57, 32, 102, 21], `Morale ${member.morale}%`, { size: 12, color: member.morale < LOW_MORALE ? p.bad : p.secondary });
+        const penalty = Math.round((1 - moralePace(member.morale)) * 100);
         const occupied = state.tharsis.work.some(job => job.orderId !== order.id && job.leadId === member.id);
-        ui.label(control.entity, [8, 64, 148, 22], !eligible ? 'Ineligible lead' : `${quote.sols} Sol · ${occupied ? 'Reassign' : quote.specialist ? 'Specialist' : 'Backup'}`, { size: 12, color: eligible ? p.amber : p.muted, center: true });
+        ui.label(control.entity, [8, 64, 148, 22], !eligible ? 'Ineligible lead' : `${quote.sols} Sol · ${penalty ? `−${penalty}% pace` : occupied ? 'Reassign' : quote.specialist ? 'Specialist' : 'Backup'}`, { size: 12, color: eligible ? p.amber : p.muted, center: true });
     });
     button('unassign', inspector, [16, 420, 220, 40], () => change(() => assignWork(state, order.id, null)), { label: 'Unassign lead', disabled: !leadId });
     if (!candidate.progress && !disabled) button('discuss-scheduled', inspector, [246, 420, 232, 40], () => open('aries', order.id), { label: 'Discuss revision' });

@@ -3,7 +3,8 @@ import type { ResourcePool } from '../contracts/gameContract';
 import { EQUIPMENT_IDS, STATION_EQUIPMENT } from '../data/tharsisEquipment';
 import { RESOURCE_LABELS } from '../data/missions';
 import { round1 } from '../simulation/stateOps';
-import { localArea, resourceForecast, type Area, type TharsisState } from '../simulation/tharsis';
+import { localArea, localBudget, resourceForecast, stormDay, type Area, type TharsisState } from '../simulation/tharsis';
+import { radiationAfterDose, radiationEffects } from '../simulation/tharsisConditions';
 import type { FlightUi } from './flightUi';
 import type { RunButton } from './tharsisFlight';
 
@@ -28,6 +29,65 @@ export function runway(stock: number, forecast: Forecast, key: Resource): string
     return 'Stable at current use';
 }
 
+export function showConditions(ui: FlightUi, content: Entity, button: RunButton, state: TharsisState, area: Area,
+    select: (area: Area) => void, openControls: (area: Area) => void): void {
+    const p = ui.palette;
+    const actualArea = area === 'rover' && state.tharsis.rover ? 'rover' : 'station';
+    const { conditions, resources } = localArea(state, actualArea)!;
+    const budget = localBudget(state, actualArea);
+    const day = stormDay(state);
+    const projectedDose = radiationAfterDose(conditions.radiation, budget.dose);
+    const projectedEffects = radiationEffects(projectedDose);
+    const powered = round1(resources.energy + budget.passive.energy) >= budget.upkeep.energy;
+    button('condition-station', content, [20, 68, 172, 39], () => select('station'), { label: 'Station', tone: actualArea === 'station' ? 'hero' : 'plain' });
+    button('condition-rover', content, [204, 68, 172, 39], () => select('rover'), {
+        label: 'Rover', tone: actualArea === 'rover' ? 'hero' : 'plain', disabled: !state.tharsis.rover,
+    });
+    ui.label(content, [866, 70, 284, 32], `SOL ${state.sol} / ${state.goal.deadlineSol}`, { size: 15, color: p.cyan, center: true });
+
+    const columns = [
+        {
+            title: 'Weather', value: `${conditions.weather}${day ? ` · ${day}/3` : ''}`, warning: Boolean(day || conditions.weather === 'Dust Haze'),
+            rows: [
+                [actualArea === 'station' ? `+${budget.passive.energy} passive solar Power` : 'Rover running from packed supplies',
+                    budget.filterOxygen ? `Filtration draws ${budget.filterOxygen}${actualArea === 'station' ? '%' : ''} O₂` : 'Filters at normal load'].join(' · '),
+                conditions.weather === 'Dust Haze' ? 'Opacity is rising. Check storm protection and reserves.' :
+                    conditions.weather === 'Solar Flare' ? 'Particle exposure rises. Solar generation continues.' :
+                    day ? 'The storm draws down reserves and limits exposed work.' : 'Routine operations.',
+            ],
+        },
+        {
+            title: 'Temperature', value: `${conditions.temperatureC} °C`, warning: !powered && budget.heating > 0,
+            rows: [`${budget.heating} Power for heating, included in ${budget.upkeep.energy} Power total upkeep.`,
+                !powered && budget.heating > 0 ? 'Heating reserve shortfall. Crew will lose health and Morale.' :
+                    budget.heating ? 'Heaters are funded at current stock.' : 'Baseline heating is covered by routine upkeep.'],
+        },
+        {
+            title: 'Radiation', value: `${conditions.radiation} mSv`, warning: projectedEffects.health > 0,
+            rows: [`${projectedDose} mSv projected after exposure · ${projectedEffects.level}`,
+                projectedEffects.health ? `Each crew member loses ${projectedEffects.health} HP and ${round1(projectedEffects.morale * state.skillModifiers.moraleDecayMult)} Morale at this dose.` :
+                    'Current exposure is below the crew health threshold.',
+                projectedEffects.exteriorHold ? 'Exposure exceeds the limit for outside work and field sampling.' :
+                    actualArea === 'station' ? 'Shelter and shielding reduce incoming exposure.' : 'Rover hardening reduces incoming exposure.'],
+        },
+    ];
+    columns.forEach(({ title, value, warning, rows }, index) => {
+        const card = ui.frame(content, [20 + 384 * index, 132, 364, 356], p.ink, warning ? p.rust : p.teal);
+        ui.label(card, [16, 12, 330, 34], title, { display: true, size: 23, color: p.secondary });
+        ui.label(card, [16, 56, 330, 56], value, { display: true, size: 29, fit: 19, color: warning ? p.amber : p.cyan });
+        ui.box(card, [16, 122, 328, 1], p.teal);
+        rows.forEach((line, row) => ui.label(card, [16, 143 + 62 * row, 328, 55], line, {
+            size: 15, wrap: true, top: true, color: row === 0 ? p.text : p.secondary,
+        }));
+    });
+    const text = actualArea === 'station' ? `Shelter ${state.tharsis.shelter} · ${state.tharsis.completed.shield ? 'Shelter panels fitted' : 'Standard shielding'}` :
+        state.tharsis.completed.harden ? 'Hardened rover · Added shielding and insulation' : 'Standard rover · Must shelter in a storm';
+    ui.label(content, [24, 519, 810, 44], text, { size: 16, color: p.amber });
+    button('condition-controls', content, [860, 512, 272, 49], () => openControls(actualArea), {
+        label: actualArea === 'station' ? 'Life support controls' : 'Expedition supplies', tone: 'hero',
+    });
+}
+
 export function showResources(ui: FlightUi, content: Entity, button: RunButton, state: TharsisState, area: Area, key: Resource, taskPage: number,
     select: (key: Resource) => void, page: (next: number) => void): void {
     const p = ui.palette;
@@ -46,11 +106,13 @@ export function showResources(ui: FlightUi, content: Entity, button: RunButton, 
     const budget = ui.frame(content, [20, 200, 476, 406], p.ink, p.teal);
     ui.label(budget, [18, 8, 420, 43], RESOURCE_LABELS[key], { display: true, size: 27 });
     ui.label(budget, [18, 58, 420, 32], runway(local.resources[key], forecast, key), { size: 19, color: p.amber });
-    const rows = [ ['Passive recovery / Sol', passive], ['Life support / Sol', -forecast.upkeep[key]],
+    const climate = key === 'energy' ? round1(forecast.heating + forecast.filterPower) : key === 'oxygen' ? forecast.filterOxygen : 0;
+    const rows = [ ['Passive recovery / Sol', passive], ['Routine upkeep / Sol', -(forecast.upkeep[key] - climate)],
+        [key === 'energy' ? 'Heating and filtration / Sol' : 'Filtration / Sol', -climate],
         ['Task consumption / Sol', -(use - forecast.upkeep[key])], ['Tasks finishing this Sol', recovery], ['Projected net this Sol', daily] ] as const;
-    rows.forEach(([label, value], index) => {
-        const y = 114 + index * 39;
-        ui.box(budget, [16, y + 33, 434, 1], p.edge);
+    rows.filter((_, index) => index !== 2 || climate > 0).forEach(([label, value], index) => {
+        const y = 101 + index * 35;
+        ui.box(budget, [16, y + 30, 434, 1], p.edge);
         ui.label(budget, [18, y, 310, 29], label, { size: 15, color: p.secondary });
         ui.label(budget, [328, y, 116, 29], `${signed(round1(value))}${unit}`, { size: 16, color: value < 0 ? p.bad : value > 0 ? p.good : p.text, center: true });
     });

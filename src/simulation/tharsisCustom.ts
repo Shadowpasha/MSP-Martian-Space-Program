@@ -22,9 +22,9 @@ export interface CustomWorkOrder extends WorkOrder {
     bay: 'custom';
 }
 
-export function plainText(value: unknown, max: number): string | null {
+export function ariesText(value: unknown, max: number): string | null {
     if (typeof value !== 'string') return null;
-    const text = value.trim().replace(/\s+/g, ' ');
+    const text = value.trim().replace(/\s+/g, ' ').replace(/\bgemini\b/gi, 'A.R.I.E.S.');
     return text.length > 0 && text.length <= max && !/[<>\u0000-\u001f]/.test(text) ? text : null;
 }
 
@@ -43,8 +43,8 @@ function parsePool(value: unknown, limits: ResourcePool): Partial<ResourcePool> 
 export function readCustomTask(value: unknown): CustomTaskSpec | null {
     if (!value || typeof value !== 'object') return null;
     const raw = value as Record<string, unknown>;
-    const title = plainText(raw.title, 44)?.replace(/\bgemini\b/gi, 'A.R.I.E.S.');
-    const description = plainText(raw.description, 180)?.replace(/\bgemini\b/gi, 'A.R.I.E.S.');
+    const title = ariesText(raw.title, 44);
+    const description = ariesText(raw.description, 180);
     const category = Object.keys(SPECIALTY).find(key => key === raw.category) as CustomTaskSpec['category'] | undefined;
     const shifts = raw.shifts;
     const decommission = EQUIPMENT_IDS.find(id => id === raw.decommission);

@@ -1,10 +1,10 @@
 import { expeditionOf } from '../data/expeditions';
 import { EQUIPMENT_IDS, STATION_EQUIPMENT } from '../data/tharsisEquipment';
 import { TECHNIQUES, WORK_ORDERS, type Technique } from '../data/tharsisOrders';
-import { localArea, stormDay, type TharsisState } from '../simulation/tharsis';
+import { localArea, localBudget, stormDay, type TharsisState } from '../simulation/tharsis';
 import { allowedEventCargo, allowedPositiveEffects, availableEffectIds, EVENT_COMMITMENT_IDS, EVENT_SYSTEMS, validateBriefing } from '../simulation/tharsisEvents';
 import { customDraftBlock, findOrder, methodProblem, orderBlock, scheduledOrder, stationCrew, workDraftBlock } from '../simulation/tharsisWork';
-import { plainText, readCustomTask, type CustomTaskSpec } from '../simulation/tharsisCustom';
+import { ariesText, readCustomTask, type CustomTaskSpec } from '../simulation/tharsisCustom';
 import { requestGemini } from './geminiPlanner';
 
 function parse(response: Awaited<ReturnType<typeof requestGemini>>): unknown {
@@ -32,7 +32,8 @@ export async function draftSurveyBriefing(state: TharsisState, signal?: AbortSig
     const systems = EVENT_SYSTEMS[area].filter(system => !state.tharsis.recentSystems.slice(-2).includes(system));
     const input = JSON.stringify({
         mission: state.goal.title, seed: state.tharsis.seed, briefingSol: state.sol, lastSol: state.tharsis.reportSol, deadline: state.goal.deadlineSol,
-        difficulty: `${expedition.region} standard`, hazard: expedition.hazard.kind === 'solar' ? 'solar particle storm' : 'regional dust storm', area, weather: local.conditions.weather, stormDay: stormDay(state), radiation: local.conditions.radiation, morale: local.conditions.morale,
+        difficulty: expedition.id, hazard: expedition.hazard.kind === 'solar' ? 'solar particle storm' : 'regional dust storm', area,
+        conditions: local.conditions, stormDay: stormDay(state), dailyBudget: localBudget(state, area),
         resources: local.resources, cargo: local.cargo, crew: local.crew.map(({ role, health, stamina }) => ({ role, health, stamina })),
         localReport: state.lastSolReport.filter(line => area === 'station' ? !fieldLine(line) : fieldLine(line)).slice(0, 6),
         fieldHours: state.tharsis.hours, travelPhase: state.tharsis.rover?.phase, completedWork: Object.keys(state.tharsis.completed),
@@ -61,8 +62,7 @@ export function draftProblem(state: TharsisState, draft: TaskDraft): string | nu
 function readReply(raw: unknown, state: TharsisState): DiscussionReply | null {
     if (!raw || typeof raw !== 'object') return null;
     const value = raw as Record<string, unknown>;
-    const prose = plainText(value.message, 640);
-    const message = prose?.replace(/\bgemini\b/gi, 'A.R.I.E.S.');
+    const message = ariesText(value.message, 640);
     if (!message) return null;
     if (!value.draft || typeof value.draft !== 'object') return { message };
     const suggestion = value.draft as Record<string, unknown>;
@@ -96,7 +96,7 @@ export async function discussWork(state: TharsisState, topic: string | null, his
         'Keep each reply under 640 characters. Explain the idea, risk, or actual question. The review panel shows the quoted numbers, so there is no need to format your chat as a task form.',
     ].join('\n');
     const input = JSON.stringify({
-        sol: state.sol, deadline: state.goal.deadlineSol, weather: state.conditions.weather, resources: state.resources, cargo: state.cargo,
+        sol: state.sol, deadline: state.goal.deadlineSol, conditions: state.conditions, dailyBudget: localBudget(state, 'station'), resources: state.resources, cargo: state.cargo,
         equipment: EQUIPMENT_IDS.map(id => ({ id, ...STATION_EQUIPMENT[id], state: state.tharsis.disabledEquipment[id] ? 'decommissioned' :
             state.tharsis.work.some(job => job.custom?.decommission === id) ? 'salvage scheduled' : 'available' })),
         crew: stationCrew(state).map(({ name, role, health, morale, id }) => ({ name, role, health, morale, dutySols: state.tharsis.dutyStreak[id] ?? 0,

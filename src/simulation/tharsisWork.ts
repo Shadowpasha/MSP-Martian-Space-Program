@@ -5,6 +5,7 @@ import { EQUIPMENT_IDS, STATION_EQUIPMENT, type StationEquipmentId } from '../da
 import { formatResource, resourceEntries } from '../data/missions';
 import { CHECKLIST, ORDER_BY_ID, repeatable, type Technique, type WorkOrder } from '../data/tharsisOrders';
 import { appendLog, applyResourceDelta, canAffordCost, clamp, round1, spend } from './stateOps';
+import { moralePace, radiationEffects } from './tharsisConditions';
 import { customWorkOrder, readCustomTask, type CustomWorkOrder } from './tharsisCustom';
 import type { TharsisState } from './tharsis';
 
@@ -25,12 +26,11 @@ export function findOrder(state: TharsisState, id: string): WorkOrder | undefine
 }
 
 export function equipmentBlock(state: TharsisState, order: WorkOrder): string | null {
+    if (order.id === 'harden' && state.tharsis.rover) return 'Dock the rover before hardening it.';
     const equipment = EQUIPMENT_IDS.find(id => state.tharsis.disabledEquipment[id] &&
         (order.decommission === id || (STATION_EQUIPMENT[id].blocks as readonly string[]).includes(order.id)));
     return equipment ? `${STATION_EQUIPMENT[equipment].name} decommissioned.` : null;
 }
-
-export const LOW_MORALE = 45;
 
 export function methodProblem(order: WorkOrder, method: readonly Technique[]): string | null {
     if (method.length > 2 || new Set(method).size !== method.length || method.some(id => !order.methods?.includes(id))) {
@@ -38,6 +38,11 @@ export function methodProblem(order: WorkOrder, method: readonly Technique[]): s
     }
     if (method.includes('specialist') && method.includes('parallel')) return 'Choose one way to shorten the checkout.';
     return null;
+}
+
+function shiftsRemaining(shifts: number, rate: number, progress = 0): number {
+    const remainingTenths = Math.round((shifts - progress) * 10);
+    return Math.ceil(remainingTenths / Math.round(rate * 10));
 }
 
 export function workQuote(order: WorkOrder, method: readonly Technique[], lead: CrewMember, mods: SkillTreeModifiers) {
@@ -59,7 +64,7 @@ export function workQuote(order: WorkOrder, method: readonly Technique[], lead: 
         else delete cost[key];
     }
     const pace = (specialist || parallel || order.shifts === 1 ? 1 : 0.8) * (perk ? lead.perk.speedMultiplier : 1) + mods.taskSpeedBonus;
-    const rate = round1(pace * (lead.morale < LOW_MORALE ? 0.8 : 1));
+    const rate = round1(pace * moralePace(lead.morale));
     const output = { ...order.yield };
     let yieldMult = perk ? lead.perk.yieldMultiplier : 1;
     if (order.category === 'BIO') yieldMult *= mods.hydroponicsYieldMult;
@@ -67,7 +72,7 @@ export function workQuote(order: WorkOrder, method: readonly Technique[], lead: 
     for (const key of Object.keys(output) as Array<keyof ResourcePool>) output[key] = round1(output[key]! * yieldMult);
     const salvage = order.decommission;
     if (salvage && output.res) output.res = Math.min(output.res, STATION_EQUIPMENT[salvage].maxMaterials);
-    return { shifts, rate, sols: Math.ceil(shifts / rate), cost, output, specialist };
+    return { shifts, rate, sols: shiftsRemaining(shifts, rate), cost, output, specialist };
 }
 
 export function stationCrew(state: TharsisState): CrewMember[] {
@@ -193,7 +198,12 @@ export interface WorkFlow {
     decommission?: StationEquipmentId;
 }
 
-export function advanceWork(state: TharsisState, storm: boolean, report: string[], flows?: WorkFlow[]) {
+interface ShiftConditions {
+    storm: boolean;
+    unheated: boolean;
+}
+
+export function advanceWork(state: TharsisState, conditions: ShiftConditions, report: string[], flows?: WorkFlow[]) {
     const finished: string[] = [];
     const done = new Set<string>();
     const worked = new Set<string>();
@@ -201,13 +211,13 @@ export function advanceWork(state: TharsisState, storm: boolean, report: string[
         const order = scheduledOrder(job);
         const lead = job.leadId && validLead(state, order, job.method, job.leadId);
         const quote = lead ? workQuote(order, job.method, lead, state.skillModifiers) : null;
-        const hold = shiftHold(state, order, storm, quote);
+        const hold = shiftHold(state, order, conditions, quote);
         if (hold || !lead || !quote) {
             report.push(`${order.title} held · ${hold}.`);
             if (flows) flows.push({ title: order.title, hold: hold ?? 'no eligible lead', yield: order.yield, decommission: order.decommission });
             continue;
         }
-        const remaining = Math.ceil((quote.shifts - job.progress) / quote.rate);
+        const remaining = shiftsRemaining(quote.shifts, quote.rate, job.progress);
         spend(state.resources, quote.cost);
         job.progress = round1(job.progress + quote.rate);
         lead.stamina = clamp(lead.stamina - 7, 20, 100);
@@ -244,10 +254,12 @@ export function advanceWork(state: TharsisState, storm: boolean, report: string[
     return { completed: finished, worked };
 }
 
-function shiftHold(state: TharsisState, order: WorkOrder, storm: boolean, quote: ReturnType<typeof workQuote> | null) {
+function shiftHold(state: TharsisState, order: WorkOrder, { storm, unheated }: ShiftConditions, quote: ReturnType<typeof workQuote> | null) {
     const disabled = equipmentBlock(state, order);
     if (disabled) return disabled.replace(/\.$/, '');
     if (!quote) return 'no eligible station lead';
+    if (unheated && !['air', 'triage'].includes(order.id)) return 'station heating shortfall';
+    if (order.exterior && radiationEffects(state.conditions.radiation).exteriorHold) return 'radiation above exterior work limit';
     if (order.exterior && storm && !(order.id === 'load-test' && state.tharsis.completed.harden)) return 'storm exterior restrictions';
     if (storm && state.tharsis.shelter === 'full' && !['air', 'triage'].includes(order.id)) return 'station in full shelter';
     return canAffordCost(state.resources, quote.cost) ? null : 'station cannot cover the shift cost';

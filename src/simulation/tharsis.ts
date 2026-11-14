@@ -6,13 +6,13 @@ import { CHECKLIST } from '../data/tharsisOrders';
 import { expeditionOf, hazardWeather, INSTRUMENTS, type Expedition, type ExpeditionId } from '../data/expeditions';
 import type { OutpostGameState, WeatherForecast } from './solEngine';
 import { appendLog, applyResourceDelta, canAffordCost, clamp, resourceChanges, round1, spend } from './stateOps';
+import { dutyMoraleLoss, FIELD_REST_MORALE, heatingPower, radiationAfterDose, radiationEffects, REST_MORALE } from './tharsisConditions';
 import { advanceWork, stationCrew, type WorkAssignment, type WorkFlow } from './tharsisWork';
 import { authoredBriefing, type SurveyBriefing } from './tharsisEvents';
 
 export const ROVER_SLOTS = 20;
 export const PACK_UNITS: ResourcePool = { food: 4, water: 4, oxygen: 6, energy: 8, res: 4 };
 export const ROVER_UPKEEP: ResourcePool = { food: 2, water: 2, oxygen: 3, energy: 4, res: 0 };
-export const STORM_DRAW = { energy: 2, oxygen: 2 };
 export const EMPTY_POOLS: ResourcePool = { energy: 0, food: 0, water: 0, oxygen: 0, res: 0 };
 export const EMPTY_CARGO = normalizeCargo({ windSampler: 0, repairKits: 0, batteryPacks: 0, medkits: 0, seedPods: 0, extraRations: 0 });
 
@@ -29,6 +29,7 @@ interface Rover extends RoverLoad {
     distance: number;
     conditions: ConditionState;
     interrupted: boolean;
+    resting: boolean;
 }
 
 export interface TharsisRun {
@@ -83,12 +84,12 @@ export function createTharsis(state: OutpostGameState, seed: number, id: Expedit
     return run;
 }
 
-function forecast(run: TharsisRun, sol: number): WeatherForecast {
+function forecast(run: TharsisRun, sol: number, start = run.stormStart): WeatherForecast {
     const expedition = expeditionOf(run.expedition);
     const { temperature } = expedition;
     const weather = hazardWeather(expedition);
-    if (sol >= run.stormStart && sol < run.stormStart + 3) return { weather: weather.hazard, temperatureC: temperature.hazard, radiationRisk: 'High' };
-    if (sol === run.stormStart - 1) return { weather: weather.warning, temperatureC: temperature.warning, radiationRisk: 'Low' };
+    if (hazardDay(start, sol)) return { weather: weather.hazard, temperatureC: temperature.hazard, radiationRisk: 'High' };
+    if (sol === start - 1) return { weather: weather.warning, temperatureC: temperature.warning, radiationRisk: 'Moderate' };
     return { weather: 'Clear', temperatureC: temperature.clear, radiationRisk: 'Low' };
 }
 
@@ -104,7 +105,11 @@ export function applyForecast(state: OutpostGameState, run: TharsisRun): void {
 }
 
 export function stormDay(state: TharsisState, sol = state.sol): number {
-    const day = sol - state.tharsis.stormStart + 1;
+    return hazardDay(state.tharsis.stormStart, sol);
+}
+
+function hazardDay(start: number, sol: number): number {
+    const day = sol - start + 1;
     return day >= 1 && day <= 3 ? day : 0;
 }
 
@@ -140,28 +145,46 @@ export function fieldCrew(state: TharsisState): CrewMember[] {
     return state.crew.filter(member => ids.includes(member.id));
 }
 
-/** Rover upkeep per Sol for this expedition (the base upkeep plus any heating in the cold). */
-export function roverUpkeep(state: TharsisState): ResourcePool {
-    const upkeep = { ...ROVER_UPKEEP };
-    for (const [key, amount] of resourceEntries(expeditionFor(state).roverExtra)) upkeep[key] += amount;
-    return upkeep;
-}
-
 export function tripPlan(state: TharsisState) {
-    const { legs } = expeditionFor(state);
-    const leg = fieldCrew(state).some(member => member.role === 'pilot' && member.health > 0) ? legs.pilot : legs.backup;
+    const { legs, temperature } = expeditionFor(state);
+    const hasPilot = fieldCrew(state).some(member => member.role === 'pilot' && member.health > 0);
+    const leg = hasPilot ? legs.pilot : legs.backup;
     const sols = leg * 2 + surveySols(state);
+    const perSol = { ...ROVER_UPKEEP, energy: ROVER_UPKEEP.energy + heatingPower(temperature.clear) };
     const cleanCost: ResourcePool = { ...EMPTY_POOLS };
-    for (const [key, amount] of resourceEntries(roverUpkeep(state))) cleanCost[key] = amount * sols;
-    return { leg, sols, cleanCost, returnSol: state.sol + sols - 1, latest: state.goal.deadlineSol - sols + 1 };
+    for (const [key, amount] of resourceEntries(perSol)) cleanCost[key] = amount * sols;
+    return { hasPilot, leg, sols, perSol, cleanCost, returnSol: state.sol + sols - 1, latest: state.goal.deadlineSol - sols + 1 };
 }
 
 export function fieldReturnEstimate(state: TharsisState): number | null {
-    const { rover, hours } = state.tharsis;
+    const run = state.tharsis;
+    const { rover, hours, stormStart } = run;
     if (!rover) return null;
-    const sampling = rover.phase === 'site' ? surveySols(state) - hours / 24 : surveySols(state);
-    const remaining = rover.phase === 'returning' ? rover.travelLeft : sampling + rover.legLength + (rover.phase === 'outbound' ? rover.travelLeft : 0);
-    return state.sol + remaining - 1;
+
+    // Project the route with visible weather. Supplies, treatment, and future decisions can change the trip.
+    const knownStormStart = rover.conditions.weather === 'Dust Haze' || state.sol >= stormStart ? stormStart : Infinity;
+    const pausedToday = rover.resting || restsForMorale(state) || rover.interrupted;
+    const requiredSamples = rover.phase === 'returning' ? 0 : surveySols(state);
+    let samples = rover.phase === 'site' ? hours / 24 : 0;
+    let outbound = rover.phase === 'outbound' ? rover.travelLeft : 0;
+    let inbound = rover.phase === 'returning' ? rover.travelLeft : rover.legLength;
+    let radiation = rover.conditions.radiation;
+    let sol = state.sol;
+    while (outbound > 0 || samples < requiredSamples || inbound > 0) {
+        const day = hazardDay(knownStormStart, sol);
+        const { dose, restricted } = roverBudget(state, forecast(run, sol, knownStormStart), day, false);
+        radiation = radiationAfterDose(radiation, dose);
+        if (radiation >= 100) return null;
+        const sampling = outbound === 0 && samples < requiredSamples;
+        const paused = restricted || (sol === state.sol && pausedToday);
+        if (paused || (sampling && radiationEffects(radiation).exteriorHold)) {
+            if (sampling) samples = 0;
+        } else if (outbound > 0) outbound--;
+        else if (sampling) samples++;
+        else inbound--;
+        sol++;
+    }
+    return sol - 1;
 }
 
 export function defaultLoad(state: TharsisState): RoverLoad {
@@ -174,6 +197,14 @@ export function loadSlots(load: RoverLoad): number {
         CARGO_ITEMS.reduce((sum, item) => sum + load.cargo[item.id] * item.cells.length, 0);
 }
 
+export function roverLoadStock(load: RoverLoad): ResourcePool {
+    const stock = { ...load.resources };
+    for (const item of CARGO_ITEMS) {
+        for (const [key, amount] of resourceEntries(item.resources)) stock[key] += amount * load.cargo[item.id];
+    }
+    return stock;
+}
+
 export function dispatchProblem(state: TharsisState, load: RoverLoad): string | null {
     const run = state.tharsis;
     if (state.phase !== 'planning') return 'Dispatch during planning.';
@@ -181,6 +212,7 @@ export function dispatchProblem(state: TharsisState, load: RoverLoad): string | 
     if (run.returnedWithData) return 'The data drive is already docked. Restore station reserves.';
     const pair = fieldCrew(state);
     if (pair.length !== 2 || pair.some(member => member.health < 40)) return 'Select two travelers with at least 40 health.';
+    if (pair.some(member => member.morale < FIELD_REST_MORALE)) return `Travelers need at least ${FIELD_REST_MORALE}% Morale. Give them a Sol off duty.`;
     const missing = CHECKLIST.find(check => check.orders.some(id => !run.completed[id]));
     if (missing) return `Complete the ${missing.label.toLowerCase()} checks first.`;
     const trip = tripPlan(state);
@@ -196,11 +228,7 @@ export function dispatchProblem(state: TharsisState, load: RoverLoad): string | 
         if (!Number.isSafeInteger(count) || count < 0 || count > state.cargo[item.id]) return `Invalid quantity or insufficient stock for ${item.name}.`;
     }
     if (loadSlots(load) > ROVER_SLOTS) return `Load exceeds ${ROVER_SLOTS} slots.`;
-    const available = { ...load.resources };
-    for (const item of CARGO_ITEMS) {
-        for (const [key, amount] of resourceEntries(item.resources)) available[key] += amount * load.cargo[item.id];
-    }
-    if (!canAffordCost(available, { ...trip.cleanCost, oxygen: trip.cleanCost.oxygen + 1 })) return 'Load clean-trip supplies plus at least 1 O₂ for docking.';
+    if (!canAffordCost(roverLoadStock(load), { ...trip.cleanCost, oxygen: trip.cleanCost.oxygen + 1 })) return 'Load clean-trip supplies plus at least 1 O₂ for docking.';
     return null;
 }
 
@@ -215,7 +243,7 @@ export function dispatchRover(state: TharsisState, load: RoverLoad): string | nu
     run.hours = 0;
     run.rover = {
         resources: { ...load.resources }, cargo: { ...load.cargo }, crewIds: [...run.fieldPair], phase: 'outbound',
-        legLength: leg, travelLeft: leg, distance: 0, conditions: { ...state.conditions }, interrupted: false,
+        legLength: leg, travelLeft: leg, distance: 0, conditions: { ...state.conditions }, interrupted: false, resting: false,
     };
     syncMorale(fieldCrew(state), run.rover.conditions);
     syncMorale(stationCrew(state), state.conditions);
@@ -228,8 +256,16 @@ export function emergencyReturn(state: TharsisState): string | null {
     if (state.phase !== 'planning' || !rover || rover.phase === 'returning') return 'No field trip can turn back now.';
     rover.phase = 'returning';
     rover.travelLeft = Math.max(1, rover.distance);
+    rover.resting = false;
     state.tharsis.hours = 0;
     appendLog(state, 'warn', 'Emergency return ordered. The partial data window was cleared.');
+    return null;
+}
+
+export function toggleFieldRest(state: TharsisState): string | null {
+    const rover = state.tharsis.rover;
+    if (state.phase !== 'planning' || !rover) return 'Order field rest while the rover is away.';
+    rover.resting = !rover.resting;
     return null;
 }
 
@@ -251,7 +287,7 @@ function applyDutyMorale(state: TharsisState, crew: readonly CrewMember[], condi
         const active = worked.has(member.id);
         const streak = active ? (dutyStreak[member.id] ?? 0) + 1 : 0;
         dutyStreak[member.id] = streak;
-        const delta = active ? -Math.min(5, 2 * (streak - 1)) * state.skillModifiers.moraleDecayMult : 7;
+        const delta = active ? -dutyMoraleLoss(streak) * state.skillModifiers.moraleDecayMult : REST_MORALE;
         const updated = clamp(round1(member.morale + delta), 0, 100);
         const measured = round1(updated - member.morale);
         member.morale = updated;
@@ -261,73 +297,141 @@ function applyDutyMorale(state: TharsisState, crew: readonly CrewMember[], condi
     if (gains.length) report.push(`${area} Morale · ${gains.join(' · ')}.`);
 }
 
-function degradeArea(crew: CrewMember[], conditions: ConditionState, resources: ResourcePool, shortOnSupplies = false) {
-    if (conditions.radiation >= 50 || resources.oxygen <= 0 || shortOnSupplies) {
-        for (const member of crew) if (member.health > 0) member.health = clamp(member.health - (conditions.radiation >= 50 ? 5 : 10), 0, 100);
-        changeAreaMorale(crew, conditions, -4);
-    }
+function degradeArea(state: TharsisState, crew: CrewMember[], conditions: ConditionState, shortOnSupplies: boolean, unheated: boolean, area: string, report: string[]) {
+    const radiation = radiationEffects(conditions.radiation);
+    const health = radiation.health + (unheated ? 14 : shortOnSupplies ? 10 : 0);
+    const morale = radiation.morale + (unheated ? 10 : shortOnSupplies ? 6 : 0);
+    if (!health) return;
+    for (const member of crew) if (member.health > 0) member.health = clamp(member.health - health, 0, 100);
+    const loss = round1(morale * state.skillModifiers.moraleDecayMult);
+    changeAreaMorale(crew, conditions, -loss);
+    const reasons = [radiation.health && `${radiation.level.toLowerCase()} radiation`, unheated && 'insufficient heating power',
+        shortOnSupplies && !unheated && 'life-support shortage'].filter(Boolean).join(' and ');
+    report.push(`${area} crew · ${reasons} · −${health} HP and −${loss} Morale per living crew member.`);
 }
 
-function stationBudget(state: TharsisState, day: number) {
+function doseChange(state: TharsisState, day: number, base: number, recovery: number): number {
+    if (!day) return -recovery;
+    const peak = day === 2 ? 1.4 : day === 3 ? 0.9 : 1;
+    return round1(base * peak * expeditionFor(state).hazard.exposure * (1 - state.skillModifiers.radiationShielding));
+}
+
+interface DailyBudget {
+    passive: ResourcePool;
+    upkeep: ResourcePool;
+    heating: number;
+    filterPower: number;
+    filterOxygen: number;
+    dose: number;
+}
+
+function stationBudget(state: TharsisState): DailyBudget {
     const { conditions, skillModifiers: mods } = state;
     const count = stationCrew(state).filter(member => member.health > 0).length;
-    const sheltered = state.tharsis.shelter !== 'off';
-    // Dust blocks the Sun; a solar particle storm does not, it only raises radiation.
-    const dust = expeditionFor(state).hazard.kind === 'dust';
-    const solar = (day && dust ? 1 : conditions.weather === 'Dust Haze' ? 6 : 8) * mods.solarOutputMult *
-        (state.tharsis.disabledEquipment['auxiliary-solar'] ? 0.65 : 1);
-    const stormPower = state.tharsis.shelter === 'full' ? 1 : sheltered ? 5 : 9;
-    const energy = (4 + (day ? stormPower : 0)) * mods.energyConsumptionMult;
-    const oxygen = (2 + count * 0.5 + (day ? 2 : 0)) * mods.oxygenConsumptionMult;
+    const { shelter, completed, disabledEquipment } = state.tharsis;
+    const day = stormDay(state);
+    const dust = conditions.weather === 'Dust Storm';
+    const haze = conditions.weather === 'Dust Haze';
+    const dustSolar = day === 2 ? 0 : day === 3 ? 3 : 2;
+    const solar = (dust ? dustSolar : haze ? 4 : 8) * mods.solarOutputMult *
+        (disabledEquipment['auxiliary-solar'] ? 0.65 : 1);
+    const heating = round1(heatingPower(conditions.temperatureC) * mods.energyConsumptionMult);
+    const filterPower = round1((dust ? day === 2 ? 5 : 3 : haze ? 1 : 0) * mods.energyConsumptionMult);
+    const filterOxygen = round1((dust ? day === 2 ? 3 : 2 : haze ? 1 : 0) * mods.oxygenConsumptionMult);
+    const stormPower = dust ? shelter === 'off' ? 7 : shelter === 'essential' ? 2 : 0 : 0;
+    const energy = round1((4 + stormPower) * mods.energyConsumptionMult + filterPower + heating);
+    const oxygen = round1((2 + count * 0.5) * mods.oxygenConsumptionMult + filterOxygen);
     const food = count * (state.rationPolicy === 'full' ? 1 : 0.5) * mods.foodConsumptionMult;
-    return { passive: { ...EMPTY_POOLS, energy: solar }, upkeep: { energy, oxygen, food, water: count * 0.9 * mods.waterConsumptionMult, res: 0 } };
+    const shielded = Boolean(completed.shield);
+    const dose = doseChange(state, day, shelter === 'off' ? 25 : shelter === 'essential' ? shielded ? 4 : 12 : shielded ? 2 : 5, 3);
+    const upkeep = { energy, oxygen, food: round1(food), water: round1(count * 0.9 * mods.waterConsumptionMult), res: 0 };
+    return { passive: { ...EMPTY_POOLS, energy: round1(solar) }, upkeep, heating, filterPower, filterOxygen, dose };
 }
 
-function applyStationResources(state: TharsisState, budget: ReturnType<typeof stationBudget>): void {
-    const { passive, upkeep } = budget;
-    applyResourceDelta(state.resources, {
-        energy: passive.energy - upkeep.energy, oxygen: -upkeep.oxygen, food: -upkeep.food, water: -upkeep.water,
-    });
+function roverBudget(state: TharsisState, weather: WeatherForecast, day: number, resting: boolean): DailyBudget & { restricted: boolean } {
+    const hardened = Boolean(state.tharsis.completed.harden);
+    const restricted = day > 0 && !hardened;
+    const clearHeat = heatingPower(expeditionFor(state).temperature.clear);
+    const heat = heatingPower(weather.temperatureC);
+    const heating = hardened ? clearHeat + Math.ceil((heat - clearHeat) / 2) : heat;
+    const dust = weather.weather === 'Dust Storm';
+    const haze = weather.weather === 'Dust Haze';
+    const filterPower = dust && !restricted ? day === 2 ? 3 : 2 : 0;
+    const filterOxygen = dust ? day === 2 ? 3 : 2 : haze ? 1 : 0;
+    const monitoring = weather.weather === 'Solar Flare' && hardened ? 1 : 0;
+    const energy = (restricted || resting ? 2 : ROVER_UPKEEP.energy) + heating + filterPower + monitoring;
+    const dose = doseChange(state, day, hardened ? 5 : dust ? 22 : 25, 2);
+    const upkeep = { ...ROVER_UPKEEP, energy, oxygen: ROVER_UPKEEP.oxygen + filterOxygen };
+    return { passive: { ...EMPTY_POOLS }, upkeep, heating, filterPower, filterOxygen, dose, restricted };
 }
 
-function roverBudget(state: TharsisState, day: number): ResourcePool {
-    const upkeep = roverUpkeep(state);
-    if (!day) return upkeep;
-    return { ...upkeep, energy: state.tharsis.completed.harden ? upkeep.energy + STORM_DRAW.energy : 2 + (upkeep.energy - ROVER_UPKEEP.energy),
-        oxygen: upkeep.oxygen + STORM_DRAW.oxygen };
+export function peakRoverBudget(state: TharsisState) {
+    return roverBudget(state, forecast(state.tharsis, state.tharsis.stormStart + 1), 2, false);
+}
+
+/** Reserve for the worst overlap until the crew can see the first storm warning. */
+export function stormReserve(state: TharsisState) {
+    const run = state.tharsis;
+    const reserve = { energy: 0, oxygen: 0 };
+    if (!run.completed.harden) return reserve;
+    const { hazard } = expeditionFor(state);
+    const warned = state.sol >= run.stormStart - 1;
+    const firstStart = warned ? run.stormStart : Math.max(hazard.firstSol, state.sol + 2);
+    const lastStart = warned ? run.stormStart : hazard.firstSol + hazard.spread - 1;
+    const trip = tripPlan(state);
+    for (let start = firstStart; start <= lastStart; start++) {
+        const extra = { energy: 0, oxygen: 0 };
+        for (let sol = Math.max(state.sol, start - 1); sol <= Math.min(trip.returnSol, start + 2); sol++) {
+            const { upkeep } = roverBudget(state, forecast(run, sol, start), hazardDay(start, sol), false);
+            extra.energy += upkeep.energy - trip.perSol.energy;
+            extra.oxygen += upkeep.oxygen - trip.perSol.oxygen;
+        }
+        reserve.energy = Math.max(reserve.energy, extra.energy);
+        reserve.oxygen = Math.max(reserve.oxygen, extra.oxygen);
+    }
+    return reserve;
+}
+
+function restsForMorale(state: TharsisState): boolean {
+    return fieldCrew(state).some(member => member.morale < FIELD_REST_MORALE);
+}
+
+export function localBudget(state: TharsisState, area: Area): DailyBudget {
+    const rover = state.tharsis.rover;
+    return area === 'rover' && rover
+        ? roverBudget(state, forecast(state.tharsis, state.sol), stormDay(state), rover.resting || restsForMorale(state))
+        : stationBudget(state);
 }
 
 export function resourceForecast(state: TharsisState, area: Area) {
-    const day = stormDay(state);
-    if (area === 'rover' && state.tharsis.rover) {
-        return { passive: { ...EMPTY_POOLS }, upkeep: roverBudget(state, day), tasks: [] as WorkFlow[] };
-    }
-    const budget = stationBudget(state, day);
-    const predicted = structuredClone(state);
+    const budget = localBudget(state, area);
     const tasks: WorkFlow[] = [];
-    applyStationResources(predicted, budget);
-    advanceWork(predicted, day > 0, [], tasks);
+    if (area === 'rover' && state.tharsis.rover) {
+        return { ...budget, tasks };
+    }
+    const predicted = structuredClone(state);
+    const unheated = stationUpkeep(predicted, budget, []);
+    advanceWork(predicted, { storm: stormDay(state) > 0, unheated }, [], tasks);
     return { ...budget, tasks };
 }
 
-function stationUpkeep(state: TharsisState, day: number, report: string[]): void {
+function stationUpkeep(state: TharsisState, budget: DailyBudget, report: string[]): boolean {
     const { resources, conditions, skillModifiers: mods } = state;
-    const crew = stationCrew(state);
-    const sheltered = state.tharsis.shelter !== 'off';
-    const shielded = day > 0 && sheltered && Boolean(state.tharsis.completed.shield);
-    const budget = stationBudget(state, day);
+    const { passive, upkeep, heating, filterPower, filterOxygen, dose } = budget;
+    const day = stormDay(state);
     const before = { ...resources };
-    applyStationResources(state, budget);
+    const unheated = heating > 0 && round1(resources.energy + passive.energy) < upkeep.energy;
+    applyResourceDelta(resources, { energy: passive.energy - upkeep.energy, oxygen: -upkeep.oxygen, food: -upkeep.food, water: -upkeep.water });
+    conditions.radiation = radiationAfterDose(conditions.radiation, dose);
     if (day) {
-        const hazard = expeditionFor(state).hazard;
-        const exposure = (state.tharsis.shelter === 'full' ? shielded ? 2 : 4 : shielded ? 4 : sheltered ? 10 : 23) * hazard.exposure * (1 - mods.radiationShielding);
-        conditions.radiation = clamp(round1(conditions.radiation + exposure), 0, 100);
-        report.push(`${hazard.kind === 'solar' ? 'Solar storm' : 'Storm'} ${day}/3 · station radiation +${round1(exposure)} mSv${shielded ? ' with shelter shielding' : ''}.`);
-    } else {
-        conditions.radiation = Math.max(0, round1(conditions.radiation - 2));
+        report.push(`Storm ${day}/3 · ${conditions.weather} · station radiation +${dose} mSv.`);
     }
-    if (state.rationPolicy === 'half') changeAreaMorale(crew, conditions, -2.5 * mods.moraleDecayMult);
+    if (heating || filterPower || filterOxygen) {
+        report.push(`Station climate · ${conditions.temperatureC} °C · heating ${heating} Power · filtration ${filterPower} Power and ${filterOxygen}% O₂ · solar +${passive.energy} Power.`);
+    }
+    if (state.rationPolicy === 'half') changeAreaMorale(stationCrew(state), conditions, -2.5 * mods.moraleDecayMult);
     report.push(`Station upkeep · ${resourceChanges(before, resources) || 'no usable stock'}.`);
+    return unheated;
 }
 
 export function cycleShelter(state: TharsisState): string {
@@ -349,26 +453,32 @@ function advanceRover(state: TharsisState, day: number, report: string[]): strin
     const rover = run.rover;
     if (!rover) return null;
     const crew = fieldCrew(state);
-    const hardened = Boolean(run.completed.harden);
-    const restricted = day > 0 && !hardened;
-    const cost = roverBudget(state, day);
+    const lowMorale = restsForMorale(state);
+    const resting = rover.resting || lowMorale;
+    const { upkeep: cost, heating, filterPower, filterOxygen, dose, restricted } = roverBudget(state, forecast(run, state.sol), day, resting);
     const funded = canAffordCost(rover.resources, cost);
+    const unheated = heating > 0 && rover.resources.energy < cost.energy;
     const before = { ...rover.resources };
     spend(rover.resources, cost);
-    const exposure = day ? round1((hardened ? 5 : 25) * (1 - state.skillModifiers.radiationShielding)) : 0;
-    if (day) rover.conditions.radiation = clamp(rover.conditions.radiation + exposure, 0, 100);
-    degradeArea(crew, rover.conditions, rover.resources, !funded);
-    for (const member of crew) if (member.health > 0) member.stamina = clamp(member.stamina - (restricted ? 2 : 7), 20, 100);
-    report.push(`Rover upkeep · ${resourceChanges(before, rover.resources, true) || 'no usable stock'}${day ? ` · radiation +${exposure} mSv` : ''}.`);
+    rover.conditions.radiation = radiationAfterDose(rover.conditions.radiation, dose);
+    report.push(`Rover upkeep · ${resourceChanges(before, rover.resources, true) || 'no usable stock'}${day ? ` · radiation +${dose} mSv` : ''}.`);
+    if (heating || filterOxygen) {
+        report.push(`Rover climate · ${rover.conditions.temperatureC} °C · heating ${heating} Power · filtration ${filterPower} Power and ${filterOxygen} O₂.`);
+    }
+    degradeArea(state, crew, rover.conditions, !funded || rover.resources.oxygen <= 0, unheated, 'Rover', report);
     if (rover.conditions.radiation >= 100 || crew.some(member => member.health <= 0) || rover.resources.oxygen <= 0) {
         return 'The field team lost life support or suffered a critical exposure before docking.';
     }
-    const hold = restricted ? 'crew sheltering in the dust storm' : !funded ? 'insufficient field supplies' :
+    const hold = unheated ? 'insufficient heating power' : !funded ? 'insufficient field supplies' : restricted ? 'crew sheltering through the storm' :
+        lowMorale ? 'crew resting due to low Morale' : rover.resting ? 'planned field rest' :
+        rover.phase === 'site' && radiationEffects(rover.conditions.radiation).exteriorHold ? 'radiation above field work limit' :
         rover.interrupted ? 'field systems required a reset' : crew.some(member => member.health < 40) ? 'field crew needs treatment' :
         rover.phase === 'site' && !rover.cargo[expeditionFor(state).instrument] ? `${CARGO_BY_ID[expeditionFor(state).instrument].name} missing` : null;
+    for (const member of crew) if (member.health > 0) member.stamina = clamp(member.stamina + (hold ? 12 : -7), 20, 100);
     applyDutyMorale(state, crew, rover.conditions, new Set(hold ? [] : rover.crewIds), 'Rover', report);
     if (rover.conditions.morale <= 0) return 'Field crew Morale collapsed before docking.';
     rover.interrupted = false;
+    rover.resting = false;
     if (hold) {
         if (rover.phase === 'site' && run.hours > 0) {
             run.hours = 0;
@@ -420,11 +530,12 @@ export function completionShortfalls(state: TharsisState): string[] {
 
 export function resolveTharsisSol(state: TharsisState, report: string[]) {
     const day = stormDay(state);
-    stationUpkeep(state, day, report);
-    const { completed, worked } = advanceWork(state, day > 0, report);
+    const unheated = stationUpkeep(state, stationBudget(state), report);
+    const { completed, worked } = advanceWork(state, { storm: day > 0, unheated }, report);
     const crew = stationCrew(state);
     applyDutyMorale(state, crew, state.conditions, worked, 'Station', report);
-    degradeArea(crew, state.conditions, state.resources, state.resources.food <= 0 || state.resources.water <= 0);
+    const shortOnSupplies = state.resources.food <= 0 || state.resources.water <= 0 || state.resources.oxygen <= 0;
+    degradeArea(state, crew, state.conditions, shortOnSupplies, unheated, 'Station', report);
     const fieldFailure = advanceRover(state, day, report);
     const missing = completionShortfalls(state);
     if (day && !state.resources.energy) {

@@ -52,7 +52,7 @@ export const WORK_ORDERS: readonly WorkOrder[] = [
     { id: 'suits', title: 'Certify field suits', bay: 'crew', category: 'MED', specialists: ['medic', 'captain'], shifts: 1,
         description: 'Fit and pressure-test EVA suits for the two travelers selected in the rover checklist.', needs: ['route', 'seal'], cost: { energy: 2, oxygen: 1 } },
     { id: 'harden', title: 'Harden rover for storm', bay: 'rover', category: 'ENG', specialists: ['engineer', 'pilot'], shifts: 2,
-        description: 'Fit dust baffles, isolate the drive connections, and line the rover safe compartment.', needs: ['drive-service'], cost: { energy: 3, res: 2 }, methods: METHODS },
+        description: 'Fit dust baffles, isolate drive connections, and insulate and shield the rover cabin.', needs: ['drive-service'], cost: { energy: 3, res: 2 }, methods: METHODS },
     { id: 'shield', title: 'Shield station shelter', bay: 'life', category: 'ENG', specialists: ['engineer', 'medic'], shifts: 2,
         description: 'Rearrange water and shielding panels around the storm shelter for passive protection.', cost: { energy: 2, res: 2 }, methods: METHODS },
     { id: 'greens', title: 'Harvest hydroponics', bay: 'life', category: 'BIO', specialists: ['botanist'], shifts: 2,

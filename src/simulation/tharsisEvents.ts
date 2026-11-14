@@ -4,6 +4,7 @@ import { CARGO_BY_ID } from '../data/cargo';
 import { formatResource, resourceEntries } from '../data/missions';
 import { appendLog, applyResourceDelta, canAffordCost, clamp, resourceChanges, round1, spend } from './stateOps';
 import { changeAreaMorale, localArea, stormDay, type Area, type TharsisState } from './tharsis';
+import { ariesText } from './tharsisCustom';
 
 interface EffectRule { resource?: keyof ResourcePool; amount?: number; morale?: number; radiation?: number; resetsSurvey?: boolean; }
 
@@ -173,8 +174,8 @@ export function authoredBriefing(
     if (storm && expedition.hazard.kind === 'solar') {
         const title = storm === 'onset' ? 'Solar particle storm' : storm === 'peak' ? 'Storm at peak flux' : 'Last Sol of the storm';
         const observation = area === 'rover'
-            ? 'A solar particle storm is underway and radiation is climbing fast. Unprotected crews must shelter. A hardened rover can operate at higher Power and O₂ cost.'
-            : 'The Sun is active and station radiation is climbing fast. Solar power is unaffected. Activate shelter operations in Life Support to reduce exposure.';
+            ? 'Particle counts are climbing fast. A standard rover must shelter. A hardened rover can operate if the batteries cover the extra monitoring load.'
+            : 'Particle counts are climbing fast and will peak on the second Sol. Activate shelter in Life Support to limit exposure. The array is still generating at its usual rate.';
         return { title, observation, system: 'storm', area, source: 'Mission control', choices: [
             choice('Isolate nonessential circuits', 'Use the low-load storm checklist.', 'The lower electrical load preserved reserve power.', 'power_saved'),
             choice('Run at full output', 'Keep all lights, transmitters, and work circuits live.', 'The extra load drained reserves during the alert.', 'power_loss', 'none', 2),
@@ -183,8 +184,8 @@ export function authoredBriefing(
     if (storm) {
         const title = storm === 'onset' ? 'Regional dust storm' : storm === 'peak' ? 'Storm at peak opacity' : 'Last Sol under dust';
         const observation = area === 'rover'
-            ? 'Visibility is restricted and the solar particle alert is active. Unprotected crews must shelter. A hardened rover can operate at higher Power and O₂ cost.'
-            : 'Solar output has dropped sharply, filters are working harder, and a solar particle alert is active. Activate shelter operations in Life Support to reduce exposure and power load.';
+            ? 'Visibility is restricted and the cabin is cooling. A standard rover must shelter. A hardened rover can operate if its Power and O₂ cover the heaters and filters.'
+            : 'Dust is blocking sunlight, temperatures are falling, and particle counts are rising. Activate shelter in Life Support and check heater and filter loads in Conditions.';
         return { title, observation, system: 'storm', area, source: 'Mission control', choices: [
             choice('Isolate nonessential circuits', 'Use the low-load storm checklist.', 'The lower electrical load preserved reserve power.', 'power_saved'),
             choice('Run at full output', 'Keep all lights, transmitters, and work circuits live.', 'The extra load drained reserves during the alert.', 'power_loss', 'none', 2),
@@ -217,20 +218,14 @@ export function choiceBlock(state: TharsisState, choice: SurveyChoice): string |
     return null;
 }
 
-function fieldText(value: unknown, max: number): string | null {
-    if (typeof value !== 'string') return null;
-    const text = value.trim().replace(/[\r\n\t]+/g, ' ');
-    return text.length > 0 && text.length <= max && !/[<>]/.test(text) ? text : null;
-}
-
 export function validateBriefing(value: unknown, state: TharsisState): SurveyBriefing | null {
     if (!value || typeof value !== 'object') return null;
     const area = state.tharsis.briefing.area;
     const local = localArea(state, area);
     if (!local) return null;
     const raw = value as Record<string, unknown>;
-    const title = fieldText(raw.title, 52);
-    const observation = fieldText(raw.observation, 310);
+    const title = ariesText(raw.title, 52);
+    const observation = ariesText(raw.observation, 310);
     const system = typeof raw.system === 'string' && (EVENT_SYSTEMS[area] as readonly string[]).includes(raw.system) ? raw.system : null;
     if (!title || !observation || !system || state.tharsis.recentSystems.slice(-2).includes(system) ||
         !Array.isArray(raw.choices) || raw.choices.length < 2 || raw.choices.length > 3) return null;
@@ -239,9 +234,9 @@ export function validateBriefing(value: unknown, state: TharsisState): SurveyBri
     for (const candidate of raw.choices as unknown[]) {
         if (!candidate || typeof candidate !== 'object') return null;
         const item = candidate as Record<string, unknown>;
-        const action = fieldText(item.action, 48);
-        const detail = fieldText(item.detail, 126);
-        const result = fieldText(item.result, 150);
+        const action = ariesText(item.action, 48);
+        const detail = ariesText(item.detail, 126);
+        const result = ariesText(item.result, 150);
         const commitment = EVENT_COMMITMENT_IDS.find(id => id === item.commitment);
         const cargo = allowedEventCargo(local.cargo).find(id => id === item.cargo);
         if (!action || !detail || !result || !commitment || (item.cargo && item.cargo !== 'none' && !cargo) ||
