@@ -25,6 +25,16 @@ const CARGO_COLORS: Record<CargoItemId, number> = {
     seedPods: 0x8db079, extraRations: 0xba9a6e, waterCanisters: 0x75a7c7, oxygenTanks: 0x69bbb5,
 };
 const DRAG_THRESHOLD_PX = 6;
+
+/** Inventory tabs, like Mission Prep's shelf: mission gear, supplies, power, tools. */
+const INVENTORY_TABS = ['Mission', 'Supplies', 'Power', 'Tools'] as const;
+type InventoryTab = typeof INVENTORY_TABS[number];
+const TAB_OF: Partial<Record<CargoItemId, InventoryTab>> = {
+    windSampler: 'Mission',
+    seedPods: 'Supplies', extraRations: 'Supplies', waterCanisters: 'Supplies', oxygenTanks: 'Supplies',
+    batteryPacks: 'Power',
+    repairKits: 'Tools', medkits: 'Tools',
+};
 const PIECE = 76;
 const STEP = 84;
 
@@ -117,16 +127,32 @@ export function showCargoPacker(
     const cancel = ui.button(bay, [372, 500, 176, 44], cancelHeld, { label: 'Put Back [Esc]' });
     ui.label(bay, [20, 548, 528, 28], 'Click a packed item to take it out · drag it to move it', { size: 13, color: p.muted });
 
-    // ---- Inventory (his list, compacted to make room for the supply meters) ----
+    // ---- Inventory: tabbed by kind, so items are quick to find ----
     ui.label(inventory, [16, 12, 384, 36], 'Supply Inventory', { display: true, size: 28 });
-    const items = CARGO_ITEMS.map((item, index) => {
-        const button = ui.button(inventory, [16, 54 + index * 40, 384, 37], () => {
+    const required = setup.missionGoal.requiredEquipment ?? {};
+    const tabOf = (id: CargoItemId): InventoryTab => TAB_OF[id] ?? 'Supplies';
+    let tab: InventoryTab = INVENTORY_TABS.find(t => CARGO_ITEMS.some(item => tabOf(item.id) === t && (required[item.id] ?? 0) > 0)) ?? 'Mission';
+    const tabs = INVENTORY_TABS.map((name, index) => {
+        const button = ui.button(inventory, [16 + index * 97, 50, 92, 36], () => { tab = name; refresh(); }, { label: name });
+        // Amber marker: this tab still holds required equipment that is not packed yet.
+        const marker = ui.box(button.entity, [84, 2, 6, 6], p.amber);
+        return { name, button, marker };
+    });
+    const ROW = 64;
+    const items = CARGO_ITEMS.map((item) => {
+        const slot = CARGO_ITEMS.filter(other => tabOf(other.id) === tabOf(item.id)).indexOf(item);
+        const button = ui.button(inventory, [16, 94 + slot * ROW, 384, ROW - 6], () => {
             if (ui.hasKeyboardFocus(button.entity)) pick(item.id, true);
         });
-        ui.icon(button.entity, 8, 7, 22, item.id, p.amber);
-        ui.label(button.entity, [40, 0, 180, 37], item.name, { display: true, size: 16 });
-        ui.label(button.entity, [196, 0, 140, 37], item.effect, { size: 11, color: p.secondary, wrap: true });
-        const stock = ui.label(button.entity, [334, 0, 44, 37], '', { size: 14, color: p.amber, center: true });
+        ui.icon(button.entity, 10, 12, 32, item.id, p.amber);
+        ui.label(button.entity, [54, 4, 220, 26], item.name, { display: true, size: 18 });
+        ui.label(button.entity, [54, 30, 270, 24], item.effect, { size: 12, color: p.secondary, wrap: true });
+        const needed = (required[item.id] ?? 0) > 0;
+        if (needed) {
+            const tag = ui.box(button.entity, [276, 8, 64, 18], p.amber);
+            ui.label(tag, [0, 0, 64, 18], 'NEEDED', { size: 11, color: p.ink, center: true });
+        }
+        const stock = ui.label(button.entity, [334, 0, 44, ROW - 6], '', { size: 15, color: p.amber, center: true });
         ui.on(button.entity, 'press', () => pick(item.id, false));
         return { item, button, stock };
     });
@@ -336,6 +362,14 @@ export function showCargoPacker(
         for (const { item, button, stock } of items) {
             ui.setText(stock, `×${item.stock - counts[item.id]}`);
             ui.fill(button.surface, held?.item === item.id ? p.teal : p.raised);
+            ui.show(button.entity, tabOf(item.id) === tab);
+        }
+        for (const t of tabs) {
+            const active = t.name === tab;
+            ui.fill(t.button.surface, active ? p.amber : p.raised);
+            ui.textColor(t.button.text, active ? p.ink : p.text);
+            const missing = CARGO_ITEMS.some(item => tabOf(item.id) === t.name && counts[item.id] < (required[item.id] ?? 0));
+            ui.show(t.marker, missing && !active);
         }
         ui.setText(usage, `${occupied} / ${CARGO_COLUMNS * CARGO_ROWS} cells used`);
         ui.setText(status, feedback || 'Pack the required equipment first, then supplies.');
