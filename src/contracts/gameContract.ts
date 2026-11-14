@@ -106,6 +106,13 @@ export interface MissionRequirement {
     target: number;
 }
 
+/** Mission goals the survival loop can complete. A goal task wins the mission when its flag matches. */
+export const GOAL_FLAGS = [
+    'wind_sample_collected', 'ice_core_collected',
+    'oxygen_produced', 'crop_harvested', 'radiation_measured',
+] as const;
+export type GoalFlag = typeof GOAL_FLAGS[number];
+
 export interface MissionGoal {
     id: string;
     title: string;
@@ -113,7 +120,7 @@ export interface MissionGoal {
     coords: string;
     durationHours: number;
     deadlineSol: number;
-    requiredFlag: 'wind_sample_collected' | 'ice_core_collected';
+    requiredFlag: GoalFlag;
     requirements: MissionRequirement[];
     minimumReserves?: Partial<ResourcePool>;
     requiredEquipment?: Partial<Record<CargoItemId, number>>;

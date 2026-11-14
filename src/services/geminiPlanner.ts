@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
-import { CREW_ROLES } from '../contracts/gameContract';
+import {
+    GOAL_FLAGS,
+    type GoalFlag, CREW_ROLES } from '../contracts/gameContract';
 import type {
     CargoInventory,
     ConditionState,
@@ -111,7 +113,7 @@ export interface ProposedTaskSpec {
         resources?: Partial<ResourcePool>;
         radiationDelta?: number;
         moraleDelta?: number;
-        goalFlag?: 'wind_sample_collected' | 'ice_core_collected';
+        goalFlag?: GoalFlag;
     };
     recommendedRole: CrewRole;
     riskNote: string;
@@ -331,10 +333,8 @@ export async function generateTaskWithGemini(
 
         const rewardRaw = (t.rewardOnComplete as Record<string, unknown> | undefined) ?? {};
         const goalFlagRaw = rewardRaw.goalFlag;
-        const goalFlag =
-            goalFlagRaw === 'wind_sample_collected' || goalFlagRaw === 'ice_core_collected'
-                ? goalFlagRaw
-                : undefined;
+        // Accept any known goal; the loop only counts it when it matches this mission's goal.
+        const goalFlag = (GOAL_FLAGS as readonly unknown[]).includes(goalFlagRaw) ? goalFlagRaw as GoalFlag : undefined;
 
         const reqKindRaw = String(t.requirementKind ?? '');
         const requirementKind =
@@ -406,7 +406,8 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
             source: 'offline-fallback',
             replyText: 'A.R.I.E.S. [Local Sim]: Sensor calibration takes 1 Sol. Assign an Engineer for faster, cheaper work.',
             task: {
-                title: moon ? 'Prep Drill Sensor' : 'Prep Weather Sensor',
+                // Use the mission's own label (e.g. 'Prep Oxygen Maker'); fall back to the old Mars/Moon names.
+                title: ctx.goal.requirements.find((r) => r.kind === 'prep_sensor')?.label ?? (moon ? 'Prep Drill Sensor' : 'Prep Weather Sensor'),
                 description: `Calibrate field instruments for ${ctx.goal.coords}.`,
                 category: 'ENG',
                 durationSols: 1,

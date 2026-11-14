@@ -4,6 +4,7 @@ import {
     DEFAULT_SKILL_MODIFIERS,
     DEFAULT_MARS_SETUP,
     type CargoInventory,
+    type GoalFlag,
     type CargoItemId,
     type ConditionState,
     type CrewMember,
@@ -40,7 +41,7 @@ export interface ActiveTask {
         resources?: Partial<ResourcePool>;
         radiationDelta?: number;
         moraleDelta?: number;
-        goalFlag?: 'wind_sample_collected' | 'ice_core_collected';
+        goalFlag?: GoalFlag;
     };
     recommendedRole: CrewRole;
     assignedCrewIds: string[];
