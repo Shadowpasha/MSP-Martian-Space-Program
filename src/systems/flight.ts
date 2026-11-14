@@ -10,6 +10,7 @@ import type { CargoPlacement } from '../data/cargo';
 import { buildLaunchSetup, LAUNCH_CREW_SIZE, launchProblem, missionOffers, preparedMoonOffer, type MissionOffer } from '../data/missions';
 import { awardResearch, loadProfile, purchaseUpgrade, type PlaytestProfile } from '../data/profile';
 import { showCargoPacker } from '../ui/cargoPacker';
+import { showLaunchSummary } from '../ui/launchSummary';
 import {
     showCrew, showExit, showMenu, showMissions, showPreparedManifest, showQuit, showSettings, showShell, showUpgrades, type Page,
 } from '../ui/flightScreens';
@@ -142,7 +143,16 @@ export const flightSystem = defineSystem(
                     };
                     const start = () => launch(chosen, Boolean(chosen.prepared));
                     if (chosen.prepared) showPreparedManifest(ui, chosen, problem(draft), start);
-                    else surfaceTick = showCargoPacker(ui, chosen.setup, draft, next => { draft = next; }, problem, start);
+                    // Packed missions go through the Launch Summary before the run.
+                    else surfaceTick = showCargoPacker(ui, chosen.setup, draft, next => { draft = next; }, problem, () => navigate('review'));
+                    break;
+                }
+                case 'review': {
+                    const chosen = offer;
+                    const preview = chosen?.setup ? buildLaunchSetup(chosen, profile.crewIds, draft) : null;
+                    if (!chosen || !preview) { navigate('mission'); break; }
+                    showShell(ui, page, 'Launch Summary', `${chosen.title} · check your crew and cargo`, 'check', navigate);
+                    showLaunchSummary(ui, preview, draft, launchProblem(preview), () => launch(chosen, false), () => navigate('cargo'));
                     break;
                 }
                 case 'settings':
@@ -163,6 +173,7 @@ export const flightSystem = defineSystem(
                 const usedEscape = surfaceTick?.(input) === true;
                 if (!usedEscape && (input.isKeyPressed('Escape') || input.isGamepadButtonPressed(GamepadButton.East))) {
                     if (page === 'cargo') navigate('mission');
+                    else if (page === 'review') navigate('cargo');
                     else if (page !== 'menu') navigate('menu');
                 }
                 ui.updateFocus(input);

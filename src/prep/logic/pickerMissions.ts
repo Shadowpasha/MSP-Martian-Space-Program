@@ -15,6 +15,7 @@ export interface PickerMission {
     /** Card picture; the Moon mission uses the lunar map instead of a Mars window. */
     image?: string;
     setup: MissionSetupInput;
+    briefing: { task: string; basis: string; fact: string; lesson: string; source: string };
 }
 
 /** Same reserve rule as the Tharsis survey, so every mission plays by one standard. */
@@ -63,6 +64,13 @@ export function pickerMissions(): PickerMission[] {
             description: `${setup.missionGoal.description} Based on NASA's ${m.realBasis.mission.split(' (')[0]}.`,
             image: m.planet === 'moon' ? 'assets/textures/prep/maps/map_lunar_south_pole_320x180.png' : undefined,
             setup,
+            briefing: {
+                task: m.briefing,
+                basis: m.realBasis.mission,
+                fact: m.realBasis.fact,
+                lesson: m.lesson,
+                source: m.realBasis.sources[0]?.label ?? '',
+            },
         };
     });
 }

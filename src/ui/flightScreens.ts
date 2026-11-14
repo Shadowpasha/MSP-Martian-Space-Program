@@ -1,4 +1,4 @@
-import type { InputState } from 'esengine';
+import { Interactable, type Entity, type InputState } from 'esengine';
 import {
     AVAILABLE_CREW, SKILL_TREE_UPGRADES, UPGRADE_BRANCHES,
     type CrewMember, type SkillUpgradeDef, type TaskCategory, type UpgradeBranch,
@@ -7,8 +7,9 @@ import { CARGO_BY_ID, normalizeCargo } from '../data/cargo';
 import { formatResource, LAUNCH_CREW_SIZE, resourceEntries, type MissionOffer } from '../data/missions';
 import { purchaseProblem, type PlaytestProfile } from '../data/profile';
 import { MENU_BACKGROUND, SIDEBAR_BACKGROUND, type FlightUi, type IconName } from './flightUi';
+import { makeAbsBox } from './theme';
 
-export type Page = 'menu' | 'crew' | 'upgrade' | 'settings' | 'mission' | 'cargo' | 'quit' | 'exit' | 'run';
+export type Page = 'menu' | 'crew' | 'upgrade' | 'settings' | 'mission' | 'cargo' | 'review' | 'quit' | 'exit' | 'run';
 type Navigate = (page: Page) => void;
 const NAV = [
     ['Play', 'mission'], ['Crew', 'crew'], ['Upgrade', 'upgrade'], ['Settings', 'settings'], ['Quit', 'quit'],
@@ -31,7 +32,7 @@ function sidebar(ui: FlightUi, page: Page, navigate: Navigate, hero: boolean): v
     if (!hero) ui.image(root, [0, 216, 248, 504], SIDEBAR_BACKGROUND);
     logo(ui, hero ? 36 : 24, hero ? 56 : 24, hero);
     NAV.forEach(([label, destination], i) => {
-        const active = destination === page || (destination === 'mission' && page === 'cargo');
+        const active = destination === page || (destination === 'mission' && (page === 'cargo' || page === 'review'));
         const width = hero ? 228 : 204;
         const button = ui.button(root, [hero ? 36 : 24, (hero ? 236 : 216) + i * 64, width, 52], () => navigate(destination), {
             tone: hero && i === 0 ? 'hero' : active ? 'primary' : 'plain',
@@ -266,6 +267,7 @@ export function showUpgrades(ui: FlightUi, profile: PlaytestProfile, initial: Sk
 
 export function showMissions(ui: FlightUi, offers: readonly MissionOffer[], onChoose: (offer: MissionOffer) => void): void {
     const { root, palette: p } = ui;
+    const selectButtons: Array<ReturnType<FlightUi['button']>> = [];
     offers.forEach((offer, index) => {
         const card = ui.frame(root, [248 + index * 340, 108, 336, 596], offer.setup ? p.panel : p.well);
         const active = Boolean(offer.setup);
@@ -284,10 +286,51 @@ export function showMissions(ui: FlightUi, offers: readonly MissionOffer[], onCh
                 size: 14, color: p.secondary, wrap: true,
             });
         }
-        ui.button(card, [16, 532, 296, 44], () => onChoose(offer), {
+        // Selecting a mission opens its briefing popup first; "Prepare Cargo" there continues.
+        const button = ui.button(card, [16, 532, 296, 44], () => (offer.briefing ? openBriefing(offer) : onChoose(offer)), {
             label: active ? 'Select Mission' : 'Unavailable', disabled: !active, tone: active ? 'primary' : 'plain',
         });
+        if (active) selectButtons.push(button);
     });
+
+    let popup: Entity | null = null;
+    function closeBriefing(): void {
+        if (popup !== null) ui.world.despawn(popup);
+        popup = null;
+        selectButtons.forEach(button => button.setDisabled(false));
+    }
+
+    function openBriefing(offer: MissionOffer): void {
+        const brief = offer.briefing!;
+        // Cards stay visible but go inert, so the pointer and the keyboard only reach the popup.
+        selectButtons.forEach(button => button.setDisabled(true));
+        popup = makeAbsBox(ui.world, root, 0, 0, 1280, 720, { ...p.ink, a: 0.82 }, false);
+        ui.world.insert(popup, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
+        const panel = ui.frame(popup, [280, 70, 720, 580], p.raised);
+        ui.box(panel, [12, 12, 240, 136], p.ink);
+        ui.image(panel, [12, 12, 240, 136], offer.image ?? `assets/textures/mission_${offers.indexOf(offer) + 1}.png`);
+        ui.label(panel, [272, 14, 420, 22], offer.site, { color: p.amber, size: 14 });
+        ui.label(panel, [272, 38, 420, 44], offer.title, { display: true, size: 32 });
+        if (offer.setup) {
+            ui.label(panel, [272, 86, 420, 22], `Deadline · Sol ${offer.setup.missionGoal.deadlineSol}  ·  ${offer.setup.planet === 'moon' ? 'Moon' : 'Mars'}`, {
+                size: 15, color: p.secondary,
+            });
+        }
+        ui.label(panel, [272, 112, 420, 40], brief.task, { size: 14, wrap: true, top: true });
+
+        const nasa = ui.frame(panel, [12, 164, 688, 216], p.ink);
+        ui.label(nasa, [16, 8, 648, 28], 'The real NASA mission', { display: true, size: 20, color: p.amber });
+        ui.label(nasa, [16, 38, 648, 24], brief.basis, { size: 15, color: p.text, wrap: true });
+        ui.label(nasa, [16, 70, 648, 96], brief.fact, { size: 15, color: p.secondary, wrap: true, top: true });
+        ui.label(nasa, [16, 170, 648, 24], `Source: ${brief.source}`, { size: 12, color: p.muted });
+
+        const why = ui.frame(panel, [12, 392, 688, 100], p.ink);
+        ui.label(why, [16, 8, 648, 28], 'Why it matters', { display: true, size: 20, color: p.good });
+        ui.label(why, [16, 38, 648, 52], brief.lesson, { size: 15, color: p.secondary, wrap: true, top: true });
+
+        ui.button(panel, [12, 508, 200, 48], closeBriefing, { label: 'Back' });
+        ui.button(panel, [452, 508, 248, 48], () => { closeBriefing(); onChoose(offer); }, { label: 'Prepare Cargo', tone: 'primary' });
+    }
 }
 
 export function showPreparedManifest(ui: FlightUi, offer: MissionOffer, problem: string | null, onLaunch: () => void): void {

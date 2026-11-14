@@ -29,7 +29,30 @@ export interface MissionOffer {
     prepared?: 'team' | 'moon-test';
     /** Card picture; defaults to assets/textures/mission_<slot>.png. */
     image?: string;
+    /** Shown in the mission popup: the real NASA mission it is based on and why it matters. */
+    briefing?: MissionBriefing;
 }
+
+export interface MissionBriefing {
+    /** What the crew will do, in plain words. */
+    task: string;
+    /** The real NASA mission or instrument this is based on. */
+    basis: string;
+    /** A true fact from that mission. */
+    fact: string;
+    /** The trade-off this mission teaches. */
+    lesson: string;
+    /** Where the fact comes from. */
+    source: string;
+}
+
+export const THARSIS_BRIEFING: MissionBriefing = {
+    task: 'Set up the wind sampler on Tharsis Ridge and record 48 hours of weather so the station gets better storm warnings.',
+    basis: 'NASA weather stations REMS (Curiosity) and MEDA (Perseverance)',
+    fact: 'In 2018 a dust storm covered all of Mars. It blocked so much sunlight that the solar-powered Opportunity rover ran out of power and never woke up again.',
+    lesson: 'Dust storms block sunlight, so solar power drops. Battery packs take cargo space, but they keep the station running in the dark.',
+    source: 'NASA: Opportunity rover mission comes to end (2019)',
+};
 
 // Slots 2 and 3: Mission Prep's NASA-based missions (Ice Hunter on Mars, Shadow Ice on
 // the Moon). They replace the old "Polar Ice Recon" / "Crater Relay" placeholders.
@@ -44,6 +67,7 @@ export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
             description: mission.missionGoal.description,
             setup: mission,
             prepared: pending ? 'team' : undefined,
+            briefing: pending ? undefined : THARSIS_BRIEFING,
         },
         ...laterMissions,
     ];

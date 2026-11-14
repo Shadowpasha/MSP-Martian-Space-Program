@@ -49,6 +49,28 @@ export function centredAnchor(item: CargoItemId, rotation: Rotation, hx: number,
     return { x: clamp(hx - Math.floor((w - 1) / 2), CARGO_COLUMNS - w), y: clamp(hy - Math.floor((h - 1) / 2), CARGO_ROWS - h) };
 }
 
+export interface SupplyLasts {
+    key: 'food' | 'water' | 'oxygen';
+    label: string;
+    /** Whole sols the supply lasts: starting stock + packed items, at the main loop's daily use. */
+    lasts: number;
+    deadline: number;
+    ok: boolean;
+}
+
+/** Shared by the packer and the launch summary so both always show the same numbers. */
+export function supplyLasts(setup: MissionSetupInput, placements: readonly CargoPlacement[]): SupplyLasts[] {
+    const crew = setup.crew.length || 4;
+    const deadline = setup.missionGoal.deadlineSol;
+    return (['food', 'water', 'oxygen'] as const).map((key) => {
+        let amount = setup.startingResources[key];
+        for (const piece of placements) amount += CARGO_BY_ID[piece.item].resources?.[key] ?? 0;
+        const perSol = key === 'food' ? crew * FOOD_PER_CREW_PER_SOL : key === 'water' ? crew * WATER_PER_CREW_PER_SOL : OXYGEN_PER_SOL;
+        const lasts = Math.floor(amount / perSol);
+        return { key, label: key === 'oxygen' ? 'O₂' : key[0]!.toUpperCase() + key.slice(1), lasts, deadline, ok: lasts >= deadline };
+    });
+}
+
 /** Plain-language reason for the red preview (placementProblem's words, shortened for kids). */
 function shortProblem(problem: string): string {
     if (problem.startsWith('Another item')) return 'Slot taken: try another spot or rotate (R).';
@@ -125,7 +147,7 @@ export function showCargoPacker(
     });
 
     const validation = ui.label(inventory, [16, 478, 384, 40], '', { size: 14, wrap: true });
-    const launch = ui.button(inventory, [16, 528, 384, 48], () => { if (!held) onLaunch(); }, { label: 'Launch Mission', tone: 'primary' });
+    const launch = ui.button(inventory, [16, 528, 384, 48], () => { if (!held) onLaunch(); }, { label: 'Review & Launch', tone: 'primary' });
 
     const piecesLayer = ui.box(grid, [0, 0, 520, 340]);
     let pieces = ui.box(piecesLayer, [0, 0, 520, 340]);
@@ -320,15 +342,9 @@ export function showCargoPacker(
         ui.textColor(status, error ? p.bad : p.secondary);
 
         // Meters: starting stock + what packed items will add, against daily use in the main loop.
-        const crew = setup.crew.length || 4;
-        const deadline = setup.missionGoal.deadlineSol;
+        const lastsBy = supplyLasts(setup, placements);
         for (const meter of meters) {
-            let amount = setup.startingResources[meter.key];
-            for (const piece of placements) amount += CARGO_BY_ID[piece.item].resources?.[meter.key] ?? 0;
-            const perSol = meter.key === 'food' ? crew * FOOD_PER_CREW_PER_SOL
-                : meter.key === 'water' ? crew * WATER_PER_CREW_PER_SOL : OXYGEN_PER_SOL;
-            const lasts = Math.floor(amount / perSol);
-            const ok = lasts >= deadline;
+            const { lasts, deadline, ok } = lastsBy.find(entry => entry.key === meter.key)!;
             const filled = Math.min(meter.segs.length, Math.round((lasts / deadline) * meter.segs.length));
             meter.segs.forEach((seg, i) => ui.fill(seg, i < filled ? (ok ? p.good : p.amber) : p.well));
             ui.setText(meter.days, ok ? 'whole trip ✓' : `${lasts} of ${deadline} sols`);
