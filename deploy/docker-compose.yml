@@ -1,0 +1,10 @@
+# On the server: put this file in a folder (for example ~/msp) and run
+#   docker compose pull && docker compose up -d
+# The game listens on 127.0.0.1:8070 only; the Cloudflare Tunnel (msp.amerai.top) points at localhost:8070.
+services:
+  msp:
+    image: ghcr.io/shadowpasha/msp-martian-space-program:latest
+    container_name: msp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8070:8070"
