@@ -676,7 +676,8 @@ export function createGameModals(opts: {
     const crewPortraitMap = new Map<string, number>();
 
     const crewTopStripe = makeAbsBox(world, crewDlg.panelEntity, 2, 2, 576, 4, PALETTE.cyan, true);
-    const crewPortraitFrame = makeFramedBox(world, crewDlg.panelEntity, 20, 20, 96, 96, PALETTE.panelCard, PALETTE.goldNormal, true, 2);
+    // Crew portraits are 64x80 (4:5 aspect ratio); 80x100 inner keeps proportions unstretched.
+    const crewPortraitFrame = makeFramedBox(world, crewDlg.panelEntity, 24, 14, 84, 104, PALETTE.panelCard, PALETTE.goldNormal, true, 2);
     const crewPortraitBox = crewPortraitFrame.inner;
     const crewNameLbl = makeAbsLabel(world, crewDlg.panelEntity, 130, 20, 340, 28, '', { fontSize: 20, bold: true });
     const crewRoleLbl = makeAbsLabel(world, crewDlg.panelEntity, 130, 50, 340, 20, '', { fontSize: 13, bold: true, color: PALETTE.cyan });
