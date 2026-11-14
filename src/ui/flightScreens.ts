@@ -289,7 +289,7 @@ export function showMissions(
         ui.box(card, [12, 12, 304, 148], p.ink);
         ui.image(card, [12, 12, 304, 148], offer.image ?? `assets/textures/mission_${Math.min(3, index + 1)}.png`);
         ui.label(card, [16, 168, 296, 28], offer.site, { color: active ? p.amber : p.muted, size: 14 });
-        ui.label(card, [16, 204, 296, 64], offer.title, { display: true, size: 28, wrap: true, color: active ? p.text : p.muted });
+        ui.label(card, [16, 200, 296, 70], offer.title, { display: true, size: 28, fit: 18, wrap: true, color: active ? p.text : p.muted });
         // The goal in one line; the site is above, the deadline and the kit below. Nothing is said twice.
         ui.label(card, [16, 276, 296, 56], offer.description, { size: 16, color: active ? p.text : p.muted, wrap: true, top: true });
         if (offer.setup) {
@@ -334,7 +334,7 @@ export function showMissions(
         ui.image(panel, [12, 12, 240, 136], offer.image ?? 'assets/textures/mission_1.png');
         // The card already showed the site and the deadline; the popup adds the job, the real
         // NASA mission and the lesson. Title on top, then three short blocks.
-        ui.label(panel, [272, 10, 420, 44], offer.title, { display: true, size: 32 });
+        ui.label(panel, [272, 10, 420, 44], offer.title, { display: true, size: 32, fit: 18 });
         ui.label(panel, [272, 58, 420, 92], brief.task, { size: 15, wrap: true, top: true });
 
         const nasa = ui.frame(panel, [12, 168, 688, 152], p.ink);

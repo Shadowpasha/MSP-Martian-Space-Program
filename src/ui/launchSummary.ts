@@ -35,7 +35,7 @@ export function showLaunchSummary(
 
     // ---- Mission, cargo, supplies (right) ----
     const side = ui.frame(root, [848, 108, 416, 596]);
-    ui.label(side, [16, 10, 384, 34], goal.title, { display: true, size: 24, wrap: true });
+    ui.label(side, [16, 10, 384, 34], goal.title, { display: true, size: 24, fit: 16 });
     ui.label(side, [16, 44, 384, 22], `${setup.planet === 'moon' ? 'Moon' : 'Mars'} · Deadline Sol ${goal.deadlineSol}`, {
         size: 14, color: p.amber,
     });

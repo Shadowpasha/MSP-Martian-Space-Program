@@ -89,6 +89,36 @@ export const ICON_NAMES = [
 ] as const;
 export type IconName = typeof ICON_NAMES[number];
 
+/** Average glyph width as a share of font size. Slightly wide on purpose, so estimates err toward fitting. */
+const GLYPH_WIDTH = 0.6;
+const LINE_HEIGHT = 1.15;
+
+/**
+ * Largest font size from `max` down to `min` at which `text` fits a `width` × `height` box.
+ * Engine text has no measuring API here, so this estimates from the glyph width. Without `wrap`
+ * the text must fit on one line; with `wrap` it may use as many lines as the height allows.
+ */
+export function fitFontSize(text: string, width: number, height: number, max: number, min: number, wrap: boolean): number {
+    for (let size = max; size > min; size--) {
+        const perLine = Math.floor(width / (size * GLYPH_WIDTH));
+        const maxLines = wrap ? Math.max(1, Math.floor(height / (size * LINE_HEIGHT))) : 1;
+        if (wrappedLines(text, perLine) <= maxLines) return size;
+    }
+    return min;
+}
+
+function wrappedLines(text: string, perLine: number): number {
+    let lines = 1;
+    let used = 0;
+    for (const word of text.split(/\s+/).filter(Boolean)) {
+        if (word.length > perLine) return Infinity;
+        const needed = used === 0 ? word.length : used + 1 + word.length;
+        if (needed <= perLine) used = needed;
+        else { lines++; used = word.length; }
+    }
+    return lines;
+}
+
 export function makeFlightUi(
     world: World, events: UIEventQueue, root: Entity, art: FlightArt, focus: FocusManagerState,
     options: { highContrast: boolean; reducedMotion: boolean },
@@ -118,13 +148,18 @@ export function makeFlightUi(
 
     function label(parent: Entity, bounds: Bounds, content: string, opts: {
         size?: number; color?: Color; display?: boolean; wrap?: boolean; center?: boolean; top?: boolean;
+        /** Smallest font size allowed: shrink from `size` until the text fits the box. */
+        fit?: number;
     } = {}) {
         const [x, y, w, h] = bounds;
+        const size = opts.fit === undefined
+            ? opts.size ?? 16
+            : fitFontSize(content, w, h, opts.size ?? 16, opts.fit, opts.wrap ?? false);
         const el = spawnUIEntity({
             world, parent,
             node: { position: UIPositionType.Absolute, insetLeft: px(x), insetTop: px(y), width: px(w), height: px(h), pointerEvents: UIPointerEvents.None },
             text: {
-                content, fontSize: opts.size ?? 16, fontFamily: opts.display ? 'sans-serif' : 'monospace',
+                content, fontSize: size, fontFamily: opts.display ? 'sans-serif' : 'monospace',
                 bold: opts.display ?? false, color: opts.color ?? palette.text,
                 align: opts.center ? TextAlign.Center : TextAlign.Left,
                 verticalAlign: opts.top ? TextVerticalAlign.Top : TextVerticalAlign.Middle, wordWrap: opts.wrap ?? false,
