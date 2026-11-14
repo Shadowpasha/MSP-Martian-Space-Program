@@ -175,7 +175,7 @@ export const flightSystem = defineSystem(
                     const preview = chosen?.setup ? buildLaunchSetup(chosen, profile.crewIds, draft) : null;
                     if (!chosen || !preview) { navigate('mission'); break; }
                     showShell(ui, page, 'Launch Summary', `${chosen.title} · last check before launch`, 'check', navigate);
-                    surfaceTick = showLaunchSummary(ui, preview, draft, launchProblem(preview), () => launch(chosen, false), () => navigate('cargo'));
+                    surfaceTick = showLaunchSummary(ui, preview, draft, launchProblem(preview), () => launch(chosen, false), () => navigate('cargo'), chosen.image);
                     break;
                 }
                 case 'settings':
