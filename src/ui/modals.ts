@@ -1055,7 +1055,7 @@ export function createGameModals(opts: {
         },
         {
             title: '3. MATCH CREW PERKS FOR BIG BONUSES',
-            body: 'Elena loves ENG/solar jobs, Kenji grows +45% Food & O2 on BIO tasks, Maya rocks NAV/Mission goals, and Marcus heals Radiation & Morale!',
+            body: 'Kalpana loves ENG/solar jobs, Scott grows +45% Food & O2 on BIO tasks, Eileen rocks NAV/Mission goals, and Bernard heals Radiation & Morale!',
             accent: PALETTE.green,
         },
         {

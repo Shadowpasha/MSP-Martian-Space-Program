@@ -46,12 +46,12 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         choices: [
             {
                 id: 'calibrate_with_eng',
-                label: 'Engineer Tune-Up [Elena Perk]',
+                label: 'Engineer Tune-Up [Kalpana Perk]',
                 summary: '+6 Power, +3 O2, +4 Morale (Free!)',
                 requiresRole: 'engineer',
                 resourceDelta: { energy: 6, oxygen: 3 },
                 moraleDelta: 4,
-                outcomeText: 'Elena tuned the solar trackers and O2 valves in minutes!',
+                outcomeText: 'Kalpana tuned the solar trackers and O2 valves in minutes!',
             },
             {
                 id: 'spend_battery_boost',
@@ -128,12 +128,12 @@ export const DAILY_EVENTS: DailyEventDef[] = [
             },
             {
                 id: 'botanist_rescue',
-                label: 'Kenji Bio-Filter [Botanist Perk]',
+                label: 'Scott Bio-Filter [Botanist Perk]',
                 summary: '+6 Food, +4 O2, +3 Morale (-2 Water)',
                 requiresRole: 'botanist',
                 resourceDelta: { water: -2, food: 6, oxygen: 4 },
                 moraleDelta: 3,
-                outcomeText: 'Kenji saved the whole greenhouse without wasting seeds!',
+                outcomeText: 'Scott saved the whole greenhouse without wasting seeds!',
             },
             {
                 id: 'dump_trays',
@@ -230,12 +230,12 @@ export const DAILY_EVENTS: DailyEventDef[] = [
             },
             {
                 id: 'medic_triage',
-                label: 'Medic Water-Wall Shelter [Marcus Perk]',
+                label: 'Medic Water-Wall Shelter [Bernard Perk]',
                 summary: '+4 Radiation only, +3 Morale',
                 requiresRole: 'medic',
                 radiationDelta: 4,
                 moraleDelta: 3,
-                outcomeText: 'Marcus guided everyone safely behind the water tanks!',
+                outcomeText: 'Bernard guided everyone safely behind the water tanks!',
             },
             {
                 id: 'ride_it_out',
@@ -333,12 +333,12 @@ export const DAILY_EVENTS: DailyEventDef[] = [
             },
             {
                 id: 'counseling_session',
-                label: 'Music & Stories [Marcus Perk]',
+                label: 'Music & Stories [Bernard Perk]',
                 summary: '+9 Morale, -2 Power',
                 requiresRole: 'medic',
                 resourceDelta: { energy: -2 },
                 moraleDelta: 9,
-                outcomeText: 'Marcus hosted game night and everyone laughed!',
+                outcomeText: 'Bernard hosted game night and everyone laughed!',
             },
             {
                 id: 'deny_break',
@@ -386,12 +386,12 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         choices: [
             {
                 id: 'engineer_brace_mast',
-                label: 'Bolt & Brace Mast [Elena Perk]',
+                label: 'Bolt & Brace Mast [Kalpana Perk]',
                 summary: 'Protects Sensor, +1 Prep Sensor, +2 Morale',
                 requiresRole: 'engineer',
                 moraleDelta: 2,
                 requirementDelta: { prep_sensor: 1 },
-                outcomeText: 'Elena locked the mast bolts tight so the storm could not break the sensor!',
+                outcomeText: 'Kalpana locked the mast bolts tight so the storm could not break the sensor!',
             },
             {
                 id: 'patch_mast_kit',
@@ -424,13 +424,13 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         choices: [
             {
                 id: 'pilot_wiggle_clean',
-                label: 'Pilot Rock-Crawl Free [Maya Perk]',
+                label: 'Pilot Rock-Crawl Free [Eileen Perk]',
                 summary: '+1 Prep Rover, -2 Power, +3 Morale',
                 requiresRole: 'pilot',
                 resourceDelta: { energy: -2 },
                 moraleDelta: 3,
                 requirementDelta: { prep_rover: 1 },
-                outcomeText: 'Maya wiggled the wheels out smoothly and calibrated rover steering!',
+                outcomeText: 'Eileen wiggled the wheels out smoothly and calibrated rover steering!',
             },
             {
                 id: 'replace_rover_seal',

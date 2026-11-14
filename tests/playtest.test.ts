@@ -4,7 +4,7 @@ import { AVAILABLE_CREW, DEFAULT_CREW, DEFAULT_MARS_SETUP, SKILL_TREE_UPGRADES, 
 import { packedInventory, placementProblem, rotatedCells, type CargoPlacement } from '../src/data/cargo';
 import { DAILY_EVENTS } from '../src/data/events';
 import { buildLaunchSetup, launchProblem, missionOffers } from '../src/data/missions';
-import { awardResearch, loadProfile, purchaseProblem, purchaseUpgrade } from '../src/data/profile';
+import { awardResearch, loadProfile, purchaseProblem, purchaseUpgrade, resetUpgrades, spentResearch } from '../src/data/profile';
 import {
     advanceSol, assignCrewToTask, computeTaskEfficiency, consumeCargoDirectly, createInitialGameState, enqueueTask,
     isChoiceAvailable, resolveDailyEventChoice, type OutpostGameState,
@@ -32,10 +32,19 @@ function quickTask(state: OutpostGameState, plan: string, ...crew: string[]) {
 
 test('mission offers expose one contract and honor a prepared external manifest', () => {
     const offers = missionOffers();
-    assert.equal(offers.length, 3);
-    assert.equal(offers.filter(offer => offer.setup).length, 1);
+    // After Tharsis come Mission Prep's NASA-based missions; all six are playable.
+    assert.equal(offers.length, 6);
+    assert.equal(offers.filter(offer => offer.setup).length, 6);
     assert.equal(offers[0]?.setup?.missionGoal.deadlineSol, 16);
-    assert.equal(buildLaunchSetup(offers[1]!, starterCrew, []), null);
+    assert.deepEqual(offers.map(offer => offer.setup?.missionGoal.requiredFlag), [
+        'wind_sample_collected', 'crop_harvested', 'ice_core_collected', 'oxygen_produced', 'ice_core_collected', 'radiation_measured',
+    ]);
+    // Each page of three runs Easy, Medium, Hard.
+    assert.deepEqual(offers.map(offer => offer.difficulty), [1, 2, 3, 1, 2, 3]);
+    assert.ok(offers.every(offer => offer.briefing), 'every mission has a NASA briefing for the popup');
+    const ice = buildLaunchSetup(offers[2]!, starterCrew, [sampler])!;
+    assert.equal(ice.missionGoal.requiredFlag, 'ice_core_collected');
+    assert.equal(launchProblem(ice), null);
     const external = missionOffers(DEFAULT_MARS_SETUP)[0]!;
     const setup = buildLaunchSetup(external, [], [])!;
     assert.equal(setup.cargo.batteryPacks, DEFAULT_MARS_SETUP.cargo.batteryPacks);
@@ -160,4 +169,64 @@ test('the AI cost discount applies once and the storm event retains required har
     state.currentEvent = DAILY_EVENTS.find(event => event.id === 'sandstorm_wind_window')!;
     assert.equal(resolveDailyEventChoice(state, 'prep_wind_sampler').ok, true);
     assert.equal(state.cargo.windSampler, 1);
+});
+
+test('Mission Prep goals (oxygen, crops, radiation, ice) can be completed in the survival loop', () => {
+    const offers = missionOffers();
+    const equipment: Record<string, CargoPlacement[]> = {
+        ice_core_collected: [sampler],
+        oxygen_produced: [
+            { id: 11, item: 'batteryPacks', x: 0, y: 0, rotation: 0 },
+            { id: 12, item: 'batteryPacks', x: 0, y: 1, rotation: 0 },
+        ],
+        crop_harvested: [
+            { id: 21, item: 'seedPods', x: 0, y: 0, rotation: 0 },
+            { id: 22, item: 'seedPods', x: 1, y: 0, rotation: 0 },
+            { id: 23, item: 'waterCanisters', x: 2, y: 0, rotation: 0 },
+        ],
+        radiation_measured: [
+            { id: 31, item: 'medkits', x: 0, y: 0, rotation: 0 },
+            { id: 32, item: 'medkits', x: 1, y: 0, rotation: 0 },
+        ],
+    };
+    // Like the Tharsis win test: two packed supplies are used on Sol 1 to fill the prep-supplies units.
+    const supplies: CargoPlacement[] = [
+        { id: 41, item: 'waterCanisters', x: 5, y: 0, rotation: 0 },
+        { id: 42, item: 'oxygenTanks', x: 3, y: 3, rotation: 0 },
+    ];
+    for (const offer of offers.slice(1)) {
+        const flag = offer.setup!.missionGoal.requiredFlag;
+        const setup = buildLaunchSetup(offer, starterCrew, [...equipment[flag]!, ...supplies])!;
+        assert.equal(launchProblem(setup), null, `${offer.title} launches with its equipment`);
+        assert.match(launchProblem(buildLaunchSetup(offer, starterCrew, [])!) ?? '', /Pack required equipment/, `${offer.title} needs equipment`);
+        const sim = createInitialGameState(setup);
+        resolveEvent(sim);
+        assert.equal(consumeCargoDirectly(sim, 'waterCanisters').ok, true);
+        assert.equal(consumeCargoDirectly(sim, 'oxygenTanks').ok, true);
+        quickTask(sim, 'Prep Sensor', 'crew_engineer');
+        quickTask(sim, 'Prep Rover', 'crew_medic');
+        quickTask(sim, 'Prep Supplies', 'crew_botanist');
+        assert.equal(advanceSol(sim).advanced, true);
+        resolveEvent(sim);
+        const goal = quickTask(sim, 'Start the mission goal expedition', 'crew_pilot', 'crew_engineer');
+        assert.equal(goal.rewardOnComplete.goalFlag, flag, `${offer.title}: the goal task carries ${flag}`);
+        for (let sol = 0; sol < 12 && !sim.goal.completed && sim.phase !== 'ended'; sol++) {
+            if (sim.currentEvent) resolveEvent(sim);
+            advanceSol(sim);
+        }
+        assert.equal(sim.goal.completed, true, `${offer.title}: goal completed`);
+    }
+});
+
+test('resetting upgrades refunds every point spent and clears the tree', () => {
+    const start = { ...loadProfile(null, [], false), researchPoints: 40 };
+    const tier1 = SKILL_TREE_UPGRADES.find(node => node.id === 'solar_mppt')!;
+    const tier2 = SKILL_TREE_UPGRADES.find(node => node.prerequisites.includes('solar_mppt'))!;
+    const bought = purchaseUpgrade(purchaseUpgrade(start, tier1), tier2);
+    assert.deepEqual(bought.upgradeIds, [tier1.id, tier2.id]);
+    assert.equal(spentResearch(bought), tier1.cost + tier2.cost);
+    const reset = resetUpgrades(bought);
+    assert.deepEqual(reset.upgradeIds, []);
+    assert.equal(reset.researchPoints, 40);
+    assert.equal(resetUpgrades(reset), reset, 'nothing to reset leaves the profile unchanged');
 });

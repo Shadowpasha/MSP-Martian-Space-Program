@@ -3,6 +3,7 @@ import {
     UIDisplay, UINode, UIPointerEvents, UIPositionType, UIVisual, UIVisualFit, UIVisualType, uiNodeWorldBox,
     type AssetsData, type Color, type Entity, type FocusManagerState, type InputState, type UIEventQueue, type World,
 } from 'esengine';
+import { play, vibrate } from './feedback';
 import { makeAbsBox, setNodeDisplayed, setText, setTextColor, setVisualColor } from './theme';
 
 export type Bounds = readonly [x: number, y: number, width: number, height: number];
@@ -36,8 +37,14 @@ export function flightPalette(highContrast: boolean) {
 }
 
 type Tone = 'plain' | 'primary' | 'hero' | 'tile';
-interface ButtonOptions { tone?: Tone; disabled?: boolean; label?: string; }
-interface Control { entity: Entity; ring: Entity; }
+interface ButtonOptions {
+    tone?: Tone; disabled?: boolean; label?: string;
+    /** No hover lift, press sink, hover tick or click blip (for grid cells that other things are drawn over). */
+    still?: boolean;
+    /** No hover tick: for big hover areas built from buttons (list rows, cards) rather than real buttons. */
+    quiet?: boolean;
+}
+interface Control { entity: Entity; ring: Entity; disabled: () => boolean; x: number; y: number; }
 
 export interface FlightArt {
     texture(ref: string): Promise<number>;
@@ -89,6 +96,36 @@ export const ICON_NAMES = [
 ] as const;
 export type IconName = typeof ICON_NAMES[number];
 
+/** Average glyph width as a share of font size. Slightly wide on purpose, so estimates err toward fitting. */
+const GLYPH_WIDTH = 0.6;
+const LINE_HEIGHT = 1.15;
+
+/**
+ * Largest font size from `max` down to `min` at which `text` fits a `width` × `height` box.
+ * Engine text has no measuring API here, so this estimates from the glyph width. Without `wrap`
+ * the text must fit on one line; with `wrap` it may use as many lines as the height allows.
+ */
+export function fitFontSize(text: string, width: number, height: number, max: number, min: number, wrap: boolean): number {
+    for (let size = max; size > min; size--) {
+        const perLine = Math.floor(width / (size * GLYPH_WIDTH));
+        const maxLines = wrap ? Math.max(1, Math.floor(height / (size * LINE_HEIGHT))) : 1;
+        if (wrappedLines(text, perLine) <= maxLines) return size;
+    }
+    return min;
+}
+
+function wrappedLines(text: string, perLine: number): number {
+    let lines = 1;
+    let used = 0;
+    for (const word of text.split(/\s+/).filter(Boolean)) {
+        if (word.length > perLine) return Infinity;
+        const needed = used === 0 ? word.length : used + 1 + word.length;
+        if (needed <= perLine) used = needed;
+        else { lines++; used = word.length; }
+    }
+    return lines;
+}
+
 export function makeFlightUi(
     world: World, events: UIEventQueue, root: Entity, art: FlightArt, focus: FocusManagerState,
     options: { highContrast: boolean; reducedMotion: boolean },
@@ -118,13 +155,18 @@ export function makeFlightUi(
 
     function label(parent: Entity, bounds: Bounds, content: string, opts: {
         size?: number; color?: Color; display?: boolean; wrap?: boolean; center?: boolean; top?: boolean;
+        /** Smallest font size allowed: shrink from `size` until the text fits the box. */
+        fit?: number;
     } = {}) {
         const [x, y, w, h] = bounds;
+        const size = opts.fit === undefined
+            ? opts.size ?? 16
+            : fitFontSize(content, w, h, opts.size ?? 16, opts.fit, opts.wrap ?? false);
         const el = spawnUIEntity({
             world, parent,
             node: { position: UIPositionType.Absolute, insetLeft: px(x), insetTop: px(y), width: px(w), height: px(h), pointerEvents: UIPointerEvents.None },
             text: {
-                content, fontSize: opts.size ?? 16, fontFamily: opts.display ? 'sans-serif' : 'monospace',
+                content, fontSize: size, fontFamily: opts.display ? 'sans-serif' : 'monospace',
                 bold: opts.display ?? false, color: opts.color ?? palette.text,
                 align: opts.center ? TextAlign.Center : TextAlign.Left,
                 verticalAlign: opts.top ? TextVerticalAlign.Top : TextVerticalAlign.Middle, wordWrap: opts.wrap ?? false,
@@ -164,18 +206,36 @@ export function makeFlightUi(
         return image(parent, [x, y, size, size], 'assets/textures/flight_icons.png', spriteHasColor ? palette.white : tint, ICON_NAMES.indexOf(name));
     }
 
+    /** Buttons being rattled because someone pressed them while they were disabled. */
+    const rattles: Array<{ entity: Entity; x: number; y: number; start: number }> = [];
+    function placeAt(entity: Entity, x: number, y: number): void {
+        if (!world.valid(entity)) return;
+        world.update(entity, UINode, node => { node.insetLeft = px(x); node.insetTop = px(y); });
+    }
+
     function button(parent: Entity, bounds: Bounds, onClick: () => void, opts: ButtonOptions = {}) {
         const [x, y, w, h] = bounds;
         const tone = opts.tone ?? 'plain';
         const resting = tone === 'hero' ? palette.cyan : tone === 'primary' ? palette.amber : palette.edge;
+        let disabled = Boolean(opts.disabled);
+        let hovered = false;
         const handle = createButton({
             world, parent, events, disabled: opts.disabled,
             node: { position: UIPositionType.Absolute, insetLeft: px(x), insetTop: px(y), width: px(w), height: px(h) },
+            // Start in the state's own colour. The engine default is a white quad that then fades to
+            // the state colour, which flashed every button white whenever a page was redrawn.
+            background: { color: opts.disabled ? palette.edge : resting },
             states: {
                 normal: { color: resting }, hover: { color: tone === 'hero' ? palette.white : palette.hover },
                 pressed: { color: palette.pressed }, disabled: { color: palette.edge },
             },
-            fadeDuration: options.reducedMotion ? 0 : 0.1, onClick,
+            fadeDuration: options.reducedMotion ? 0 : 0.1,
+            onClick: () => {
+                if (!live()) return;
+                // `still` controls (the cargo grid) make their own sound for what happened, so no blip.
+                if (!opts.still) play('blip');
+                onClick();
+            },
         });
         const surface = box(handle.entity, [2, 2, w - 4, h - 4],
             tone === 'hero' ? palette.teal : tone === 'primary' ? palette.amber : tone === 'tile' ? palette.well : palette.raised);
@@ -187,8 +247,73 @@ export function makeFlightUi(
         const text = opts.label === undefined ? null : label(handle.entity, [8, 2, w - 16, h - 4], opts.label, {
             display: true, size: 18, center: true, color: tone === 'primary' ? palette.ink : palette.text,
         });
-        controls.push({ entity: handle.entity, ring });
-        return { ...handle, surface, text };
+        controls.push({ entity: handle.entity, ring, disabled: () => disabled, x, y });
+
+        // Only a button on the page that is showing reacts: never one left over from a page that is
+        // gone or hidden (so nothing from a previous screen can tick or click under the current one).
+        const live = () => world.valid(root) && world.valid(handle.entity) && world.isEntityActive(handle.entity)
+            && world.get(handle.entity, UINode).display !== UIDisplay.None;
+        // Feel: lift a pixel on hover, sink on press, tick and buzz. `still` buttons (the cargo
+        // grid cells) keep their place and stay quiet, since pieces are drawn over them.
+        const moves = !options.reducedMotion && !opts.still;
+        // Only real buttons tick: cards ("tile") and quiet rows lift but stay silent.
+        const ticks = !opts.still && !opts.quiet && tone !== 'tile';
+        listeners.push(events.on(handle.entity, 'hover_enter', () => {
+            // Hover events bubble up from inside the button; react once per real enter.
+            if (hovered || !live()) return;
+            hovered = true;
+            if (disabled || opts.still) return;
+            if (ticks) play('tick');
+            if (moves) placeAt(handle.entity, x, y - 1);
+        }));
+        listeners.push(events.on(handle.entity, 'hover_exit', event => {
+            if (event.target !== handle.entity && event.target !== catcher) return;
+            hovered = false;
+            if (moves) placeAt(handle.entity, x, y);
+        }));
+        listeners.push(events.on(handle.entity, 'press', () => {
+            if (!live()) return;
+            if (disabled) { refuse(handle.entity, x, y); return; }
+            vibrate('short');
+            if (moves) placeAt(handle.entity, x, y + 2);
+        }));
+        listeners.push(events.on(handle.entity, 'release', () => {
+            if (moves && !disabled) placeAt(handle.entity, x, hovered ? y - 1 : y);
+        }));
+        // The engine sends no pointer events to a disabled button, so while it is disabled an
+        // invisible catcher covers it and turns a press into the "not allowed" rattle.
+        const catcher = makeAbsBox(world, handle.entity, 0, 0, w, h, undefined, false);
+        world.insert(catcher, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
+        listeners.push(events.on(catcher, 'press', () => { if (live()) refuse(handle.entity, x, y); }));
+        setNodeDisplayed(world, catcher, disabled);
+        const setDisabled = (value: boolean) => {
+            disabled = value;
+            handle.setDisabled(value);
+            setNodeDisplayed(world, catcher, value);
+            if (value && moves) placeAt(handle.entity, x, y);
+        };
+        return { ...handle, setDisabled, surface, text };
+    }
+
+    /** A press on a disabled control: it rattles side to side with a low buzz instead of doing nothing. */
+    function refuse(entity: Entity, x: number, y: number): void {
+        play('buzz');
+        vibrate('short');
+        if (options.reducedMotion || rattles.some(r => r.entity === entity)) return;
+        rattles.push({ entity, x, y, start: Date.now() });
+    }
+
+    function stepRattles(): void {
+        const now = Date.now();
+        for (const r of [...rattles]) {
+            const t = now - r.start;
+            if (t >= 280 || !world.valid(r.entity)) {
+                placeAt(r.entity, r.x, r.y);
+                rattles.splice(rattles.indexOf(r), 1);
+                continue;
+            }
+            placeAt(r.entity, r.x + (Math.floor(t / 40) % 2 === 0 ? 3 : -3) * (1 - t / 280), r.y);
+        }
     }
 
     let lastFocused: Entity | null = null;
@@ -197,6 +322,7 @@ export function makeFlightUi(
             world.get(control.entity, UINode).display !== UIDisplay.None && world.get(control.entity, Interactable).enabled;
     }
     function updateFocus(input: InputState) {
+        stepRattles();
         const key = (name: string, pad: GamepadButton) => input.isKeyPressed(name) || input.isGamepadButtonPressed(pad);
         const dx = Number(key('ArrowRight', GamepadButton.DpadRight)) - Number(key('ArrowLeft', GamepadButton.DpadLeft));
         const dy = Number(key('ArrowDown', GamepadButton.DpadDown)) - Number(key('ArrowUp', GamepadButton.DpadUp));
@@ -238,6 +364,8 @@ export function makeFlightUi(
 
     return {
         world, root, palette, box, group, frame, label, image, icon, button, updateFocus,
+        /** The player's Reduced Motion setting; screens with motion read it. */
+        reducedMotion: options.reducedMotion,
         setText: (entity: Entity | null, content: string) => setText(world, entity, content),
         textColor: (entity: Entity | null, fill: Color) => setTextColor(world, entity, fill),
         fill: (entity: Entity | null, fill: Color) => setVisualColor(world, entity, fill),

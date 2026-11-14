@@ -8,13 +8,15 @@ import {
 } from '../contracts/gameContract';
 import type { CargoPlacement } from '../data/cargo';
 import { buildLaunchSetup, LAUNCH_CREW_SIZE, launchProblem, missionOffers, preparedMoonOffer, type MissionOffer } from '../data/missions';
-import { awardResearch, loadProfile, purchaseUpgrade, type PlaytestProfile } from '../data/profile';
-import { showCargo } from '../ui/cargoScreen';
+import { awardResearch, loadProfile, purchaseUpgrade, resetUpgrades, type PlaytestProfile } from '../data/profile';
+import { showCargoPacker } from '../ui/cargoPacker';
+import { showLaunchSummary } from '../ui/launchSummary';
 import {
     showCrew, showExit, showMenu, showMissions, showPreparedManifest, showQuit, showSettings, showShell, showUpgrades, type Page,
 } from '../ui/flightScreens';
 import { makeFlightArt, makeFlightUi } from '../ui/flightUi';
 import { makeAbsBox, setNodeDisplayed } from '../ui/theme';
+import { menuAmbience, setFeedbackPrefs } from '../ui/feedback';
 import { mountSurvivalUi } from './gameUi';
 
 const controllers = new WeakMap<World, { root: Entity; update: () => void }>();
@@ -42,13 +44,19 @@ export const flightSystem = defineSystem(
         const legacySkills = Storage.getJSON<unknown>(STORAGE_KEYS.ACTIVE_SKILLS);
         const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
         let profile = loadProfile(Storage.getJSON<unknown>(STORAGE_KEYS.PROFILE), legacySkills, reducedMotion);
+        setFeedbackPrefs(profile);
         let page: Page = 'menu';
         let nextPage: Page | null = null;
         let pageRoot: Entity | null = null;
         let tickPage: (() => void) | null = null;
         let selectedCrewId = profile.crewIds[0] ?? 'crew_engineer';
         let selectedUpgradeId = SKILL_TREE_UPGRADES[0]!.id;
+        /** Set for one render after buying an upgrade, so the Upgrade page can celebrate it. */
+        let justUnlocked: string | null = null;
+        /** The branch the Upgrade page last showed, so only a new branch (or a fresh visit) animates the tree in. */
+        let upgradeBranch: string | null = null;
         let offer: MissionOffer | null = null;
+        let missionPage = 0;
         let draft: CargoPlacement[] = [];
         let draftKey = '';
         let runSetup: MissionSetupInput | null = null;
@@ -57,6 +65,7 @@ export const flightSystem = defineSystem(
             if (next === profile) return;
             Storage.setJSON(STORAGE_KEYS.PROFILE, next);
             profile = next;
+            setFeedbackPrefs(profile);
         }
 
         function navigate(destination: Page): void {
@@ -84,7 +93,10 @@ export const flightSystem = defineSystem(
         }
 
         function render(destination: Page): void {
+            const previousPage = page;
             page = destination;
+            // The station hum belongs to the title screen only.
+            if (destination !== 'menu') menuAmbience(false);
             focus.blur();
             if (pageRoot !== null) world.despawn(pageRoot);
             const root = makeAbsBox(world, sceneRoot, 0, 0, 1280, 720);
@@ -111,41 +123,63 @@ export const flightSystem = defineSystem(
             }
 
             const ui = makeFlightUi(world, events, root, art, focus, profile);
-            let surfaceTick: ((state: typeof input) => void) | undefined;
+            // Returns true when the page used Escape itself (e.g. putting back a held cargo item).
+            let surfaceTick: ((state: typeof input) => boolean | void) | undefined;
             switch (page) {
                 case 'crew':
-                    showShell(ui, page, 'Crew', 'Select four specialists for the next mission.', 'crew', navigate);
-                    showCrew(ui, profile, selectedCrewId, crewIds => saveProfile({ ...profile, crewIds }), id => { selectedCrewId = id; });
+                    showShell(ui, page, 'Crew', 'Pick 4 crew for your next mission.', 'crew', navigate);
+                    surfaceTick = showCrew(ui, profile, selectedCrewId, crewIds => saveProfile({ ...profile, crewIds }), id => { selectedCrewId = id; });
                     break;
                 case 'upgrade':
-                    showShell(ui, page, 'Upgrade', 'Spend research to improve future missions.', 'upgrade', navigate);
-                    showUpgrades(ui, profile, SKILL_TREE_UPGRADES.find(node => node.id === selectedUpgradeId)!, id => {
+                    showShell(ui, page, 'Upgrade', 'Spend research points to make every mission easier.', 'upgrade', navigate);
+                    surfaceTick = showUpgrades(ui, profile, SKILL_TREE_UPGRADES.find(node => node.id === selectedUpgradeId)!, id => {
                         if (id !== selectedUpgradeId) { selectedUpgradeId = id; navigate('upgrade'); }
                     }, node => {
                         saveProfile(purchaseUpgrade(profile, node));
                         Storage.setJSON(STORAGE_KEYS.ACTIVE_SKILLS, profile.upgradeIds);
+                        justUnlocked = node.id;
+                        navigate('upgrade');
+                    }, (() => {
+                        const branch = SKILL_TREE_UPGRADES.find(node => node.id === selectedUpgradeId)!.branch;
+                        const fx = { justUnlocked, newBranch: previousPage !== 'upgrade' || branch !== upgradeBranch };
+                        upgradeBranch = branch;
+                        return fx;
+                    })(), () => {
+                        saveProfile(resetUpgrades(profile));
+                        Storage.setJSON(STORAGE_KEYS.ACTIVE_SKILLS, profile.upgradeIds);
+                        upgradeBranch = null;
                         navigate('upgrade');
                     });
+                    justUnlocked = null;
                     break;
                 case 'mission':
-                    showShell(ui, page, 'Mission Selection', 'Review the contract before loading the cargo bay.', 'mars', navigate);
-                    showMissions(ui, missionOffers(readPendingSetup()), selectMission);
+                    showShell(ui, page, 'Mission Selection', 'Pick a job for your crew.', 'mars', navigate);
+                    surfaceTick = showMissions(ui, missionOffers(readPendingSetup()), selectMission, missionPage, next => { missionPage = next; navigate('mission'); });
                     break;
                 case 'cargo': {
                     const chosen = offer;
                     if (!chosen?.setup) { navigate('mission'); break; }
-                    showShell(ui, page, 'Cargo Preparation', chosen.title, 'windSampler', navigate);
+                    showShell(ui, page, 'Cargo Preparation', `${chosen.title} · pack what the mission needs`, 'windSampler', navigate);
                     const problem = (placements: CargoPlacement[]) => {
                         const setup = buildLaunchSetup(chosen, profile.crewIds, placements);
                         return setup ? launchProblem(setup) : 'Choose a mission to launch.';
                     };
                     const start = () => launch(chosen, Boolean(chosen.prepared));
                     if (chosen.prepared) showPreparedManifest(ui, chosen, problem(draft), start);
-                    else surfaceTick = showCargo(ui, draft, next => { draft = next; }, problem, start);
+                    // Packed missions go through the Launch Summary before the run.
+                    else surfaceTick = showCargoPacker(ui, chosen.setup, draft, next => { draft = next; }, problem, () => navigate('review'));
+                    break;
+                }
+                case 'review': {
+                    const chosen = offer;
+                    const preview = chosen?.setup ? buildLaunchSetup(chosen, profile.crewIds, draft) : null;
+                    if (!chosen || !preview) { navigate('mission'); break; }
+                    showShell(ui, page, 'Launch Summary', `${chosen.title} · last check before launch`, 'check', navigate);
+                    surfaceTick = showLaunchSummary(ui, preview, draft, launchProblem(preview), () => launch(chosen, false), () => navigate('cargo'));
                     break;
                 }
                 case 'settings':
-                    showShell(ui, page, 'Settings', 'Adjust motion and contrast for this profile.', 'settings', navigate);
+                    showShell(ui, page, 'Settings', 'Sound, vibration, motion and contrast.', 'settings', navigate);
                     showSettings(ui, profile, setting => { saveProfile({ ...profile, [setting]: !profile[setting] }); navigate('settings'); });
                     break;
                 case 'quit':
@@ -158,12 +192,14 @@ export const flightSystem = defineSystem(
                     surfaceTick = showMenu(ui, navigate, profile.reducedMotion);
             }
             tickPage = () => {
-                if (input.isKeyPressed('Escape') || input.isGamepadButtonPressed(GamepadButton.East)) {
+                // The page sees input first, so Escape can put back a held cargo item instead of leaving.
+                const usedEscape = surfaceTick?.(input) === true;
+                if (!usedEscape && (input.isKeyPressed('Escape') || input.isGamepadButtonPressed(GamepadButton.East))) {
                     if (page === 'cargo') navigate('mission');
+                    else if (page === 'review') navigate('cargo');
                     else if (page !== 'menu') navigate('menu');
                 }
                 ui.updateFocus(input);
-                surfaceTick?.(input);
             };
         }
 

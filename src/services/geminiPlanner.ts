@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
-import { CREW_ROLES } from '../contracts/gameContract';
+import {
+    GOAL_FLAGS,
+    type GoalFlag, CREW_ROLES } from '../contracts/gameContract';
 import type {
     CargoInventory,
     ConditionState,
@@ -117,7 +119,7 @@ export interface ProposedTaskSpec {
         resources?: Partial<ResourcePool>;
         radiationDelta?: number;
         moraleDelta?: number;
-        goalFlag?: 'wind_sample_collected' | 'ice_core_collected';
+        goalFlag?: GoalFlag;
     };
     recommendedRole: CrewRole;
     riskNote: string;
@@ -569,10 +571,8 @@ export async function generateTaskWithGemini(
 
         const rewardRaw = (t.rewardOnComplete as Record<string, unknown> | undefined) ?? {};
         const goalFlagRaw = rewardRaw.goalFlag;
-        const goalFlag =
-            goalFlagRaw === 'wind_sample_collected' || goalFlagRaw === 'ice_core_collected'
-                ? goalFlagRaw
-                : undefined;
+        // Accept any known goal; the loop only counts it when it matches this mission's goal.
+        const goalFlag = (GOAL_FLAGS as readonly unknown[]).includes(goalFlagRaw) ? goalFlagRaw as GoalFlag : undefined;
 
         const reqKindRaw = String(t.requirementKind ?? '');
         const requirementKind =
@@ -644,7 +644,8 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
             source: 'offline-fallback',
             replyText: 'A.R.I.E.S. [Local Sim]: Sensor calibration takes 1 Sol. Assign an Engineer for faster, cheaper work.',
             task: {
-                title: moon ? 'Prep Drill Sensor' : 'Prep Weather Sensor',
+                // Use the mission's own label (e.g. 'Prep Oxygen Maker'); fall back to the old Mars/Moon names.
+                title: ctx.goal.requirements.find((r) => r.kind === 'prep_sensor')?.label ?? (moon ? 'Prep Drill Sensor' : 'Prep Weather Sensor'),
                 description: `Calibrate field instruments for ${ctx.goal.coords}.`,
                 category: 'ENG',
                 durationSols: 1,
@@ -740,7 +741,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     if (/(food|crop|hydro|plant|farm|algae|grow|greenhouse)/.test(q)) {
         return {
             source: 'offline-fallback',
-            replyText: 'A.R.I.E.S. [Local Sim]: Cultivating fast-cycle hydroponic greens takes 2 Sols (+2 Prep Supplies progress). Kenji Sato boosts yield by +45%.',
+            replyText: 'A.R.I.E.S. [Local Sim]: Cultivating fast-cycle hydroponic greens takes 2 Sols (+2 Prep Supplies progress). Scott Kelly boosts yield by +45%.',
             task: {
                 title: 'Expand Hydroponic Crop Cycle',
                 description: 'Seed high-yield nutrient trays and increase grow-lamp photoperiod.',
@@ -763,7 +764,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     if (/(solar|power|energy|battery|clean|panel|generator)/.test(q)) {
         return {
             source: 'offline-fallback',
-            replyText: 'A.R.I.E.S. [Local Sim]: Solar array restoration and MPPT tuning completes in 1 Sol with low EVA drain. Elena Vance reduces tool & power draw.',
+            replyText: 'A.R.I.E.S. [Local Sim]: Solar array restoration and MPPT tuning completes in 1 Sol with low EVA drain. Kalpana Chawla reduces tool & power draw.',
             task: {
                 title: 'Solar Array Maintenance & Boost',
                 description: 'Brush Martian dust from arrays and rebalance inverter capacitors.',
@@ -832,7 +833,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     if (/(rad|radiation|shield|med|heal|sick|morale|rest|counsel|stress)/.test(q)) {
         return {
             source: 'offline-fallback',
-            replyText: 'A.R.I.E.S. [Local Sim]: Shield reinforcement & medical recovery spans 1 Sol with extra rations for crew recovery. Marcus Thorne (Medic) amplifies the healing effect.',
+            replyText: 'A.R.I.E.S. [Local Sim]: Shield reinforcement & medical recovery spans 1 Sol with extra rations for crew recovery. Bernard Harris (Medic) amplifies the healing effect.',
             task: {
                 title: 'Medical Recovery & Rad Shielding',
                 description: 'Line bunk bulkheads with water bags and run crew wellness triage.',

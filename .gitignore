@@ -12,3 +12,6 @@ art/*.meta
 .env.local
 .env.*.local
 !.env.example
+
+# Python bytecode from scripts/art
+__pycache__/

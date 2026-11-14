@@ -61,7 +61,10 @@ export interface CrewMember {
     name: string;
     role: CrewRole;
     trait: string;
+    /** What this real astronaut did, in plain words. Every fact comes from `source`. */
     bio: string;
+    /** Where the facts in `bio` come from (see docs/CREW.md for the full list). */
+    source?: { label: string; url: string };
     portraitPath: string;
     stamina: number;       // 0..100
     health: number;        // 0..100
@@ -106,6 +109,13 @@ export interface MissionRequirement {
     target: number;
 }
 
+/** Mission goals the survival loop can complete. A goal task wins the mission when its flag matches. */
+export const GOAL_FLAGS = [
+    'wind_sample_collected', 'ice_core_collected',
+    'oxygen_produced', 'crop_harvested', 'radiation_measured',
+] as const;
+export type GoalFlag = typeof GOAL_FLAGS[number];
+
 export interface MissionGoal {
     id: string;
     title: string;
@@ -113,7 +123,7 @@ export interface MissionGoal {
     coords: string;
     durationHours: number;
     deadlineSol: number;
-    requiredFlag: 'wind_sample_collected' | 'ice_core_collected';
+    requiredFlag: GoalFlag;
     requirements: MissionRequirement[];
     minimumReserves?: Partial<ResourcePool>;
     requiredEquipment?: Partial<Record<CargoItemId, number>>;
@@ -226,46 +236,47 @@ function upgradeBranch(branch: UpgradeBranch, specs: readonly [UpgradeSpec, Upgr
 
 export const SKILL_TREE_UPGRADES = [
     ...upgradeBranch('Infrastructure', [
-        { id: 'solar_mppt', label: 'Dust-Repel Solar Coating', summary: '+30% solar output and −15% daily power use.', effects: { solarOutputMult: 1.3, energyConsumptionMult: 0.85 } },
-        { id: 'efficient_inverters', label: 'Efficient Inverters', summary: '+15% solar output.', effects: { solarOutputMult: 1.15 } },
-        { id: 'power_balancing', label: 'Power Balancing', summary: '−10% daily power use.', effects: { energyConsumptionMult: 0.9 } },
-        { id: 'sun_tracking', label: 'Sun Tracking', summary: '+15% solar output.', effects: { solarOutputMult: 1.15 } },
-        { id: 'heat_recovery', label: 'Heat Recovery', summary: '−10% daily power use.', effects: { energyConsumptionMult: 0.9 } },
-        { id: 'habitat_microgrid', label: 'Habitat Microgrid', summary: '+10% solar output and −10% daily power use.', effects: { solarOutputMult: 1.1, energyConsumptionMult: 0.9 } },
+        { id: 'solar_mppt', label: 'Dust-Repel Solar Coating', summary: 'Makes 30% more solar power. Uses 15% less power each day.', effects: { solarOutputMult: 1.3, energyConsumptionMult: 0.85 } },
+        { id: 'efficient_inverters', label: 'Efficient Inverters', summary: 'Makes 15% more solar power.', effects: { solarOutputMult: 1.15 } },
+        { id: 'power_balancing', label: 'Power Balancing', summary: 'Uses 10% less power each day.', effects: { energyConsumptionMult: 0.9 } },
+        { id: 'sun_tracking', label: 'Sun Tracking', summary: 'Makes 15% more solar power.', effects: { solarOutputMult: 1.15 } },
+        { id: 'heat_recovery', label: 'Heat Recovery', summary: 'Uses 10% less power each day.', effects: { energyConsumptionMult: 0.9 } },
+        { id: 'habitat_microgrid', label: 'Habitat Microgrid', summary: 'Makes 10% more solar power. Uses 10% less power each day.', effects: { solarOutputMult: 1.1, energyConsumptionMult: 0.9 } },
     ]),
     ...upgradeBranch('Survival', [
-        { id: 'closed_o2', label: 'Closed-Loop Scrubbers', summary: '−25% daily oxygen use.', effects: { oxygenConsumptionMult: 0.75 } },
-        { id: 'hydro_rationing', label: 'Algae Nutrient Loop', summary: '−25% daily food use and +20% Bio yield.', effects: { foodConsumptionMult: 0.75, hydroponicsYieldMult: 1.2 } },
-        { id: 'greywater_reclaimer', label: 'Greywater Reclaimer', summary: '−15% daily water use.', effects: { waterConsumptionMult: 0.85 } },
-        { id: 'grow_trays', label: 'Grow Trays', summary: '+15% Bio yield.', effects: { hydroponicsYieldMult: 1.15 } },
-        { id: 'condenser', label: 'Condenser', summary: '−15% daily water use.', effects: { waterConsumptionMult: 0.85 } },
-        { id: 'redundant_scrubbers', label: 'Redundant Scrubbers', summary: '−15% daily oxygen use and −10% daily water use.', effects: { oxygenConsumptionMult: 0.85, waterConsumptionMult: 0.9 } },
+        { id: 'closed_o2', label: 'Closed-Loop Scrubbers', summary: 'Uses 25% less oxygen each day.', effects: { oxygenConsumptionMult: 0.75 } },
+        { id: 'hydro_rationing', label: 'Algae Nutrient Loop', summary: 'Uses 25% less food each day. Plant tasks grow 20% more.', effects: { foodConsumptionMult: 0.75, hydroponicsYieldMult: 1.2 } },
+        { id: 'greywater_reclaimer', label: 'Greywater Reclaimer', summary: 'Uses 15% less water each day.', effects: { waterConsumptionMult: 0.85 } },
+        { id: 'grow_trays', label: 'Grow Trays', summary: 'Plant tasks grow 15% more.', effects: { hydroponicsYieldMult: 1.15 } },
+        { id: 'condenser', label: 'Condenser', summary: 'Uses 15% less water each day.', effects: { waterConsumptionMult: 0.85 } },
+        { id: 'redundant_scrubbers', label: 'Redundant Scrubbers', summary: 'Uses 15% less oxygen and 10% less water each day.', effects: { oxygenConsumptionMult: 0.85, waterConsumptionMult: 0.9 } },
     ]),
     ...upgradeBranch('Operations', [
-        { id: 'ai_logistics', label: 'A.R.I.E.S. Logistics Co-Pilot', summary: '−20% AI task cost and +20% rover yield.', effects: { aiCostDiscountMult: 0.8, roverYieldMult: 1.2 } },
-        { id: 'survey_routes', label: 'Survey Routes', summary: '+15% rover yield.', effects: { roverYieldMult: 1.15 } },
-        { id: 'planning_cache', label: 'Planning Cache', summary: '−10% AI task cost.', effects: { aiCostDiscountMult: 0.9 } },
-        { id: 'rover_racks', label: 'Rover Racks', summary: '+15% rover yield.', effects: { roverYieldMult: 1.15 } },
-        { id: 'dispatch_automation', label: 'Dispatch Automation', summary: '+0.1 progress per staffed task each Sol.', effects: { taskSpeedBonus: 0.1 } },
-        { id: 'autonomous_logistics', label: 'Autonomous Logistics', summary: '+10% rover yield and −10% AI task cost.', effects: { roverYieldMult: 1.1, aiCostDiscountMult: 0.9 } },
+        { id: 'ai_logistics', label: 'A.R.I.E.S. Logistics Co-Pilot', summary: 'A.R.I.E.S. plans cost 20% less. Rover trips bring back 20% more.', effects: { aiCostDiscountMult: 0.8, roverYieldMult: 1.2 } },
+        { id: 'survey_routes', label: 'Survey Routes', summary: 'Rover trips bring back 15% more.', effects: { roverYieldMult: 1.15 } },
+        { id: 'planning_cache', label: 'Planning Cache', summary: 'A.R.I.E.S. plans cost 10% less.', effects: { aiCostDiscountMult: 0.9 } },
+        { id: 'rover_racks', label: 'Rover Racks', summary: 'Rover trips bring back 15% more.', effects: { roverYieldMult: 1.15 } },
+        { id: 'dispatch_automation', label: 'Dispatch Automation', summary: 'Crewed tasks go 10% faster.', effects: { taskSpeedBonus: 0.1 } },
+        { id: 'autonomous_logistics', label: 'Autonomous Logistics', summary: 'Rover trips bring back 10% more. A.R.I.E.S. plans cost 10% less.', effects: { roverYieldMult: 1.1, aiCostDiscountMult: 0.9 } },
     ]),
     ...upgradeBranch('Crew', [
-        { id: 'rad_hull', label: 'Polyethylene Rad Shielding', summary: 'Absorbs 35% of incoming radiation spikes.', effects: { radiationShielding: 0.35 } },
-        { id: 'habitation_quarters', label: 'Habitation Quarters', summary: '−10% morale loss.', effects: { moraleDecayMult: 0.9 } },
-        { id: 'dosimeter_network', label: 'Dosimeter Network', summary: '+10 percentage points of radiation shielding.', effects: { radiationShielding: 0.1 } },
-        { id: 'shift_scheduling', label: 'Shift Scheduling', summary: '+0.2 progress per staffed task each Sol.', effects: { taskSpeedBonus: 0.2 } },
-        { id: 'storm_shelter', label: 'Storm Shelter', summary: '+15 percentage points of radiation shielding.', effects: { radiationShielding: 0.15 } },
-        { id: 'crew_support', label: 'Crew Support Systems', summary: '−15% morale loss and +0.2 progress per staffed task each Sol.', effects: { moraleDecayMult: 0.85, taskSpeedBonus: 0.2 } },
+        { id: 'rad_hull', label: 'Polyethylene Rad Shielding', summary: 'Blocks 35% of radiation spikes.', effects: { radiationShielding: 0.35 } },
+        { id: 'habitation_quarters', label: 'Habitation Quarters', summary: 'Crew spirit drops 10% slower.', effects: { moraleDecayMult: 0.9 } },
+        { id: 'dosimeter_network', label: 'Dosimeter Network', summary: 'Blocks 10% more radiation.', effects: { radiationShielding: 0.1 } },
+        { id: 'shift_scheduling', label: 'Shift Scheduling', summary: 'Crewed tasks go 20% faster.', effects: { taskSpeedBonus: 0.2 } },
+        { id: 'storm_shelter', label: 'Storm Shelter', summary: 'Blocks 15% more radiation.', effects: { radiationShielding: 0.15 } },
+        { id: 'crew_support', label: 'Crew Support Systems', summary: 'Crew spirit drops 15% slower. Crewed tasks go 20% faster.', effects: { moraleDecayMult: 0.85, taskSpeedBonus: 0.2 } },
     ]),
 ];
 
 export const DEFAULT_CREW: CrewMember[] = [
     {
         id: 'crew_engineer',
-        name: 'Elena Vance',
+        name: 'Kalpana Chawla',
         role: 'engineer',
-        trait: 'Methodical Tinkerer',
-        bio: 'Former orbital station systems lead. Keeps scrubbers, solar arrays, and sensors alive with duct tape and firmware patches.',
+        trait: 'Aerospace Engineer',
+        bio: 'Born in Karnal, India. Aerospace engineer who studied air flow around aircraft at NASA, then ran the robot arm on the Space Shuttle in 1997.',
+        source: { label: 'NASA biography: Kalpana Chawla', url: 'https://www.nasa.gov/wp-content/uploads/2020/09/chawla_kalpana.pdf' },
         portraitPath: 'assets/textures/crew_engineer.png',
         stamina: 92,
         health: 96,
@@ -283,10 +294,11 @@ export const DEFAULT_CREW: CrewMember[] = [
     },
     {
         id: 'crew_botanist',
-        name: 'Kenji Sato',
+        name: 'Scott Kelly',
         role: 'botanist',
-        trait: 'Patient Cultivator',
-        bio: 'Hydroponics specialist who turns Martian regolith and recycled greywater into high-calorie greens and fresh O2.',
+        trait: 'A Year in Space',
+        bio: 'Spent 340 days in a row on the Space Station. He nursed sick zinnias in its Veggie garden back to health until they bloomed in 2016.',
+        source: { label: 'NASA: Year in Space; zinnias in Veggie', url: 'https://www.nasa.gov/image-article/first-flower-grown-space-stations-veggie-facility/' },
         portraitPath: 'assets/textures/crew_botanist.png',
         stamina: 88,
         health: 95,
@@ -304,10 +316,11 @@ export const DEFAULT_CREW: CrewMember[] = [
     },
     {
         id: 'crew_pilot',
-        name: 'Maya Sterling',
+        name: 'Eileen Collins',
         role: 'pilot',
-        trait: 'Fearless Pathfinder',
-        bio: 'Reconnaissance rover pilot trained in whiteout dust navigation and atmospheric probe deployment.',
+        trait: 'Shuttle Pilot & Commander',
+        bio: 'Air Force test pilot. First woman to pilot a Space Shuttle (1995) and the first to command one (1999). Flew 4 Shuttle missions.',
+        source: { label: 'NASA: Former Astronaut Eileen Collins', url: 'https://www.nasa.gov/former-astronaut-eileen-collins' },
         portraitPath: 'assets/textures/crew_pilot.png',
         stamina: 94,
         health: 92,
@@ -325,10 +338,11 @@ export const DEFAULT_CREW: CrewMember[] = [
     },
     {
         id: 'crew_medic',
-        name: 'Marcus Thorne',
+        name: 'Bernard Harris Jr.',
         role: 'medic',
-        trait: 'Steady Anchor',
-        bio: 'Aerospace flight surgeon and crew counselor. Guards radiation thresholds and keeps spirits steady under stress.',
+        trait: 'Doctor & Flight Surgeon',
+        bio: 'Doctor and NASA flight surgeon. On the STS-63 Shuttle flight in 1995 he became the first African American to walk in space.',
+        source: { label: 'NASA biography: Bernard A. Harris Jr.', url: 'https://www.nasa.gov/wp-content/uploads/2016/01/harris_bernard.pdf' },
         portraitPath: 'assets/textures/crew_medic.png',
         stamina: 90,
         health: 98,
@@ -393,8 +407,9 @@ export const DEFAULT_MARS_SETUP: MissionSetupInput = {
 export const AVAILABLE_CREW: CrewMember[] = [
     ...DEFAULT_CREW,
     {
-        id: 'crew_scientist', name: 'Hana Ishida', role: 'scientist', trait: 'Field Researcher',
-        bio: 'Planetary scientist who turns rough field samples into reliable measurements and useful supplies.',
+        id: 'crew_scientist', name: 'Chiaki Mukai', role: 'scientist', trait: 'Surgeon in Space',
+        bio: 'Surgeon who became the first Japanese woman in space in 1994. On two Shuttle flights she ran life science and space medicine experiments.',
+        source: { label: 'JAXA: Chiaki Mukai', url: 'https://humans-in-space.jaxa.jp/en/astronaut/mukai-chiaki/' },
         portraitPath: 'assets/textures/crew_scientist.png', stamina: 89, health: 94, morale: 86,
         stageAnchor: { x: 0.63, y: 0.55 },
         perk: {
@@ -404,8 +419,9 @@ export const AVAILABLE_CREW: CrewMember[] = [
         },
     },
     {
-        id: 'crew_captain', name: 'Alex Keller', role: 'captain', trait: 'Expedition Lead',
-        bio: 'Flight commander who keeps field expeditions coordinated when schedules and conditions turn rough.',
+        id: 'crew_captain', name: 'Neil Armstrong', role: 'captain', trait: 'Apollo 11 Commander',
+        bio: 'Test pilot of the X-15 rocket plane. Commanded Apollo 11 and was the first person to walk on the Moon, on July 20, 1969.',
+        source: { label: 'NASA: Neil A. Armstrong', url: 'https://www.nasa.gov/people/neil-a-armstrong/' },
         portraitPath: 'assets/textures/crew_captain.png', stamina: 91, health: 95, morale: 89,
         stageAnchor: { x: 0.84, y: 0.63 },
         perk: {
