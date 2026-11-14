@@ -76,8 +76,9 @@ def mix(*tracks, offsets=None):
 
 def save(name, samples):
     os.makedirs(OUT, exist_ok=True)
+    # Normalise every sound to the same peak, so in-game volumes alone set how loud each one is.
     peak = max(1e-9, max(abs(s) for s in samples))
-    scale = min(1.0, 0.95 / peak)
+    scale = 0.9 / peak
     path = os.path.join(OUT, f'{name}.wav')
     with wave.open(path, 'wb') as w:
         w.setnchannels(1)

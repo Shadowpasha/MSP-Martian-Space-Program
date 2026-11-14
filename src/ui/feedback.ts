@@ -16,9 +16,14 @@ export type Sfx = 'tick' | 'blip' | 'chime' | 'success' | 'buzz' | 'thunk' | 'wh
     | 'slam' | 'count' | 'go';
 
 const PATH = (name: string) => `assets/audio/ui/${name}.wav`;
+/**
+ * Per-sound volume, set so each one sits at the same loudness as the recorded effects in
+ * src/audio/soundManager.ts (measured as RMS x volume; the files are all normalised to the same
+ * peak by sfx.py). Big moments a little louder, the hover tick much quieter.
+ */
 const VOLUME: Record<Sfx, number> = {
-    tick: 0.25, blip: 0.5, chime: 0.6, success: 0.6, buzz: 0.5, thunk: 0.7, whoosh: 0.4, beep: 0.5, sparkle: 0.55, launch: 0.8,
-    slam: 0.8, count: 0.55, go: 0.6,
+    tick: 0.08, blip: 0.2, chime: 0.5, success: 0.76, buzz: 0.19, thunk: 0.49, whoosh: 0.41, beep: 0.22,
+    sparkle: 0.48, launch: 0.56, slam: 0.9, count: 0.22, go: 0.74,
 };
 /** Minimum gap between two plays of the same sound, so fast hovering does not chatter. */
 const SPACING_MS: Partial<Record<Sfx, number>> = { tick: 45, blip: 30, buzz: 150, thunk: 80 };
@@ -42,7 +47,14 @@ export function setFeedbackPrefs(prefs: { sound: boolean; vibration: boolean }):
     vibrationOn = prefs.vibration;
 }
 
+/** Counts every sound started, so a caller can tell whether an action made its own sound. */
+let started = 0;
+export function soundsStarted(): number {
+    return started;
+}
+
 export function play(name: Sfx, pitch = 1): void {
+    started++;
     if (!soundOn || !audio) return;
     const now = Date.now();
     const gap = SPACING_MS[name];

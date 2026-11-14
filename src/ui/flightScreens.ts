@@ -11,7 +11,6 @@ import { play, vibrate } from './feedback';
 import { burst } from './fx';
 import { easeOutBack, makeMotion, type Motion } from './motion';
 import { makeAbsBox } from './theme';
-import { playSfx } from '../audio/soundManager';
 
 export type Page = 'menu' | 'crew' | 'upgrade' | 'settings' | 'mission' | 'cargo' | 'review' | 'quit' | 'exit' | 'run';
 type Navigate = (page: Page) => void;
@@ -812,7 +811,7 @@ export function showSettings(
                     const now = Date.now();
                     if (now - lastSfxSample > 140) {
                         lastSfxSample = now;
-                        playSfx('click');
+                        play('blip');
                     }
                 }
             },

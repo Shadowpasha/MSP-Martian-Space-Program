@@ -3,9 +3,8 @@ import {
     UIDisplay, UINode, UIPointerEvents, UIPositionType, UIVisual, UIVisualFit, UIVisualType, uiNodeWorldBox,
     type AssetsData, type Color, type Entity, type FocusManagerState, type InputState, type UIEventQueue, type World,
 } from 'esengine';
-import { play, vibrate } from './feedback';
+import { play, soundsStarted, vibrate } from './feedback';
 import { makeAbsBox, setNodeDisplayed, setText, setTextColor, setVisualColor } from './theme';
-import { playSfx } from '../audio/soundManager';
 
 export type Bounds = readonly [x: number, y: number, width: number, height: number];
 
@@ -233,9 +232,12 @@ export function makeFlightUi(
             fadeDuration: options.reducedMotion ? 0 : 0.1,
             onClick: () => {
                 if (!live()) return;
-                // One click sound per press. `still` controls (the cargo grid) make their own sound.
-                if (!opts.still) playSfx(tone === 'primary' || tone === 'hero' ? 'confirm' : 'click');
+                // One sound per press: if the action plays its own (the popup's whoosh, a chime, the
+                // launch rumble), that is the sound; otherwise the menus' blip. `still` controls (the
+                // cargo grid) always make their own. The survival run uses soundManager's click/confirm.
+                const before = soundsStarted();
                 onClick();
+                if (!opts.still && soundsStarted() === before) play('blip');
             },
         });
         const surface = box(handle.entity, [2, 2, w - 4, h - 4],

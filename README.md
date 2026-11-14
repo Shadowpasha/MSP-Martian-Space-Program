@@ -33,3 +33,4 @@ The four mission quick actions use the built-in planner. The complete game runs 
 - `mars-outpost:last-result` holds the latest `MainLoopResult`, including the expedition outcome and earned research.
 
 See [the art sources](art/README.md) for the station, portraits, icons, and bundled font licenses.
+See [CREDITS.md](CREDITS.md) for every asset, font, fact source and contributor.

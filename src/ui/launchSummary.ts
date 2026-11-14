@@ -5,6 +5,7 @@ import type { MissionSetupInput } from '../contracts/gameContract';
 import { CARGO_ITEMS, CARGO_COLUMNS, CARGO_ROWS, occupiedCells, packedInventory, type CargoPlacement } from '../data/cargo';
 import { supplyLasts } from './cargoPacker';
 import type { FlightUi } from './flightUi';
+import { stopMusic } from '../audio/soundManager';
 import { play, vibrate } from './feedback';
 import type { InputState } from 'esengine';
 import { playLaunchIntro, type LaunchIntro } from './launchIntro';
@@ -94,6 +95,9 @@ export function showLaunchSummary(
     const go = ui.button(side, [168, 528, 232, 48], () => {
         if (launching) return;
         launching = true;
+        // The menu music fades out: the rocket intro has only its own sounds, and the survival
+        // run starts its game music when it opens.
+        stopMusic();
         play('launch');
         vibrate('long');
         back.setDisabled(true);
