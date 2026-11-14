@@ -14,6 +14,12 @@ import type {
     SkillTreeModifiers,
     TaskCategory,
 } from '../contracts/gameContract';
+import {
+    pickDailyEvent,
+    type DailyEventDef,
+    type EventChoice,
+    type MissionProgressDelta,
+} from '../data/events';
 
 /**
  * Optional in-code override for local development. The packaged playtest leaves this empty.
@@ -244,6 +250,238 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
         ]);
     } finally {
         if (timer !== undefined) clearTimeout(timer);
+    }
+}
+
+export interface DailyEventContextSnapshot {
+    planet: PlanetId;
+    sol: number;
+    targetSol: number;
+    resources: ResourcePool;
+    conditions: ConditionState;
+    cargo: CargoInventory;
+    crew: CrewMember[];
+    goal: MissionGoal;
+    usedEventIds: readonly string[];
+    usedEventTitles: readonly string[];
+}
+
+export interface DailyEventGenerationResult {
+    source: 'gemini' | 'fallback';
+    event: DailyEventDef;
+}
+
+const ALLOWED_EVENT_CARGO: ReadonlyArray<Exclude<keyof CargoInventory, 'windSampler'>> = [
+    'repairKits',
+    'medkits',
+    'batteryPacks',
+    'seedPods',
+    'extraRations',
+    'waterCanisters',
+    'oxygenTanks',
+];
+
+function sanitizeSignedDelta(
+    raw: Partial<Record<keyof ResourcePool, unknown>> | undefined,
+): Partial<ResourcePool> | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const out: Partial<ResourcePool> = {};
+    const keys: (keyof ResourcePool)[] = ['energy', 'food', 'water', 'oxygen', 'res'];
+    for (const k of keys) {
+        const v = Number(raw[k]);
+        if (!Number.isFinite(v) || Math.round(v) === 0) continue;
+        out[k] = clamp(v, -12, 18);
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sanitizeRequirementDelta(
+    raw: Partial<Record<keyof MissionProgressDelta, unknown>> | undefined,
+): MissionProgressDelta | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const out: MissionProgressDelta = {};
+    const keys: (keyof MissionProgressDelta)[] = ['prep_sensor', 'prep_rover', 'prep_supplies'];
+    for (const k of keys) {
+        const v = Number(raw[k]);
+        if (!Number.isFinite(v) || Math.round(v) === 0) continue;
+        out[k] = k === 'prep_supplies' ? clamp(v, -2, 2) : clamp(v, -1, 1);
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function buildChoiceSummary(
+    res: Partial<ResourcePool> | undefined,
+    rad: number,
+    mor: number,
+    req: MissionProgressDelta | undefined,
+): string {
+    const parts: string[] = [];
+    if (req?.prep_sensor) parts.push(`${req.prep_sensor > 0 ? '+' : ''}${req.prep_sensor} Prep Sensor`);
+    if (req?.prep_rover) parts.push(`${req.prep_rover > 0 ? '+' : ''}${req.prep_rover} Prep Rover`);
+    if (req?.prep_supplies) parts.push(`${req.prep_supplies > 0 ? '+' : ''}${req.prep_supplies} Prep Supplies`);
+    if (res?.energy) parts.push(`${res.energy > 0 ? '+' : ''}${res.energy} Power`);
+    if (res?.food) parts.push(`${res.food > 0 ? '+' : ''}${res.food} Food`);
+    if (res?.water) parts.push(`${res.water > 0 ? '+' : ''}${res.water} Water`);
+    if (res?.oxygen) parts.push(`${res.oxygen > 0 ? '+' : ''}${res.oxygen} O2`);
+    if (res?.res) parts.push(`${res.res > 0 ? '+' : ''}${res.res} Res`);
+    if (rad) parts.push(`${rad > 0 ? '+' : ''}${rad} Radiation`);
+    if (mor) parts.push(`${mor > 0 ? '+' : ''}${mor} Morale`);
+    return parts.length > 0 ? parts.join(', ') : 'Safe check';
+}
+
+export function parseDailyEventJson(
+    rawText: string,
+    sol: number,
+    aliveRoles: ReadonlySet<CrewRole>,
+): DailyEventDef | null {
+    const parsed = JSON.parse(extractJsonPayload(rawText)) as Record<string, unknown>;
+    const rawChoices = Array.isArray(parsed.choices) ? parsed.choices : [];
+    const choices: EventChoice[] = [];
+
+    for (let i = 0; i < Math.min(3, rawChoices.length); i++) {
+        const rc = rawChoices[i] as Record<string, unknown> | undefined;
+        if (!rc || typeof rc !== 'object') continue;
+        const label = String(rc.label ?? '').trim().slice(0, 44);
+        const outcomeText = String(rc.outcomeText ?? '').trim().slice(0, 120);
+        if (!label || !outcomeText) continue;
+
+        const reqCargoRaw = String(rc.requiresCargo ?? '').trim() as Exclude<keyof CargoInventory, 'windSampler'>;
+        const requiresCargo = ALLOWED_EVENT_CARGO.includes(reqCargoRaw) ? reqCargoRaw : undefined;
+        const reqRoleRaw = String(rc.requiresRole ?? '').trim().toLowerCase() as CrewRole;
+        const requiresRole = aliveRoles.has(reqRoleRaw) ? reqRoleRaw : undefined;
+
+        const resourceDelta = sanitizeSignedDelta(rc.resourceDelta as Partial<Record<keyof ResourcePool, unknown>>);
+        const requirementDelta = sanitizeRequirementDelta(
+            rc.requirementDelta as Partial<Record<keyof MissionProgressDelta, unknown>>,
+        );
+        const radRaw = Number(rc.radiationDelta ?? 0);
+        const radiationDelta = Number.isFinite(radRaw) && Math.round(radRaw) !== 0 ? clamp(radRaw, -12, 16) : undefined;
+        const morRaw = Number(rc.moraleDelta ?? 0);
+        const moraleDelta = Number.isFinite(morRaw) && Math.round(morRaw) !== 0 ? clamp(morRaw, -10, 14) : undefined;
+        const summaryRaw = String(rc.summary ?? '').trim().slice(0, 56);
+
+        choices.push({
+            id: `ai_ev_${sol}_c${i + 1}`,
+            label,
+            summary: summaryRaw || buildChoiceSummary(resourceDelta, radiationDelta ?? 0, moraleDelta ?? 0, requirementDelta),
+            requiresCargo,
+            requiresRole,
+            consumesCargo: requiresCargo ? { [requiresCargo]: 1 } : undefined,
+            resourceDelta,
+            radiationDelta,
+            moraleDelta,
+            requirementDelta,
+            outcomeText,
+        });
+    }
+
+    if (choices.length < 2) return null;
+
+    // Guarantee at least one fallback choice with no cargo or crew prerequisite so kids never get softlocked.
+    if (choices.every((c) => Boolean(c.requiresCargo || c.requiresRole))) {
+        const last = choices[choices.length - 1]!;
+        last.requiresCargo = undefined;
+        last.consumesCargo = undefined;
+        last.requiresRole = undefined;
+    }
+
+    const title = String(parsed.title ?? '').trim().slice(0, 36);
+    const prompt = String(parsed.prompt ?? '').trim().slice(0, 160);
+    if (!title || !prompt) return null;
+
+    const badgeRaw = String(parsed.badge ?? 'MARS ALERT').trim().toUpperCase().slice(0, 14);
+    const factRaw = String(parsed.scienceFact ?? '').trim().slice(0, 175);
+    const scienceFact = factRaw
+        ? factRaw.startsWith('Real NASA Fact:')
+            ? factRaw
+            : `Real NASA Fact: ${factRaw}`
+        : 'Real NASA Fact: Real Mars missions test sensors daily because Martian weather, dust, and radiation shift rapidly.';
+
+    return {
+        id: `ai_event_sol_${sol}_${Date.now().toString(36).slice(-4)}`,
+        title,
+        prompt,
+        badge: badgeRaw || 'MARS ALERT',
+        scienceFact,
+        source: 'gemini',
+        choices,
+    };
+}
+
+function buildDailyEventPrompt(ctx: DailyEventContextSnapshot): string {
+    const aliveCrew = ctx.crew.filter((c) => c.health > 0);
+    const cargoSummary = ALLOWED_EVENT_CARGO.map((k) => `${k}=${ctx.cargo[k]}`).join(', ');
+    const reqSummary = ctx.goal.requirements
+        .map((r) => `${r.kind}: ${r.current}/${r.target} (${r.label})`)
+        .join('; ');
+    const recentTitles = ctx.usedEventTitles.slice(-8).join(' | ') || 'None';
+    return [
+        'You are the Event Director for a fun kids (ages 7-12) NASA Mars survival game.',
+        'Invent ONE original, creative morning event inspired by real challenges NASA faces on Mars (or Moon if planet is MOON).',
+        'Real NASA Mars ideas: electrostatic clinging dust on airlocks/panels, toxic perchlorate salts in regolith soil, -80C frozen rover wheel joints, MOXIE-style CO2 oxygen maker filter clogs, solar conjunction blocking Earth radio, dust devils damaging outside sensors, radiation bursts without a magnetic field, frost veins under red dirt, meteorite pressure leaks.',
+        `Planet: ${ctx.planet.toUpperCase()} | Sol ${ctx.sol}/${ctx.targetSol} | Weather: ${ctx.conditions.weather} (${ctx.conditions.temperatureC}C) | Rad: ${ctx.conditions.radiation} mSv | Morale: ${ctx.conditions.morale}%`,
+        `Resources: Energy=${Math.round(ctx.resources.energy)}, Food=${Math.round(ctx.resources.food)}, Water=${Math.round(ctx.resources.water)}, O2=${Math.round(ctx.resources.oxygen)}%, Res=${Math.round(ctx.resources.res)}`,
+        `Mission Progress: ${reqSummary}`,
+        `Crew alive: ${aliveCrew.map((c) => `${c.name.split(' ')[0]} (${c.role})`).join(', ')}`,
+        `Cargo available: ${cargoSummary}`,
+        `Do NOT repeat these titles: ${recentTitles}`,
+        'Rules:',
+        '- Keep all text super fun, short, and easy for a 7-12 year old!',
+        '- title: 2-4 catchy words (max 32 chars). badge: 1-2 uppercase words (max 12 chars).',
+        '- prompt: 1-2 short sentences (max 140 chars) explaining what just happened this morning.',
+        '- scienceFact: Starts with "Real NASA Fact: " and teaches 1 cool true Mars/space science fact (max 155 chars).',
+        '- If Mission Progress shows any prepped step (> 0, like prep_sensor 1/1 or prep_rover 1/1), you MAY threaten to break/set it back with requirementDelta (e.g. { "prep_sensor": -1 } on the skip/unsafe choice while crew perk or repair kit saves it or adds +1)! Smart choices can also give +1 progress.',
+        `- Provide 2 or 3 choices. Choice 1 can optionally reward an alive crew role (requiresRole: ${CREW_ROLES.join('|')}) or cargo item (requiresCargo: ${ALLOWED_EVENT_CARGO.join('|')}). The last choice MUST have NO requiresRole and NO requiresCargo.`,
+        '- Keep resourceDelta fields between -8 and +15, radiationDelta -10..+14, moraleDelta -8..+12, requirementDelta fields -1..+1. Never kill the crew.',
+        'Return raw JSON only: { "title", "badge", "prompt", "scienceFact", "choices": [{ "label", "summary", "requiresCargo?", "requiresRole?", "resourceDelta": { "energy?", "food?", "water?", "oxygen?", "res?" }, "radiationDelta?", "moraleDelta?", "requirementDelta": { "prep_sensor?", "prep_rover?", "prep_supplies?" }, "outcomeText" }] }.',
+    ].join('\n');
+}
+
+export async function generateDailyEventWithGemini(
+    ctx: DailyEventContextSnapshot,
+    config: GeminiConfig = getActiveGeminiConfig(),
+): Promise<DailyEventGenerationResult> {
+    const fallbackEvent = () =>
+        pickDailyEvent(ctx.sol, ctx.conditions.weather, new Set(ctx.usedEventIds), ctx.goal.completed);
+
+    const trimmedKey = await resolveGeminiApiKey(config.apiKey);
+    if (!trimmedKey && !config.endpointOverride) {
+        return { source: 'fallback', event: fallbackEvent() };
+    }
+
+    const model = config.model.trim() || DEFAULT_GEMINI_MODEL;
+    const aliveRoles = new Set<CrewRole>(ctx.crew.filter((c) => c.health > 0).map((c) => c.role));
+
+    try {
+        const ai = new GoogleGenAI({ apiKey: trimmedKey, apiVersion: 'v1beta' });
+        const interaction = await withTimeout(
+            ai.interactions.create(
+                {
+                    model,
+                    system_instruction: `${buildDailyEventPrompt(ctx)}\nRespond with raw JSON only.`,
+                    input: `Generate Sol ${ctx.sol} Mars morning event during ${ctx.conditions.weather}.`,
+                    generation_config: {
+                        temperature: 0.85,
+                    },
+                },
+                {
+                    retries: { strategy: 'none' },
+                    timeout_ms: GEMINI_TIMEOUT_MS,
+                },
+            ),
+            GEMINI_TIMEOUT_MS + 1000,
+            `Gemini Event (${model})`,
+        );
+
+        const rawText = readInteractionText(interaction);
+        if (!rawText) return { source: 'fallback', event: fallbackEvent() };
+
+        const parsed = parseDailyEventJson(rawText, ctx.sol, aliveRoles);
+        if (!parsed) return { source: 'fallback', event: fallbackEvent() };
+
+        return { source: 'gemini', event: parsed };
+    } catch {
+        return { source: 'fallback', event: fallbackEvent() };
     }
 }
 

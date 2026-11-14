@@ -6,7 +6,9 @@ import {
     MOON_TEST_SETUP,
 } from '../src/contracts/gameContract';
 import {
+    advanceMissionRequirement,
     advanceSol,
+    applyGeneratedDailyEvent,
     applySkillTreePresets,
     assignCrewToTask,
     computeTaskEfficiency,
@@ -16,7 +18,7 @@ import {
     resolveDailyEventChoice,
     setRationPolicy,
 } from '../src/simulation/solEngine';
-import { evaluatePlanOffline } from '../src/services/geminiPlanner';
+import { evaluatePlanOffline, parseDailyEventJson } from '../src/services/geminiPlanner';
 
 test('Sol 1 starts with empty task queue and daily event decisions never create tasks', () => {
     const state = createInitialGameState(DEFAULT_MARS_SETUP);
@@ -238,4 +240,92 @@ test('Mission requirements gate goal completion; completing all requirements + g
     assert.equal(winState.result?.solReached, 3);
     assert.equal(winState.result?.goalCompleted, true);
     assert.ok((winState.result?.researchPointsEarned ?? 0) > 0);
+});
+
+test('Resolving daily events records science fact + resource deltas cleanly', () => {
+    const state = createInitialGameState(DEFAULT_MARS_SETUP);
+    const firstEv = state.currentEvent!;
+    assert.ok(firstEv.scienceFact.startsWith('Real NASA Fact:'));
+
+    const res = resolveDailyEventChoice(state, firstEv.choices[0]!.id);
+    assert.equal(res.ok, true);
+    assert.equal(state.lastEventScienceFact, firstEv.scienceFact);
+    assert.ok(state.lastEventDeltas.length > 0);
+});
+
+test('Gemini daily event parser sanitizes deltas, adds NASA fact prefix, and prevents softlocks', () => {
+    const rawJson = JSON.stringify({
+        title: 'Salty Soil Surprise!',
+        badge: 'MARS LAB',
+        prompt: 'Our greenhouse soil sensor found salty perchlorate dust inside Tray B!',
+        scienceFact: 'Martian dirt contains perchlorate salts that NASA must wash out before growing crops.',
+        choices: [
+            {
+                label: 'Rinse With Botanist',
+                requiresRole: 'botanist',
+                resourceDelta: { food: 99, water: -3 },
+                moraleDelta: 4,
+                outcomeText: 'Kenji washed the soil clean and sprouts bounced back!',
+            },
+            {
+                label: 'Use Emergency Seed Pod',
+                requiresCargo: 'seedPods',
+                resourceDelta: { food: 10 },
+                outcomeText: 'Fresh seedlings replaced the salty tray!',
+            },
+        ],
+    });
+
+    const parsed = parseDailyEventJson(rawJson, 4, new Set(['engineer', 'botanist', 'pilot', 'medic']));
+    assert.ok(parsed !== null);
+    assert.equal(parsed.source, 'gemini');
+    assert.ok(parsed.scienceFact.startsWith('Real NASA Fact:'));
+    // Clamped food delta <= 18
+    assert.equal(parsed.choices[0]!.resourceDelta?.food, 18);
+    // Final choice cleared prerequisites so player cannot get softlocked
+    assert.equal(parsed.choices[1]!.requiresCargo, undefined);
+    assert.equal(parsed.choices[1]!.requiresRole, undefined);
+
+    const state = createInitialGameState(DEFAULT_MARS_SETUP);
+    applyGeneratedDailyEvent(state, parsed);
+    assert.equal(state.currentEvent?.title, 'Salty Soil Surprise!');
+    assert.ok(state.usedEventTitles.includes('Salty Soil Surprise!'));
+});
+
+test('Daily events can damage or advance mission requirements without going below zero', () => {
+    const state = createInitialGameState(DEFAULT_MARS_SETUP);
+    advanceMissionRequirement(state, 'prep_sensor', 1);
+    assert.equal(state.goal.requirements.find((r) => r.kind === 'prep_sensor')?.current, 1);
+
+    const parsed = parseDailyEventJson(
+        JSON.stringify({
+            title: 'Sandstorm Whipped Mast!',
+            badge: 'STORM HIT',
+            prompt: 'Grit slammed our prepped weather mast!',
+            scienceFact: 'Mars dust storms pack up to 100 km/h grit against weather sensors.',
+            choices: [
+                {
+                    label: 'Brace Mast',
+                    requiresRole: 'engineer',
+                    requirementDelta: { prep_sensor: 1 },
+                    outcomeText: 'Kept the weather sensor calibrated!',
+                },
+                {
+                    label: 'Stay Inside',
+                    requirementDelta: { prep_sensor: -1 },
+                    moraleDelta: -2,
+                    outcomeText: 'The weather sensor snapped offline in the storm.',
+                },
+            ],
+        }),
+        5,
+        new Set(['engineer', 'botanist', 'pilot', 'medic']),
+    );
+    assert.ok(parsed !== null);
+    applyGeneratedDailyEvent(state, parsed);
+
+    const res = resolveDailyEventChoice(state, parsed.choices[1]!.id);
+    assert.equal(res.ok, true);
+    assert.equal(state.goal.requirements.find((r) => r.kind === 'prep_sensor')?.current, 0);
+    assert.ok(state.lastEventDeltas.some((d) => d.includes('-1 Prep Weather Sensor')));
 });

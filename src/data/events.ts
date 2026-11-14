@@ -5,6 +5,8 @@ import type {
     WeatherType,
 } from '../contracts/gameContract';
 
+export type MissionProgressDelta = Partial<Record<'prep_sensor' | 'prep_rover' | 'prep_supplies', number>>;
+
 export interface EventChoice {
     id: string;
     label: string;
@@ -15,6 +17,7 @@ export interface EventChoice {
     resourceDelta?: Partial<ResourcePool>;
     radiationDelta?: number;
     moraleDelta?: number;
+    requirementDelta?: MissionProgressDelta;
     outcomeText: string;
 }
 
@@ -23,6 +26,8 @@ export interface DailyEventDef {
     title: string;
     prompt: string;
     badge: string;
+    scienceFact: string;
+    source?: 'static' | 'gemini';
     minSol?: number;
     maxSol?: number;
     preferredWeather?: WeatherType;
@@ -35,6 +40,7 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         title: 'Landing Checkup!',
         prompt: 'Dust settled on our solar wings and an O2 valve needs tuning. What should we do first?',
         badge: 'DAY 1 CHECK',
+        scienceFact: 'Real NASA Fact: Landing blasts red Mars dust onto solar arrays, so missions like NASA InSight check power tilt on day one!',
         minSol: 1,
         maxSol: 1,
         choices: [
@@ -72,6 +78,7 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         title: 'Dusty Solar Panels!',
         prompt: 'Red Mars dust is blocking sunlight! Our solar charging dropped 35%.',
         badge: 'POWER ALERT',
+        scienceFact: 'Real NASA Fact: Fine Martian dust clings with static electricity and ended NASA Opportunity rover missions when sunlight vanished.',
         minSol: 2,
         choices: [
             {
@@ -106,6 +113,7 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         title: 'Cloudy Plant Tanks!',
         prompt: 'Green algae clouded the plant water. If we wait, our veggies will spoil!',
         badge: 'PLANTS',
+        scienceFact: 'Real NASA Fact: NASA grows space lettuce and radishes hydroponically (in water, without dirt) to recycle air and feed astronauts.',
         minSol: 2,
         choices: [
             {
@@ -142,17 +150,19 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         title: 'Giant Sandstorm Incoming!',
         prompt: 'A swirling dust storm is heading our way! Best time to prep our Weather Mission.',
         badge: 'BIG STORM',
+        scienceFact: 'Real NASA Fact: Mars sandstorms can wrap the whole planet for weeks! Measuring wind speeds helps NASA land future ships safely.',
         minSol: 10,
         maxSol: 15,
         choices: [
             {
                 id: 'prep_wind_sampler',
                 label: 'Spin Up Wind Sampler',
-                summary: '+5 Res, +6 Morale (-3 Power)',
+                summary: '+1 Prep Sensor, +5 Res, +6 Morale (-3 Power)',
                 requiresCargo: 'windSampler',
                 resourceDelta: { res: 5, energy: -3 },
                 moraleDelta: 6,
-                outcomeText: 'Wind Sampler ready! Open Issue Tasks to collect data.',
+                requirementDelta: { prep_sensor: 1 },
+                outcomeText: 'Wind Sampler ready (+1 Prep Sensor)! Open Issue Tasks to collect data.',
             },
             {
                 id: 'batten_hatches',
@@ -169,6 +179,7 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         title: 'Tiny Hull Pinhole!',
         prompt: 'Beep-beep! A tiny space pebble poked a hole in Airlock B and air is leaking.',
         badge: 'AIR LEAK',
+        scienceFact: 'Real NASA Fact: Micrometeoroids smaller than a grain of sand travel faster than bullets, so space habitats track cabin pressure nonstop.',
         minSol: 3,
         choices: [
             {
@@ -204,6 +215,7 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         title: 'Solar Flare Alert!',
         prompt: 'A bright burst from the sun is sending extra radiation toward Mars!',
         badge: 'SUN FLARE',
+        scienceFact: 'Real NASA Fact: Mars has no strong magnetic shield like Earth, so NASA astronauts can hide behind water tanks during solar flares!',
         minSol: 4,
         choices: [
             {
@@ -240,6 +252,7 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         title: 'Mystery Probe Ping!',
         prompt: 'Our radio dish heard a friendly beep from an old 2022 Mars probe nearby.',
         badge: 'DISCOVERY',
+        scienceFact: 'Real NASA Fact: Orbiters circling Mars act like space cell towers, beaming rover photos and science telemetry back to Earth.',
         minSol: 3,
         choices: [
             {
@@ -271,6 +284,7 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         title: 'Clogged Water Pipe!',
         prompt: 'Salty Mars minerals slowed down our clean water recycler.',
         badge: 'WATER PIPE',
+        scienceFact: 'Real NASA Fact: Space crews recycle over 98% of their water, turning humidity from breath and sweat back into clean drinking water!',
         minSol: 2,
         choices: [
             {
@@ -304,6 +318,7 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         title: 'Movie & Snack Night?',
         prompt: 'Living on Mars is tough! The crew wants a fun movie night with snacks.',
         badge: 'CREW FUN',
+        scienceFact: 'Real NASA Fact: NASA tests crew teamwork inside pretend Mars domes in Hawaii and Texas because staying cheerful boosts problem-solving!',
         minSol: 4,
         choices: [
             {
@@ -339,14 +354,16 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         title: 'Ice Found Nearby!',
         prompt: 'Our ground scanner found sparkling frozen water just 250m from base!',
         badge: 'BONUS ICE',
+        scienceFact: 'Real NASA Fact: Huge sheets of frozen water sit just under Mars red dirt! Future astronauts can melt it to drink and make rocket fuel.',
         minSol: 3,
         choices: [
             {
                 id: 'thermal_pump_tap',
                 label: 'Melt & Pump Ice (-6 Power)',
-                summary: '+12 Water, +3 Morale',
+                summary: '+12 Water, +1 Prep Supplies, +3 Morale',
                 resourceDelta: { energy: -6, water: 12 },
                 moraleDelta: 3,
+                requirementDelta: { prep_supplies: 1 },
                 outcomeText: 'Melted fresh ice straight into our main water tank!',
             },
             {
@@ -358,7 +375,93 @@ export const DAILY_EVENTS: DailyEventDef[] = [
             },
         ],
     },
+    {
+        id: 'sandstorm_sensor_damage',
+        title: 'Sandstorm Hit Sensor Mast!',
+        prompt: 'High-speed Mars grit slammed our weather mast! If unbraced, the storm will knock it offline.',
+        badge: 'STORM HIT',
+        scienceFact: 'Real NASA Fact: Martian dust storms whip winds up to 100 km/h and pack grit into outdoor weather booms like Mars Perseverance sensors!',
+        preferredWeather: 'Dust Storm',
+        minSol: 4,
+        choices: [
+            {
+                id: 'engineer_brace_mast',
+                label: 'Bolt & Brace Mast [Elena Perk]',
+                summary: 'Protects Sensor, +1 Prep Sensor, +2 Morale',
+                requiresRole: 'engineer',
+                moraleDelta: 2,
+                requirementDelta: { prep_sensor: 1 },
+                outcomeText: 'Elena locked the mast bolts tight so the storm could not break the sensor!',
+            },
+            {
+                id: 'patch_mast_kit',
+                label: 'Armor With Repair Kit [-1 Repair Kit]',
+                summary: 'Protects Sensor, +1 Prep Sensor, +3 Res',
+                requiresCargo: 'repairKits',
+                consumesCargo: { repairKits: 1 },
+                resourceDelta: { res: 3 },
+                requirementDelta: { prep_sensor: 1 },
+                outcomeText: 'Titanium brackets shielded the weather mast through the dust gust!',
+            },
+            {
+                id: 'shelter_ignore_mast',
+                label: 'Stay Inside Safe (-2 Morale)',
+                summary: '-1 Prep Sensor if ready (needs re-prep)',
+                moraleDelta: -2,
+                requirementDelta: { prep_sensor: -1 },
+                outcomeText: 'Wild Mars grit jammed the outside weather sensor! Re-prep it when clear.',
+            },
+        ],
+    },
+    {
+        id: 'dust_jammed_rover',
+        title: 'Dust Jammed Rover Wheel!',
+        prompt: 'Red regolith packed tight around our rover drive axle before the big expedition.',
+        badge: 'ROVER ALERT',
+        scienceFact: 'Real NASA Fact: Mars rovers wiggle and reverse-steer their aluminum wheels to shake off sticky sand and protect their motors!',
+        preferredWeather: 'Dust Haze',
+        minSol: 4,
+        choices: [
+            {
+                id: 'pilot_wiggle_clean',
+                label: 'Pilot Rock-Crawl Free [Maya Perk]',
+                summary: '+1 Prep Rover, -2 Power, +3 Morale',
+                requiresRole: 'pilot',
+                resourceDelta: { energy: -2 },
+                moraleDelta: 3,
+                requirementDelta: { prep_rover: 1 },
+                outcomeText: 'Maya wiggled the wheels out smoothly and calibrated rover steering!',
+            },
+            {
+                id: 'replace_rover_seal',
+                label: 'Swap Axle Seal [-1 Repair Kit]',
+                summary: '+1 Prep Rover, +2 Morale',
+                requiresCargo: 'repairKits',
+                consumesCargo: { repairKits: 1 },
+                moraleDelta: 2,
+                requirementDelta: { prep_rover: 1 },
+                outcomeText: 'Fresh dust seal clicked right into place. Rover rolls like new!',
+            },
+            {
+                id: 'park_rover_for_later',
+                label: 'Leave Rover Parked for Now',
+                summary: '-1 Prep Rover if prepped, -3 Morale',
+                moraleDelta: -3,
+                requirementDelta: { prep_rover: -1 },
+                outcomeText: 'Fine dust stiffened the wheel hub, knocking Rover Prep back down.',
+            },
+        ],
+    },
 ];
+
+export function isScriptedStoryEvent(
+    sol: number,
+    goalCompleted: boolean,
+    usedEventIds: ReadonlySet<string>,
+): boolean {
+    if (sol === 1) return true;
+    return !goalCompleted && sol >= 11 && sol <= 15 && !usedEventIds.has('sandstorm_wind_window');
+}
 
 export function pickDailyEvent(
     sol: number,

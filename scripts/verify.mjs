@@ -1,12 +1,29 @@
 import { readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
 
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../', import.meta.url));
-const check = spawnSync(process.execPath, [require.resolve('typescript/bin/tsc'), '--noEmit', '-p', 'tsconfig.json'], {
+const estellaModules = process.env.ESTELLA_MODULES
+    ?? path.join(process.env.LOCALAPPDATA ?? '', 'Programs/estella-editor/resources/app.asar.unpacked/node_modules');
+
+function resolveModule(id) {
+    try {
+        return require.resolve(id, { paths: [root, estellaModules] });
+    } catch {
+        const direct = path.join(estellaModules, id);
+        if (existsSync(direct)) return direct;
+        throw new Error(`Could not resolve module "${id}". Run "npm install" or set ESTELLA_MODULES.`);
+    }
+}
+
+const { build } = require(resolveModule('esbuild'));
+const tscBin = resolveModule('typescript/bin/tsc');
+
+const check = spawnSync(process.execPath, [tscBin, '--noEmit', '-p', 'tsconfig.json'], {
     cwd: root,
     stdio: 'inherit',
 });

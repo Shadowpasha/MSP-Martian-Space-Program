@@ -71,11 +71,16 @@ export interface ChatBubbleMsg {
 
 export interface ModalsController {
     openEventModal: () => void;
+    openEventScanningModal: () => void;
     openAiModal: (prefillPrompt?: string) => void;
     openCrewModal: (crewId: string) => void;
     openStationModal: (focus: 'sensor' | 'hydro' | 'rover' | 'cargo') => void;
+    openHelpModal: () => void;
+    openIdleConfirmModal: (message: string, onConfirm: () => void) => void;
     openEndReportModal: () => void;
     openSolReport: () => void;
+    closeAll: () => void;
+    isAnyOpen: () => boolean;
     setPortraitTexture: (crewId: string, textureHandle: number) => void;
     setAiRobotTexture: (textureHandle: number) => void;
     tick: (elapsedSec: number) => void;
@@ -94,7 +99,10 @@ function formatPartialPool(p: Partial<ResourcePool>): string {
 function centeredPanel(width: number, height: number) {
     return {
         position: UIPositionType.Absolute,
-        insetLeft: px((1280 - width) / 2), insetTop: px((720 - height) / 2), width: px(width), height: px(height),
+        insetLeft: px(Math.round((1280 - width) / 2)),
+        insetTop: px(Math.round((720 - height) / 2)),
+        width: px(width),
+        height: px(height),
     };
 }
 
@@ -146,8 +154,8 @@ export function createGameModals(opts: {
         color: PALETTE.amber,
     });
     const evReportFrame = makeFramedBox(world, eventDlg.panelEntity, 22, 100, 656, 68, PALETTE.panelCard, PALETTE.panelBorder, true, 2);
-    const evReportLbl = makeAbsLabel(world, evReportFrame.inner, 10, 4, 632, 56, '', {
-        fontSize: 12,
+    const evReportLbl = makeAbsLabel(world, evReportFrame.inner, 10, 3, 632, 58, '', {
+        fontSize: 11,
         color: PALETTE.cyan,
         verticalAlign: TextVerticalAlign.Top,
         wordWrap: true,
@@ -158,6 +166,8 @@ export function createGameModals(opts: {
         verticalAlign: TextVerticalAlign.Top,
         wordWrap: true,
     });
+
+    let eventMode: 'scanning' | 'choice' | 'outcome' = 'choice';
 
     const evChoiceSlots: Array<{
         root: Entity;
@@ -180,9 +190,10 @@ export function createGameModals(opts: {
                 if (!slot.choiceId) return;
                 const res = resolveDailyEventChoice(getState(), slot.choiceId);
                 if (res.ok) {
+                    eventMode = 'outcome';
                     onStateChanged();
                     refreshEventModal();
-                    focus.focus(evCloseBtn.entity, focus.focusVisible);
+                    focus.focus(evOutcomeContinueBtn.entity, focus.focusVisible);
                 }
             },
         });
@@ -200,6 +211,44 @@ export function createGameModals(opts: {
         evChoiceSlots.push({ root: btn.entity, btn, title, sub, choiceId: '' });
     }
 
+    // Outcome + Real NASA Mars Fact panel (shown after picking a choice)
+    const evOutcomeFrame = makeFramedBox(world, eventDlg.panelEntity, 22, 232, 656, 152, PALETTE.panelCard, PALETTE.cyan, false, 2);
+    makeAbsLabel(world, evOutcomeFrame.inner, 14, 8, 624, 20, 'WHAT CHANGED:', {
+        fontSize: 11,
+        bold: true,
+        color: PALETTE.amber,
+    });
+    const evDeltaLbl = makeAbsLabel(world, evOutcomeFrame.inner, 14, 28, 624, 30, '', {
+        fontSize: 14,
+        bold: true,
+        color: PALETTE.green,
+        wordWrap: true,
+    });
+    const evFactBox = makeAbsBox(world, evOutcomeFrame.inner, 10, 64, 632, 76, PALETTE.bgDark, true);
+    makeAbsBox(world, evFactBox, 0, 0, 4, 76, PALETTE.cyan, true);
+    const evFactLbl = makeAbsLabel(world, evFactBox, 12, 6, 608, 64, '', {
+        fontSize: 12,
+        color: PALETTE.cyan,
+        verticalAlign: TextVerticalAlign.Top,
+        wordWrap: true,
+    });
+
+    const evOutcomeContinueBtn = createButton({
+        world,
+        events,
+        parent: eventDlg.panelEntity,
+        node: { position: UIPositionType.Absolute, insetLeft: px(170), insetTop: px(400), width: px(360), height: px(48) },
+        states: buttonStates(PALETTE.goldNormal, PALETTE.goldHover, PALETTE.goldPressed),
+        fadeDuration: 0.12,
+        onClick: () => eventDlg.close(),
+    });
+    makeAbsLabel(world, evOutcomeContinueBtn.entity, 0, 0, 360, 48, 'AWESOME! START PLANNING ->', {
+        fontSize: 14,
+        bold: true,
+        color: PALETTE.darkInk,
+        align: TextAlign.Center,
+    });
+
     const evCloseBtn = createButton({
         world,
         events,
@@ -213,23 +262,58 @@ export function createGameModals(opts: {
     });
     makeAbsLabel(world, evCloseBtn.entity, 0, 0, 198, 40, 'Continue to Planning', { fontSize: 14, bold: true, align: TextAlign.Center });
 
+    function setEventUiPanels(showChoices: boolean, showOutcome: boolean): void {
+        for (const slot of evChoiceSlots) {
+            setNodeDisplayed(world, slot.root, showChoices);
+        }
+        setNodeDisplayed(world, evOutcomeFrame.frame, showOutcome);
+        setNodeDisplayed(world, evOutcomeContinueBtn.entity, showOutcome);
+        setNodeDisplayed(world, evCloseBtn.entity, !showOutcome && showChoices);
+    }
+
     function refreshEventModal(): void {
         const st = getState();
         const ev = st.currentEvent;
         setText(world, evSolLbl, `SOL ${st.sol} / ${st.goal.deadlineSol}  |  ${st.conditions.weather} ${st.conditions.temperatureC}C`);
-        setText(world, evReportLbl, st.sol === 1 && ev ? st.lastSolReport.join('\n') : `Mission: ${st.goal.title} · Due Sol ${st.goal.deadlineSol}`);
-        setNodeDisplayed(world, evCloseBtn.entity, !ev);
-        if (!ev) {
-            setText(world, evBadgeLbl, 'EVENT OUTCOME');
-            setText(world, evTitleLbl, st.lastEventChoiceLabel);
-            setText(world, evPromptLbl, st.lastEventOutcome ?? 'All set for today! Issue tasks, drag crew, then tap END SOL.');
-            for (const slot of evChoiceSlots) {
-                slot.choiceId = '';
-                setNodeDisplayed(world, slot.root, false);
-            }
+        setText(
+            world,
+            evReportLbl,
+            `${st.sol === 1 && ev ? st.lastSolReport.slice(0, 2).join('\n') : `Mission: ${st.goal.title} · Due Sol ${st.goal.deadlineSol}`}\nTomorrow: ${st.tomorrowForecast.weather} (${st.tomorrowForecast.temperatureC}C, Rad: ${st.tomorrowForecast.radiationRisk})`,
+        );
+
+        if (eventMode === 'scanning') {
+            setEventUiPanels(false, false);
+            setText(world, evBadgeLbl, 'MARS SCANNER');
+            setText(world, evTitleLbl, 'A.R.I.E.S. Checking Mars Sensors...');
+            setText(
+                world,
+                evPromptLbl,
+                'Scanning Martian dust clouds, solar wings, and habitat pressure for today\'s morning report!',
+            );
             return;
         }
-        setText(world, evBadgeLbl, ev.badge);
+
+        if (eventMode === 'outcome' || !ev) {
+            setEventUiPanels(false, true);
+            setText(world, evBadgeLbl, st.lastEventScienceFact ? 'OUTCOME + FACT' : 'ALL CLEAR');
+            setText(world, evTitleLbl, ev ? ev.title : st.lastEventChoiceLabel === 'Pending' ? 'Daily Update Done!' : 'Great Choice, Commander!');
+            setText(world, evPromptLbl, st.lastEventOutcome ?? 'All set for today! Issue tasks, drag crew, then tap END SOL.');
+            setText(
+                world,
+                evDeltaLbl,
+                st.lastEventDeltas.length > 0 ? st.lastEventDeltas.join('   |   ') : 'No resource change — crew safe!',
+            );
+            setText(
+                world,
+                evFactLbl,
+                st.lastEventScienceFact ??
+                    'Real NASA Fact: NASA astronauts plan every Mars Sol step by step so power, air, water, and crew stay balanced.',
+            );
+            return;
+        }
+
+        setEventUiPanels(true, false);
+        setText(world, evBadgeLbl, ev.source === 'gemini' ? `AI: ${ev.badge}` : ev.badge);
         setText(world, evTitleLbl, ev.title);
         setText(world, evPromptLbl, ev.prompt);
         for (let i = 0; i < 3; i++) {
@@ -238,11 +322,10 @@ export function createGameModals(opts: {
             setNodeDisplayed(world, slot.root, Boolean(c));
             if (!c) {
                 slot.choiceId = '';
-                slot.btn.setDisabled(true);
-                setText(world, slot.title, 'No other option');
-                setText(world, slot.sub, '');
+                setNodeDisplayed(world, slot.root, false);
                 continue;
             }
+            setNodeDisplayed(world, slot.root, true);
             const avail = isChoiceAvailable(st, c);
             slot.choiceId = c.id;
             slot.btn.setDisabled(!avail.ok);
@@ -593,7 +676,8 @@ export function createGameModals(opts: {
     const crewPortraitMap = new Map<string, number>();
 
     const crewTopStripe = makeAbsBox(world, crewDlg.panelEntity, 2, 2, 576, 4, PALETTE.cyan, true);
-    const crewPortraitFrame = makeFramedBox(world, crewDlg.panelEntity, 20, 20, 96, 96, PALETTE.panelCard, PALETTE.goldNormal, true, 2);
+    // Crew portraits are 64x80 (4:5 aspect ratio); 80x100 inner keeps proportions unstretched.
+    const crewPortraitFrame = makeFramedBox(world, crewDlg.panelEntity, 24, 14, 84, 104, PALETTE.panelCard, PALETTE.goldNormal, true, 2);
     const crewPortraitBox = crewPortraitFrame.inner;
     const crewNameLbl = makeAbsLabel(world, crewDlg.panelEntity, 130, 20, 340, 28, '', { fontSize: 20, bold: true });
     const crewRoleLbl = makeAbsLabel(world, crewDlg.panelEntity, 130, 50, 340, 20, '', { fontSize: 13, bold: true, color: PALETTE.cyan });
@@ -928,6 +1012,144 @@ export function createGameModals(opts: {
         setText(world, endLessonsLbl, res.lessons.map((l, idx) => `${idx + 1}. ${l}`).join('\n\n'));
     }
 
+    // -------------------------------------------------------------------------
+    // 6. Kid-Friendly How-to-Play & Mars Guide Modal
+    // -------------------------------------------------------------------------
+    const helpDlg: DialogHandle = createDialog({
+        world,
+        events,
+        parent,
+        backdropVisual: { color: PALETTE.scrim },
+        panelNode: centeredPanel(640, 470),
+        panelVisual: { color: PALETTE.panelBorderLight },
+        startHidden: true,
+    });
+    makeAbsBox(world, helpDlg.panelEntity, 2, 2, 636, 466, PALETTE.modalBg, true);
+    makeAbsBox(world, helpDlg.panelEntity, 2, 2, 636, 52, PALETTE.bgDark, true);
+    makeAbsBox(world, helpDlg.panelEntity, 2, 2, 636, 4, PALETTE.cyan, true);
+    makeAbsLabel(world, helpDlg.panelEntity, 20, 14, 480, 28, 'COMMANDER GUIDE - HOW TO SURVIVE MARS!', {
+        fontSize: 17,
+        bold: true,
+        color: PALETTE.amber,
+    });
+    const helpCloseBtn = createButton({
+        world,
+        events,
+        parent: helpDlg.panelEntity,
+        node: { position: UIPositionType.Absolute, insetLeft: px(540), insetTop: px(12), width: px(80), height: px(30) },
+        states: buttonStates(),
+        onClick: () => helpDlg.close(),
+    });
+    makeAbsLabel(world, helpCloseBtn.entity, 0, 0, 80, 30, 'Close', { fontSize: 12, bold: true, align: TextAlign.Center });
+
+    const helpCards: Array<{ title: string; body: string; accent: Color }> = [
+        {
+            title: '1. YOUR DAILY 4-STEP LOOP',
+            body: 'Each morning, answer the Daily Update crisis (and read the real NASA fact!). Next, open ISSUE TASKS, drag astronauts onto jobs on the left, then tap END SOL.',
+            accent: PALETTE.amber,
+        },
+        {
+            title: '2. WATCH YOUR DANGER METERS',
+            body: 'Keep Oxygen above 0%, Morale above 0%, and Radiation below 100 mSv! Half Rations save Food each night, but drop Morale by -7%.',
+            accent: PALETTE.red,
+        },
+        {
+            title: '3. MATCH CREW PERKS FOR BIG BONUSES',
+            body: 'Elena loves ENG/solar jobs, Kenji grows +45% Food & O2 on BIO tasks, Maya rocks NAV/Mission goals, and Marcus heals Radiation & Morale!',
+            accent: PALETTE.green,
+        },
+        {
+            title: '4. FINISH CHECKLIST BEFORE SOL 15',
+            body: 'Check the Outpost Status list on the right: Prep Weather Sensor (1/1), Prep Rover (1/1), Prep Supplies (4/4), and assign 2 astronauts to complete the final Goal!',
+            accent: PALETTE.cyan,
+        },
+    ];
+    for (let i = 0; i < helpCards.length; i++) {
+        const hc = helpCards[i]!;
+        const frame = makeFramedBox(world, helpDlg.panelEntity, 20, 68 + i * 82, 600, 72, PALETTE.panelCard, PALETTE.panelBorder, true, 2);
+        makeAbsBox(world, frame.inner, 0, 0, 4, 68, hc.accent, true);
+        makeAbsLabel(world, frame.inner, 12, 4, 574, 20, hc.title, { fontSize: 12, bold: true, color: hc.accent });
+        makeAbsLabel(world, frame.inner, 12, 24, 574, 42, hc.body, {
+            fontSize: 11,
+            color: PALETTE.textPrimary,
+            verticalAlign: TextVerticalAlign.Top,
+            wordWrap: true,
+        });
+    }
+    const helpGotItBtn = createButton({
+        world,
+        events,
+        parent: helpDlg.panelEntity,
+        node: { position: UIPositionType.Absolute, insetLeft: px(190), insetTop: px(406), width: px(260), height: px(42) },
+        states: buttonStates(PALETTE.goldNormal, PALETTE.goldHover, PALETTE.goldPressed),
+        onClick: () => helpDlg.close(),
+    });
+    makeAbsLabel(world, helpGotItBtn.entity, 0, 0, 260, 42, 'GOT IT! LET\'S PLAY!', {
+        fontSize: 14,
+        bold: true,
+        color: PALETTE.darkInk,
+        align: TextAlign.Center,
+    });
+
+    // -------------------------------------------------------------------------
+    // 7. Idle Crew Confirmation Modal (Before End Sol)
+    // -------------------------------------------------------------------------
+    let pendingEndConfirm: (() => void) | null = null;
+    const confirmEndDlg: DialogHandle = createDialog({
+        world,
+        events,
+        parent,
+        backdropVisual: { color: PALETTE.scrim },
+        panelNode: centeredPanel(480, 228),
+        panelVisual: { color: PALETTE.panelBorderLight },
+        startHidden: true,
+    });
+    makeAbsBox(world, confirmEndDlg.panelEntity, 2, 2, 476, 224, PALETTE.modalBg, true);
+    makeAbsBox(world, confirmEndDlg.panelEntity, 2, 2, 476, 4, PALETTE.amber, true);
+    makeAbsLabel(world, confirmEndDlg.panelEntity, 20, 18, 440, 28, 'HOLD ON, COMMANDER!', {
+        fontSize: 18,
+        bold: true,
+        color: PALETTE.amber,
+    });
+    const confirmEndMsgLbl = makeAbsLabel(world, confirmEndDlg.panelEntity, 20, 56, 440, 84, '', {
+        fontSize: 13,
+        color: PALETTE.textPrimary,
+        verticalAlign: TextVerticalAlign.Top,
+        wordWrap: true,
+    });
+    const confirmAssignBtn = createButton({
+        world,
+        events,
+        parent: confirmEndDlg.panelEntity,
+        node: { position: UIPositionType.Absolute, insetLeft: px(20), insetTop: px(162), width: px(214), height: px(44) },
+        states: buttonStates(PALETTE.goldNormal, PALETTE.goldHover, PALETTE.goldPressed),
+        onClick: () => confirmEndDlg.close(),
+    });
+    makeAbsLabel(world, confirmAssignBtn.entity, 0, 0, 214, 44, 'Assign Crew First', {
+        fontSize: 13,
+        bold: true,
+        color: PALETTE.darkInk,
+        align: TextAlign.Center,
+    });
+    const confirmProceedBtn = createButton({
+        world,
+        events,
+        parent: confirmEndDlg.panelEntity,
+        node: { position: UIPositionType.Absolute, insetLeft: px(246), insetTop: px(162), width: px(214), height: px(44) },
+        states: buttonStates(),
+        onClick: () => {
+            const fn = pendingEndConfirm;
+            pendingEndConfirm = null;
+            confirmEndDlg.close();
+            fn?.();
+        },
+    });
+    makeAbsLabel(world, confirmProceedBtn.entity, 0, 0, 214, 44, 'End Sol Anyway ->', {
+        fontSize: 13,
+        bold: true,
+        align: TextAlign.Center,
+    });
+
     function closeAll(): void {
         eventDlg.close();
         solReport.close();
@@ -935,6 +1157,8 @@ export function createGameModals(opts: {
         crewDlg.close();
         stationDlg.close();
         endDlg.close();
+        helpDlg.close();
+        confirmEndDlg.close();
     }
 
     function openAiModal(prefillPrompt?: string): void {
@@ -949,11 +1173,19 @@ export function createGameModals(opts: {
 
     function openEventModal(): void {
         closeAll();
+        eventMode = getState().currentEvent ? 'choice' : 'outcome';
         refreshEventModal();
         eventDlg.open();
         const event = getState().currentEvent;
         const first = event?.choices.findIndex(choice => isChoiceAvailable(getState(), choice).ok) ?? -1;
-        focus.focus(first >= 0 ? evChoiceSlots[first]!.btn.entity : evCloseBtn.entity, focus.focusVisible);
+        focus.focus(first >= 0 ? evChoiceSlots[first]!.btn.entity : evOutcomeContinueBtn.entity, focus.focusVisible);
+    }
+
+    function openEventScanningModal(): void {
+        closeAll();
+        eventMode = 'scanning';
+        refreshEventModal();
+        eventDlg.open();
     }
 
     function openEndReportModal(): void {
@@ -982,6 +1214,7 @@ export function createGameModals(opts: {
 
     return {
         openEventModal,
+        openEventScanningModal,
         openAiModal,
         openCrewModal: (crewId: string) => {
             closeAll();
@@ -989,15 +1222,35 @@ export function createGameModals(opts: {
             refreshCrewModal();
             crewDlg.open();
         },
-        openStationModal: (focus) => {
+        openStationModal: (focusTarget) => {
             closeAll();
-            currentStationFocus = focus;
+            currentStationFocus = focusTarget;
             setText(world, stFeedbackLbl, '');
             refreshStationModal();
             stationDlg.open();
         },
+        openHelpModal: () => {
+            closeAll();
+            helpDlg.open();
+        },
+        openIdleConfirmModal: (message, onConfirm) => {
+            closeAll();
+            pendingEndConfirm = onConfirm;
+            setText(world, confirmEndMsgLbl, message);
+            confirmEndDlg.open();
+        },
         openEndReportModal,
         openSolReport,
+        closeAll,
+        isAnyOpen: () =>
+            eventDlg.isOpen() ||
+            solReport.isOpen() ||
+            aiDlg.isOpen() ||
+            crewDlg.isOpen() ||
+            stationDlg.isOpen() ||
+            endDlg.isOpen() ||
+            helpDlg.isOpen() ||
+            confirmEndDlg.isOpen(),
         setPortraitTexture: (crewId, tex) => {
             crewPortraitMap.set(crewId, tex);
         },
@@ -1009,13 +1262,17 @@ export function createGameModals(opts: {
             const pulse = 0.5 + 0.5 * Math.sin(elapsedSec * 4.2);
             if (eventDlg.isOpen()) {
                 const st = getState();
-                if (st.currentEvent) {
+                if (eventMode === 'scanning') {
+                    const c = lerpColor(PALETTE.cyan, PALETTE.amber, pulse);
+                    setVisualColor(world, evBadgeBox, c);
+                    setVisualColor(world, evTopStripe, c);
+                } else if (st.currentEvent && eventMode === 'choice') {
                     const c = lerpColor(PALETTE.marsOrange, PALETTE.goldNormal, pulse);
                     setVisualColor(world, evBadgeBox, c);
                     setVisualColor(world, evTopStripe, c);
                 } else {
                     setVisualColor(world, evBadgeBox, PALETTE.green);
-                    setVisualColor(world, evTopStripe, PALETTE.green);
+                    setVisualColor(world, evTopStripe, PALETTE.cyan);
                 }
             }
             if (aiDlg.isOpen()) {
