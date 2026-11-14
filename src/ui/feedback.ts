@@ -11,11 +11,13 @@
 // Sound and Vibration settings, and nothing here can throw into the UI.
 import { Device, type AudioAPI } from 'esengine';
 
-export type Sfx = 'tick' | 'blip' | 'chime' | 'success' | 'buzz' | 'thunk' | 'whoosh' | 'beep' | 'sparkle' | 'launch';
+export type Sfx = 'tick' | 'blip' | 'chime' | 'success' | 'buzz' | 'thunk' | 'whoosh' | 'beep' | 'sparkle' | 'launch'
+    | 'slam' | 'count' | 'go';
 
 const PATH = (name: string) => `assets/audio/ui/${name}.wav`;
 const VOLUME: Record<Sfx, number> = {
     tick: 0.25, blip: 0.5, chime: 0.6, success: 0.6, buzz: 0.5, thunk: 0.7, whoosh: 0.4, beep: 0.5, sparkle: 0.55, launch: 0.8,
+    slam: 0.8, count: 0.55, go: 0.6,
 };
 /** Minimum gap between two plays of the same sound, so fast hovering does not chatter. */
 const SPACING_MS: Partial<Record<Sfx, number>> = { tick: 45, blip: 30, buzz: 150, thunk: 80 };
@@ -31,7 +33,7 @@ export function connectAudio(api: AudioAPI): void {
     if (audio) return;
     audio = api;
     try {
-        void api.preloadAll(['tick', 'blip', 'chime', 'success', 'buzz', 'thunk', 'whoosh', 'beep', 'sparkle', 'launch', 'hum'].map(PATH)).catch(() => {});
+        void api.preloadAll(['tick', 'blip', 'chime', 'success', 'buzz', 'thunk', 'whoosh', 'beep', 'sparkle', 'launch', 'slam', 'count', 'go', 'hum'].map(PATH)).catch(() => {});
     } catch { /* audio unavailable: stay silent */ }
     if (humOn) startHum();
 }

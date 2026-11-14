@@ -6,7 +6,9 @@ import { CARGO_ITEMS, CARGO_COLUMNS, CARGO_ROWS, occupiedCells, packedInventory,
 import { supplyLasts } from './cargoPacker';
 import type { FlightUi } from './flightUi';
 import { play, vibrate } from './feedback';
-import { easeInCubic, makeMotion } from './motion';
+import type { InputState } from 'esengine';
+import { playLaunchIntro, type LaunchIntro } from './launchIntro';
+import { makeMotion } from './motion';
 
 const ROLE: Record<string, string> = {
     engineer: 'Engineer', botanist: 'Botanist', pilot: 'Pilot', medic: 'Medic', scientist: 'Scientist', captain: 'Captain',
@@ -15,7 +17,9 @@ const ROLE: Record<string, string> = {
 export function showLaunchSummary(
     ui: FlightUi, setup: MissionSetupInput, placements: readonly CargoPlacement[], problem: string | null,
     onLaunch: () => void, onBack: () => void,
-): (input: unknown) => boolean {
+    /** The mission's picture, shown on the mission side of the launch intro. */
+    missionImage?: string,
+): (input: InputState) => boolean {
     const { root, palette: p } = ui;
     const motion = makeMotion(ui.world, ui.reducedMotion);
     const goal = setup.missionGoal;
@@ -82,28 +86,30 @@ export function showLaunchSummary(
     ui.label(side, [16, 462, 384, 52], problem ?? 'All set. Ready for launch.', {
         size: 14, wrap: true, color: problem ? p.bad : p.good,
     });
-    // Launch: the screen rattles like engines starting, then everything lifts off and the run begins.
+    // Launch: engines rumble and the screen rattles for a moment, then the launch intro
+    // (your crew vs the mission, countdown, lift-off) plays and starts the run.
     let launching = false;
+    let intro: LaunchIntro | null = null;
     const back = ui.button(side, [16, 528, 140, 48], () => { if (!launching) onBack(); }, { label: 'Back' });
     const go = ui.button(side, [168, 528, 232, 48], () => {
         if (launching) return;
-        if (motion.reducedMotion) { play('launch'); vibrate('long'); onLaunch(); return; }
         launching = true;
         play('launch');
         vibrate('long');
         back.setDisabled(true);
         go.setDisabled(true);
         if (go.text) ui.setText(go.text, 'Lift-off!');
-        motion.shake(crewHolder, 248, 108, 3, 420);
-        motion.shake(sideHolder, 848, 108, 3, 420, () => {
-            motion.leave(crewHolder, 248, 108, { dy: -760, duration: 520, ease: easeInCubic });
-            motion.leave(sideHolder, 848, 108, { dy: -760, delay: 60, duration: 520, ease: easeInCubic, onDone: onLaunch });
-        });
+        const begin = () => { intro = playLaunchIntro(ui, motion, setup, missionImage, onLaunch); };
+        if (motion.reducedMotion) { begin(); return; }
+        motion.shake(crewHolder, 248, 108, 3, 320);
+        motion.shake(sideHolder, 848, 108, 3, 320, begin);
     }, { label: 'Launch Mission', tone: 'primary', disabled: Boolean(problem) });
 
-    // Per frame: run the motion; while launching, swallow Escape so the countdown can't be cut short.
-    return () => {
+    // Per frame: run the motion and the intro. While launching, Escape belongs to the intro (skip),
+    // so the page must not navigate away on it.
+    return (input: InputState) => {
         motion.tick();
+        intro?.tick(input);
         return launching;
     };
 }

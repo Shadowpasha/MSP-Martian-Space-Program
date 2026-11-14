@@ -121,6 +121,13 @@ def main():
     for i in range(tail):
         launch[len(launch) - 1 - i] *= i / tail
     save('launch', launch)
+    # Launch intro: a heavy impact for things slamming in.
+    save('slam', mix(tone(lambda t: 90 * math.exp(-5 * t) + 32, 0.5, triangle, 0.9, 6), noise(0.22, 0.55, 18, smooth=0.6, seed=9)))
+    # Launch intro: the countdown beep (3, 2, 1).
+    save('count', tone(lambda t: 880, 0.16, square, 0.35, 12))
+    # Launch intro: lift-off fanfare, a bright held chord.
+    chord = [tone(lambda t, f=f: f, 0.75, square, 0.16, 2.5) for f in (523.25, 659.25, 783.99, 1046.5)]
+    save('go', mix(*chord, tone(lambda t: 1046.5 * 2, 0.4, triangle, 0.2, 5), offsets=[0, 0, 0, 0, 0.05]))
     # Menu ambience: a soft station hum that loops cleanly (whole cycles in 4 s).
     seconds = 4.0
     count = int(RATE * seconds)
