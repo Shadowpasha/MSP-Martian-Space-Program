@@ -22,7 +22,7 @@
                   "activeView": "viewport",
                   "id": "1"
                 },
-                "size": 724
+                "size": 612
               },
               {
                 "type": "leaf",
@@ -35,10 +35,10 @@
                   "activeView": "content",
                   "id": "4"
                 },
-                "size": 300
+                "size": 254
               }
             ],
-            "size": 1297
+            "size": 993
           },
           {
             "type": "branch",
@@ -52,7 +52,7 @@
                   "activeView": "outliner",
                   "id": "2"
                 },
-                "size": 512
+                "size": 433
               },
               {
                 "type": "leaf",
@@ -63,16 +63,16 @@
                   "activeView": "details",
                   "id": "3"
                 },
-                "size": 512
+                "size": 433
               }
             ],
-            "size": 583
+            "size": 447
           }
         ],
-        "size": 1024
+        "size": 866
       },
-      "width": 1880,
-      "height": 1024,
+      "width": 1440,
+      "height": 866,
       "orientation": "HORIZONTAL"
     },
     "panels": {
@@ -82,18 +82,6 @@
         "tabComponent": "props.defaultTabComponent",
         "title": "Viewport",
         "renderer": "always"
-      },
-      "outliner": {
-        "id": "outliner",
-        "contentComponent": "outliner",
-        "tabComponent": "props.defaultTabComponent",
-        "title": "World Outliner"
-      },
-      "details": {
-        "id": "details",
-        "contentComponent": "details",
-        "tabComponent": "props.defaultTabComponent",
-        "title": "Details"
       },
       "content": {
         "id": "content",
@@ -112,6 +100,18 @@
         "contentComponent": "profiler",
         "tabComponent": "props.defaultTabComponent",
         "title": "Profiler"
+      },
+      "outliner": {
+        "id": "outliner",
+        "contentComponent": "outliner",
+        "tabComponent": "props.defaultTabComponent",
+        "title": "World Outliner"
+      },
+      "details": {
+        "id": "details",
+        "contentComponent": "details",
+        "tabComponent": "props.defaultTabComponent",
+        "title": "Details"
       }
     },
     "activeGroup": "1"
@@ -123,9 +123,10 @@
   "openDocuments": [],
   "contentBrowserPath": "assets",
   "viewportCamera": {
-    "x": -160.12469914040128,
-    "y": -11.199197707736397,
+    "x": 0,
+    "y": 0,
     "z": 0,
-    "orthoSize": 479.16000000000014
-  }
+    "orthoSize": 396.00000000000006
+  },
+  "selectedEntity": 0
 }

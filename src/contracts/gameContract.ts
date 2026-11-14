@@ -124,6 +124,7 @@ export interface MissionSetupInput {
     planet: PlanetId;
     targetSol: number;
     missionGoal: MissionGoal;
+    rules?: 'tharsis-expedition';
     startingResources: ResourcePool;
     startingConditions: ConditionState;
     cargo: CargoInventory;

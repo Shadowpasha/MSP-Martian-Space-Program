@@ -15,6 +15,7 @@ import {
 } from '../ui/flightScreens';
 import { makeFlightArt, makeFlightUi } from '../ui/flightUi';
 import { makeAbsBox, setNodeDisplayed } from '../ui/theme';
+import { mountTharsisFlight } from '../ui/tharsisFlight';
 import { mountSurvivalUi } from './gameUi';
 
 const controllers = new WeakMap<World, { root: Entity; update: () => void }>();
@@ -90,7 +91,7 @@ export const flightSystem = defineSystem(
             const root = makeAbsBox(world, sceneRoot, 0, 0, 1280, 720);
             pageRoot = root;
             tickPage = null;
-            setNodeDisplayed(world, backdrop, page === 'run');
+            setNodeDisplayed(world, backdrop, page === 'run' && runSetup?.rules !== 'tharsis-expedition');
 
             if (page === 'run' && runSetup) {
                 const runId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -104,9 +105,9 @@ export const flightSystem = defineSystem(
                         launch(moon, profile.crewIds.length !== LAUNCH_CREW_SIZE);
                     } else navigate(target);
                 };
-                tickPage = mountSurvivalUi({
-                    world, events, assets, focus, gameRoot: root, setup: runSetup, reducedMotion: profile.reducedMotion, onFinish: finish, onExit: exit,
-                });
+                tickPage = runSetup.rules === 'tharsis-expedition'
+                    ? mountTharsisFlight({ world, events, input, focus, root, art, setup: runSetup, profile, onFinish: finish, onExit: exit })
+                    : mountSurvivalUi({ world, events, assets, focus, gameRoot: root, setup: runSetup, reducedMotion: profile.reducedMotion, onFinish: finish, onExit: exit });
                 return;
             }
 

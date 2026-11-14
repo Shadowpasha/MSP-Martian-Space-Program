@@ -8,13 +8,20 @@ export const LAUNCH_CREW_SIZE = 4;
 const surveyBase = cloneSetup(DEFAULT_MARS_SETUP);
 export const WEATHER_SURVEY: MissionSetupInput = {
     ...surveyBase,
+    rules: 'tharsis-expedition',
     targetSol: 16,
     missionGoal: {
         ...surveyBase.missionGoal,
         id: 'tharsis_weather_survey',
         title: 'Tharsis Ridge Weather Survey',
-        description: 'Collect 48 hours of weather data at Site A, Tharsis Ridge, by the end of Sol 16.',
+        description: 'Deploy to Site A, collect 48 consecutive hours of weather data, and return by Sol 16. Seasonal dust risk is elevated.',
         deadlineSol: 16,
+        requirements: [
+            { id: 'req_rover', label: 'Rover work orders', kind: 'prep_rover', current: 0, target: 3 },
+            { id: 'req_sensor', label: 'Instrument checks', kind: 'prep_sensor', current: 0, target: 3 },
+            { id: 'req_supplies', label: 'Field supply checks', kind: 'prep_supplies', current: 0, target: 2 },
+            { id: 'req_crew', label: 'Field crew checks', kind: 'assign_crew', current: 0, target: 2 },
+        ],
         minimumReserves: { food: 10, water: 10, oxygen: 25 },
         requiredEquipment: { windSampler: 1 },
     },
@@ -38,7 +45,7 @@ export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
     return [
         {
             title: mission.missionGoal.title,
-            site: pending ? mission.planet.toUpperCase() + ' · TEAM MANIFEST' : 'MARS · SITE A',
+            site: pending ? mission.planet.toUpperCase() + ' · TEAM SETUP' : 'MARS · SITE A',
             description: mission.missionGoal.description,
             setup: mission,
             prepared: pending ? 'team' : undefined,
@@ -84,6 +91,7 @@ export function buildLaunchSetup(
 ): MissionSetupInput | null {
     if (!offer.setup) return null;
     const setup = cloneSetup(offer.setup);
+    if (offer.prepared) delete setup.rules;
     if (!usePreparedCrew) {
         const selected = new Set(crewIds);
         const anchors = DEFAULT_MARS_SETUP.crew.map(member => member.stageAnchor);

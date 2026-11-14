@@ -36,7 +36,7 @@ export function flightPalette(highContrast: boolean) {
 }
 
 type Tone = 'plain' | 'primary' | 'hero' | 'tile';
-interface ButtonOptions { tone?: Tone; disabled?: boolean; label?: string; }
+interface ButtonOptions { tone?: Tone; disabled?: boolean; label?: string; labelSize?: number; }
 interface Control { entity: Entity; ring: Entity; }
 
 export interface FlightArt {
@@ -185,7 +185,7 @@ export function makeFlightUi(
         const ring = box(handle.entity, [w - 16, 6, 8, 8], palette.white);
         setNodeDisplayed(world, ring, false);
         const text = opts.label === undefined ? null : label(handle.entity, [8, 2, w - 16, h - 4], opts.label, {
-            display: true, size: 18, center: true, color: tone === 'primary' ? palette.ink : palette.text,
+            display: true, size: opts.labelSize ?? 18, center: true, color: tone === 'primary' ? palette.ink : palette.text,
         });
         controls.push({ entity: handle.entity, ring });
         return { ...handle, surface, text };
