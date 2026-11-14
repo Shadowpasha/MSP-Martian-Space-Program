@@ -1,0 +1,13 @@
+{
+  "name": "mars-outpost-sol-survival",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify": "node scripts/verify.mjs",
+    "test": "node scripts/verify.mjs"
+  },
+  "dependencies": {
+    "@google/genai": "^3.3.0"
+  }
+}

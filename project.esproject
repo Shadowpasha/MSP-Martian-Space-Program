@@ -1,0 +1,13 @@
+{
+  "formatVersion": "1",
+  "name": "Mars Outpost - Sol Survival",
+  "description": "NASA Space Apps 2026: Main Martian outpost survival loop with crew perks, Gemini AI task planner, 60-Seconds-style daily events, and skill tree integration.",
+  "tag": "Game",
+  "version": "0.1.0",
+  "defaultScene": "assets/scenes/main.esscene",
+  "designResolution": {
+    "width": 1280,
+    "height": 720
+  },
+  "spineVersion": "none"
+}

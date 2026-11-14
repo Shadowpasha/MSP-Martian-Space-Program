@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.esengine/cache/
+.esengine/play/
+.env
+.env.local
+.env.*.local
+!.env.example
