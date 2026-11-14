@@ -3,7 +3,7 @@ import {
     type CrewMember, type MissionSetupInput, type ResourcePool,
 } from '../contracts/gameContract';
 import { CARGO_BY_ID, normalizeCargo, packedInventory, type CargoPlacement } from './cargo';
-import { pickerMissions } from '../prep/logic/pickerMissions';
+import { nasaMissionOffers } from './nasaMissions';
 
 export const LAUNCH_CREW_SIZE = 4;
 const surveyBase = cloneSetup(DEFAULT_MARS_SETUP);
@@ -57,7 +57,7 @@ export const THARSIS_BRIEFING: MissionBriefing = {
 // After the Tharsis survey: Mission Prep's NASA-based missions (Ice Hunter, Shadow Ice,
 // Breathe Easy, Space Garden, Radiation Detective). They replace the old placeholders;
 // the picker pages through them three at a time.
-const laterMissions: MissionOffer[] = pickerMissions();
+const laterMissions: MissionOffer[] = nasaMissionOffers();
 
 export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
     const mission = pending ?? WEATHER_SURVEY;

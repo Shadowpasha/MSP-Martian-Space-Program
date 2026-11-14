@@ -1,4 +1,9 @@
-"""Mission Prep pixel art: item sprites, UI icons and the two crater maps.
+"""Shared pixel-art palette and helpers, plus the lunar south-pole map used by the
+Shadow Ice mission card (assets/textures/missions/). scripts/art/outpost_sprites.py
+imports the palette and drawing helpers from here.
+
+(The item/icon/logo/backdrop drawings below belonged to the removed standalone
+Mission Prep screens; they are kept as reference art and are no longer exported.)
 
 Provenance: every pixel here is drawn by this script (Pillow primitives on a
 fixed 16x16 grid, maps from seeded value noise quantised to the design.md
@@ -21,7 +26,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "assets" / "textures" / "prep"
+OUT = ROOT / "assets" / "textures" / "missions"
 
 # design.md section 3 tokens + a few material colours for item art.
 P = {
@@ -490,7 +495,7 @@ def moon_map():
 
 
 # ---------------------------------------------------------------- logo + backdrop
-FONT_DISPLAY = ROOT / "assets" / "fonts" / "PixelifySans.ttf"
+FONT_DISPLAY = ROOT / "assets" / "fonts" / "pixelify_sans.ttf"
 
 
 def logo():
@@ -585,23 +590,8 @@ def save(img: Image.Image, path: Path) -> None:
 
 
 def main() -> int:
-    for name, fn in ITEMS.items():
-        save(fn(), OUT / "items" / f"{name}.png")
-    for name, fn in ICONS.items():
-        save(fn(), OUT / "icons" / f"{name}.png")
-    save(mars_map(), OUT / "maps" / "map_jezero_320x180.png")
-    save(moon_map(), OUT / "maps" / "map_lunar_south_pole_320x180.png")
-    save(logo(), OUT / "ui" / "ui_logo_msp_116x40.png")
-    save(backdrop(), OUT / "ui" / "env_mars_backdrop_sidebar_136x360.png")
-    # Contact sheet for review (not shipped; under .impeccable/review).
-    sheet = Image.new("RGBA", (16 * 12 * 4, 16 * 3 * 4), rgba("ink8"))
-    allimgs = [fn() for fn in ITEMS.values()] + [fn() for fn in ICONS.values()]
-    for i, im in enumerate(allimgs):
-        sheet.paste(im.resize((64, 64), Image.NEAREST), ((i % 12) * 64, (i // 12) * 64), im.resize((64, 64), Image.NEAREST))
-    review = ROOT / ".impeccable" / "review"
-    review.mkdir(parents=True, exist_ok=True)
-    sheet.save(review / "prep_sprite_sheet.png")
-    print(f"wrote {len(ITEMS)} items, {len(ICONS)} icons, 2 maps")
+    save(moon_map(), OUT / "map_lunar_south_pole_320x180.png")
+    print("wrote the lunar south-pole map")
     return 0
 
 

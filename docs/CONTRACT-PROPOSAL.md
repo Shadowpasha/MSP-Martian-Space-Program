@@ -1,11 +1,11 @@
 # Contract proposal: unlock the other missions
 
 **For:** the main-loop owner (`src/contracts/gameContract.ts`, `src/simulation/solEngine.ts`, `src/data/events.ts`, `src/ui/modals.ts`).
-**Status:** proposal only. Mission Prep works today without it.
+**Status:** part 1 is DONE on this branch (goal flags `oxygen_produced`, `crop_harvested`, `radiation_measured` in `GOAL_FLAGS`; Breathe Easy, Space Garden and Radiation Detective are playable). Parts 2–3 are still open.
 
 ## The problem
 
-Mission Prep has 9 more NASA-based missions designed (see [MISSIONS.md](MISSIONS.md)), but the
+The mission plan has more NASA-based missions designed (see [MISSIONS.md](MISSIONS.md)), but the
 main loop only understands two goals and one piece of mission hardware:
 
 - `MissionGoal.requiredFlag` is `'wind_sample_collected' | 'ice_core_collected'`
@@ -51,15 +51,16 @@ interface MissionGoal {
 `prep_wind_sampler` event text would use it too.
 
 Option B (cleaner, bigger): rename the slot to `missionHardware` with a migration that reads
-`windSampler` when present. Mission Prep can write either.
+`windSampler` when present.
 
 ### 3. Optional: let packing pre-fill requirements
 
-Mission Prep could set `requirements[prep_sensor].current = 1` when the hardware is packed and
+Cargo Preparation could set `requirements[prep_sensor].current = 1` when the hardware is packed and
 `prep_supplies.current` from packed crates. Today it leaves every `current` at 0, so the main loop's
 own prep tasks still run. Your call.
 
-## What Mission Prep does once this lands
+## Still open
 
-Flip the hidden missions in `src/prep/data/missions.ts` from `goalFlag: null` to their new flag, add
-their hardware items in `src/prep/data/items.ts`, and they appear in the roll. No other change.
+- **Mission hardware naming (part 2).** The ice missions still require the "Wind Sampler" (its inventory text says "Required for the weather survey").
+- **New cargo items.** Quake Listener (seismometer), Sky Scout (helicopter) and Rock Collector (drill) need new `CargoInventory` items, `CARGO_ITEMS` entries and icons; `flight_icons.png` is full (32/32).
+- **Pre-filled requirements (part 3).** Packing does not fill `requirements[].current`; the survival loop's prep tasks still run.

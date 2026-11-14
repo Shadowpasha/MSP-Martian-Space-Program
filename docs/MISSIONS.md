@@ -1,10 +1,10 @@
 # Mission Plan: Junior Astronaut Mission Trainer
 
 > **How this maps to the code:** this is the original design for the full mission pool.
-> What is playable today lives in `src/prep/data/missions.ts`: **Storm Watch**, **Ice Hunter**
-> and the Moon mission **Shadow Ice**, because the main loop only understands the
-> `wind_sample_collected` and `ice_core_collected` goal flags. The other missions below
-> are in the data but hidden until [CONTRACT-PROPOSAL.md](CONTRACT-PROPOSAL.md) lands.
+> What is playable today lives in `src/data/nasaMissions.ts`: **Ice Hunter**, **Shadow Ice** (Moon),
+> **Breathe Easy**, **Space Garden** and **Radiation Detective**, next to the Tharsis survey in
+> `src/data/missions.ts`. Storm Watch is left out (same goal as Tharsis). Quake Listener, Sky Scout
+> and Rock Collector would need new cargo items; see [CONTRACT-PROPOSAL.md](CONTRACT-PROPOSAL.md).
 > Crew names, resources and cargo in the code follow `src/contracts/gameContract.ts`, not
 > the placeholder roster in this document.
 

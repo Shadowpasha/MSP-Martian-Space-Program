@@ -25,8 +25,8 @@ Inspired by *60 Seconds!*, but the pressure is a **mission deadline**, not pure 
 - **Game loop:** Main Menu → Mission Selection (3 random missions) → Cargo Prep (grid inventory packing) → Mission Phase (10-sol action blocks, random events, crew Q&A) → Upgrade (tech points) → repeat.
 - **Time unit:** sols (Mars days). Movement in MP. Actions in AP (10 per 10-sol block).
 - **Built by a hackathon team, one screen per developer**, merged later. Shared contract and visual system must keep screens consistent.
-- **Mission data:** design in `docs/MISSIONS.md`; code in `src/prep/data/missions.ts` (3 playable today: Storm Watch, Ice Hunter, Shadow Ice; the rest wait for `docs/CONTRACT-PROPOSAL.md`).
-- **Hand-off:** Mission Prep writes a `MissionSetupInput` (`src/contracts/gameContract.ts`) to Storage key `mars-outpost:pending-setup`; the main loop reads it on start.
+- **Mission data:** design in `docs/MISSIONS.md`; code in `src/data/missions.ts` (Tharsis survey) and `src/data/nasaMissions.ts` (Ice Hunter, Shadow Ice, Breathe Easy, Space Garden, Radiation Detective). Six playable missions, paged three at a time in the mission picker.
+- **Flow:** `src/systems/flight.ts`: Menu → Mission Selection (briefing popup) → Cargo Preparation (`src/ui/cargoPacker.ts`) → Launch Summary (`src/ui/launchSummary.ts`) → survival run.
 
 ## Capabilities and Constraints
 
@@ -42,7 +42,7 @@ Inspired by *60 Seconds!*, but the pressure is a **mission deadline**, not pure 
 ## Brand Commitments
 
 - **Name:** **MSP: Mars Station Program**.
-- **Visual authority:** `DESIGN.md` (MSP-ART-001) and the three mockups in `docs/design/` (`mockup_main_menu.jpeg`, `mockup_crew.jpeg`, `mockup_upgrade.jpeg`). Use original assets only; reference games are direction, not sources. Mission Prep implements the tokens in `src/prep/ui/tokens.ts`; the main loop still uses `src/ui/theme.ts`.
+- **Visual authority:** `DESIGN.md` (MSP-ART-001) and the three mockups in `docs/design/` (`mockup_main_menu.jpeg`, `mockup_crew.jpeg`, `mockup_upgrade.jpeg`). Use original assets only; reference games are direction, not sources. The flight screens use `src/ui/flightUi.ts` (palette matches the DESIGN.md tokens); the survival run still uses `src/ui/theme.ts`.
 - **Crew archetypes:** Rourke (Engineer), Mira (Medic), Hale (Mechanic), Keller (Captain), Ishida (Scientist), Vance (Comms).
 
 ## Evidence on Hand

@@ -17,7 +17,7 @@ import {
     CARGO_BY_ID, CARGO_COLUMNS, CARGO_ITEMS, CARGO_ROWS, occupiedCells, packedInventory, placementProblem, rotatedCells,
     type CargoPlacement, type Rotation,
 } from '../data/cargo';
-import { FOOD_PER_CREW_PER_SOL, OXYGEN_PER_SOL, WATER_PER_CREW_PER_SOL } from '../prep/logic/balance';
+import { FOOD_PER_CREW_PER_SOL, OXYGEN_PER_SOL, WATER_PER_CREW_PER_SOL } from '../data/supplyRates';
 import { type FlightUi } from './flightUi';
 
 const CARGO_COLORS: Record<CargoItemId, number> = {
