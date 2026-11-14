@@ -37,9 +37,9 @@ export function loadProfile(stored: unknown, legacySkills: unknown, preferReduce
         reducedMotion: typeof saved.reducedMotion === 'boolean' ? saved.reducedMotion : preferReducedMotion,
         highContrast: saved.highContrast === true,
         soundEnabled: saved.soundEnabled !== false,
-        masterVolume: clampUnit(saved.masterVolume, 1),
-        musicVolume: clampUnit(saved.musicVolume, 0.7),
-        sfxVolume: clampUnit(saved.sfxVolume, 0.85),
+        masterVolume: clampUnit(saved.masterVolume, 0.53),
+        musicVolume: clampUnit(saved.musicVolume, 0.18),
+        sfxVolume: clampUnit(saved.sfxVolume, 0.34),
     };
 }
 

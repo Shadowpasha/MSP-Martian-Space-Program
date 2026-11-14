@@ -33,9 +33,9 @@ let boundAudio: AudioAPI | null = null;
 let currentTrack: MusicTrack | null = null;
 let desiredTrack: MusicTrack | null = null;
 let soundEnabled = true;
-let masterVol = 1;
-let musicVol = 0.7;
-let sfxVol = 0.85;
+let masterVol = 0.53;
+let musicVol = 0.18;
+let sfxVol = 0.34;
 let audioUnlocked = false;
 let preloaded = false;
 

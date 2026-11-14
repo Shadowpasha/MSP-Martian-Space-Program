@@ -10,7 +10,44 @@
     "height": 720
   },
   "features": {
-    "rendering": { "cameraScaleMode": "expand" }
+    "rendering": {
+      "cameraScaleMode": "expand"
+    },
+    "audio": {
+      "buses": [
+        {
+          "name": "music",
+          "volume": 0.18
+        },
+        {
+          "name": "sfx",
+          "volume": 0.34
+        },
+        {
+          "name": "master",
+          "volume": 0.53
+        },
+        {
+          "name": "ui",
+          "volume": 0.54
+        },
+        {
+          "name": "voice",
+          "volume": 0.56
+        }
+      ]
+    }
   },
-  "spineVersion": "none"
+  "spineVersion": "none",
+  "packaging": {
+    "platform": "web",
+    "config": "shipping",
+    "sourceMaps": false,
+    "assetCompression": "auto",
+    "frameDebugger": false,
+    "openFolder": true,
+    "outDir": {
+      "web": "dist-web"
+    }
+  }
 }
