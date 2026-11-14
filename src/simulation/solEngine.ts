@@ -849,7 +849,7 @@ function finalizeRun(
         lessons.push('Power dipped during dust storms — pack an extra Battery Pack or unlock "Dust-Repel Solar Coating".');
     }
     if (state.lowFoodCount >= 2 || state.halfRationSols >= 3) {
-        lessons.push('Food supplies ran tight — assign Kenji Sato (Botanist) to Hydroponics early or unlock "Algae Nutrient Loop".');
+        lessons.push('Food supplies ran tight — assign Scott Kelly (Botanist) to Hydroponics early or unlock "Algae Nutrient Loop".');
     }
     if (state.lowOxygenCount >= 2 || state.resources.oxygen < 30) {
         lessons.push('Oxygen margins got thin — keep 1 Repair Kit for micrometeorites or unlock "Closed-Loop Scrubbers".');

@@ -265,7 +265,7 @@ test('Gemini daily event parser sanitizes deltas, adds NASA fact prefix, and pre
                 requiresRole: 'botanist',
                 resourceDelta: { food: 99, water: -3 },
                 moraleDelta: 4,
-                outcomeText: 'Kenji washed the soil clean and sprouts bounced back!',
+                outcomeText: 'Scott washed the soil clean and sprouts bounced back!',
             },
             {
                 label: 'Use Emergency Seed Pod',

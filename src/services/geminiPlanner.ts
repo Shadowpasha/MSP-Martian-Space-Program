@@ -741,7 +741,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     if (/(food|crop|hydro|plant|farm|algae|grow|greenhouse)/.test(q)) {
         return {
             source: 'offline-fallback',
-            replyText: 'A.R.I.E.S. [Local Sim]: Cultivating fast-cycle hydroponic greens takes 2 Sols (+2 Prep Supplies progress). Kenji Sato boosts yield by +45%.',
+            replyText: 'A.R.I.E.S. [Local Sim]: Cultivating fast-cycle hydroponic greens takes 2 Sols (+2 Prep Supplies progress). Scott Kelly boosts yield by +45%.',
             task: {
                 title: 'Expand Hydroponic Crop Cycle',
                 description: 'Seed high-yield nutrient trays and increase grow-lamp photoperiod.',
@@ -764,7 +764,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     if (/(solar|power|energy|battery|clean|panel|generator)/.test(q)) {
         return {
             source: 'offline-fallback',
-            replyText: 'A.R.I.E.S. [Local Sim]: Solar array restoration and MPPT tuning completes in 1 Sol with low EVA drain. Elena Vance reduces tool & power draw.',
+            replyText: 'A.R.I.E.S. [Local Sim]: Solar array restoration and MPPT tuning completes in 1 Sol with low EVA drain. Kalpana Chawla reduces tool & power draw.',
             task: {
                 title: 'Solar Array Maintenance & Boost',
                 description: 'Brush Martian dust from arrays and rebalance inverter capacitors.',
@@ -833,7 +833,7 @@ export function evaluatePlanOffline(userPlan: string, ctx: PlannerContextSnapsho
     if (/(rad|radiation|shield|med|heal|sick|morale|rest|counsel|stress)/.test(q)) {
         return {
             source: 'offline-fallback',
-            replyText: 'A.R.I.E.S. [Local Sim]: Shield reinforcement & medical recovery spans 1 Sol with extra rations for crew recovery. Marcus Thorne (Medic) amplifies the healing effect.',
+            replyText: 'A.R.I.E.S. [Local Sim]: Shield reinforcement & medical recovery spans 1 Sol with extra rations for crew recovery. Bernard Harris (Medic) amplifies the healing effect.',
             task: {
                 title: 'Medical Recovery & Rad Shielding',
                 description: 'Line bunk bulkheads with water bags and run crew wellness triage.',
