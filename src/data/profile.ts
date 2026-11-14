@@ -9,6 +9,13 @@ export interface PlaytestProfile {
     reducedMotion: boolean;
     highContrast: boolean;
     soundEnabled: boolean;
+    masterVolume: number;
+    musicVolume: number;
+    sfxVolume: number;
+}
+
+function clampUnit(value: unknown, fallback: number): number {
+    return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
 }
 
 const CREW_IDS = new Set(AVAILABLE_CREW.map(member => member.id));
@@ -30,6 +37,9 @@ export function loadProfile(stored: unknown, legacySkills: unknown, preferReduce
         reducedMotion: typeof saved.reducedMotion === 'boolean' ? saved.reducedMotion : preferReducedMotion,
         highContrast: saved.highContrast === true,
         soundEnabled: saved.soundEnabled !== false,
+        masterVolume: clampUnit(saved.masterVolume, 1),
+        musicVolume: clampUnit(saved.musicVolume, 0.7),
+        sfxVolume: clampUnit(saved.sfxVolume, 0.85),
     };
 }
 

@@ -33,6 +33,9 @@ let boundAudio: AudioAPI | null = null;
 let currentTrack: MusicTrack | null = null;
 let desiredTrack: MusicTrack | null = null;
 let soundEnabled = true;
+let masterVol = 1;
+let musicVol = 0.7;
+let sfxVol = 0.85;
 let audioUnlocked = false;
 let preloaded = false;
 
@@ -60,10 +63,20 @@ function applyMuteState(): void {
     if (!boundAudio) return;
     try {
         boundAudio.muteBus('master', !soundEnabled);
-        boundAudio.setMasterVolume(soundEnabled ? 1 : 0);
+        boundAudio.setMasterVolume(soundEnabled ? masterVol : 0);
+        boundAudio.setMusicVolume(musicVol);
+        boundAudio.setSFXVolume(sfxVol);
+        boundAudio.setUIVolume(sfxVol);
     } catch {
         // Ignore on mixerless backends.
     }
+}
+
+export function setVolumes(master: number, music: number, sfx: number): void {
+    masterVol = Math.max(0, Math.min(1, master));
+    musicVol = Math.max(0, Math.min(1, music));
+    sfxVol = Math.max(0, Math.min(1, sfx));
+    applyMuteState();
 }
 
 export function setSoundEnabled(enabled: boolean): void {

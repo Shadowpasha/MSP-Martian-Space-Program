@@ -15,7 +15,7 @@ import {
 } from '../ui/flightScreens';
 import { makeFlightArt, makeFlightUi } from '../ui/flightUi';
 import { makeAbsBox, setNodeDisplayed } from '../ui/theme';
-import { bindAudio, playMusic, setSoundEnabled, unlockAudio } from '../audio/soundManager';
+import { bindAudio, playMusic, setSoundEnabled, setVolumes, unlockAudio } from '../audio/soundManager';
 import { mountSurvivalUi } from './gameUi';
 
 const controllers = new WeakMap<World, { root: Entity; update: () => void }>();
@@ -44,6 +44,7 @@ export const flightSystem = defineSystem(
         const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
         let profile = loadProfile(Storage.getJSON<unknown>(STORAGE_KEYS.PROFILE), legacySkills, reducedMotion);
         bindAudio(audio);
+        setVolumes(profile.masterVolume, profile.musicVolume, profile.sfxVolume);
         setSoundEnabled(profile.soundEnabled);
         let page: Page = 'menu';
         let nextPage: Page | null = null;
@@ -149,13 +150,22 @@ export const flightSystem = defineSystem(
                     break;
                 }
                 case 'settings':
-                    showShell(ui, page, 'Settings', 'Adjust motion, contrast, and audio for this profile.', 'settings', navigate);
-                    showSettings(ui, profile, setting => {
-                        const updated = { ...profile, [setting]: !profile[setting] };
-                        saveProfile(updated);
-                        if (setting === 'soundEnabled') setSoundEnabled(updated.soundEnabled);
-                        navigate('settings');
-                    });
+                    showShell(ui, page, 'Settings', 'Adjust motion, contrast, and audio levels for this profile.', 'settings', navigate);
+                    showSettings(
+                        ui,
+                        profile,
+                        setting => {
+                            const updated = { ...profile, [setting]: !profile[setting] };
+                            saveProfile(updated);
+                            if (setting === 'soundEnabled') setSoundEnabled(updated.soundEnabled);
+                            navigate('settings');
+                        },
+                        (field, value) => {
+                            const updated = { ...profile, [field]: value };
+                            saveProfile(updated);
+                            setVolumes(updated.masterVolume, updated.musicVolume, updated.sfxVolume);
+                        },
+                    );
                     break;
                 case 'quit':
                     showQuit(ui, navigate);
