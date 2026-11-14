@@ -147,10 +147,9 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         choices: [
             {
                 id: 'prep_wind_sampler',
-                label: 'Spin Up Wind Sampler [-1 Wind Sampler]',
+                label: 'Spin Up Wind Sampler',
                 summary: '+5 Res, +6 Morale (-3 Power)',
                 requiresCargo: 'windSampler',
-                consumesCargo: { windSampler: 1 },
                 resourceDelta: { res: 5, energy: -3 },
                 moraleDelta: 6,
                 outcomeText: 'Wind Sampler ready! Open Issue Tasks to collect data.',

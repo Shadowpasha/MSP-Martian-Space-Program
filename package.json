@@ -5,9 +5,14 @@
   "type": "module",
   "scripts": {
     "verify": "node scripts/verify.mjs",
-    "test": "node scripts/verify.mjs"
+    "test": "node scripts/verify.mjs",
+    "playtest": "node scripts/playtest.mjs"
   },
   "dependencies": {
     "@google/genai": "^3.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
   }
 }

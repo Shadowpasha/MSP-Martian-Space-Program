@@ -6,7 +6,8 @@
 
 export type PlanetId = 'mars' | 'moon';
 
-export type CrewRole = 'engineer' | 'botanist' | 'pilot' | 'medic';
+export const CREW_ROLES = ['engineer', 'botanist', 'pilot', 'medic', 'scientist', 'captain'] as const;
+export type CrewRole = typeof CREW_ROLES[number];
 
 export type TaskCategory = 'ENG' | 'BIO' | 'NAV' | 'MED' | 'SCI' | 'GOAL';
 
@@ -36,7 +37,11 @@ export interface CargoInventory {
     seedPods: number;
     extraRations: number;
     windSampler: number;   // mission-critical hardware
+    waterCanisters?: number;
+    oxygenTanks?: number;
 }
+
+export type CargoItemId = keyof CargoInventory;
 
 export interface CrewPerk {
     id: string;
@@ -110,6 +115,8 @@ export interface MissionGoal {
     deadlineSol: number;
     requiredFlag: 'wind_sample_collected' | 'ice_core_collected';
     requirements: MissionRequirement[];
+    minimumReserves?: Partial<ResourcePool>;
+    requiredEquipment?: Partial<Record<CargoItemId, number>>;
     completed: boolean;
 }
 
@@ -149,10 +156,19 @@ export interface MainLoopResult {
     timeline: SolSummaryRecord[];
 }
 
+export const UPGRADE_BRANCHES = ['Infrastructure', 'Survival', 'Operations', 'Crew'] as const;
+export type UpgradeBranch = typeof UPGRADE_BRANCHES[number];
+export type UpgradeTier = 1 | 2 | 3 | 4;
+
 export interface SkillUpgradeDef {
     id: string;
     label: string;
     summary: string;
+    branch: UpgradeBranch;
+    tier: UpgradeTier;
+    slot: 'left' | 'center' | 'right';
+    cost: number;
+    prerequisites: readonly string[];
     apply: (m: SkillTreeModifiers) => SkillTreeModifiers;
 }
 
@@ -170,55 +186,77 @@ export const DEFAULT_SKILL_MODIFIERS: SkillTreeModifiers = {
     taskSpeedBonus: 0,
 };
 
-export const SKILL_TREE_UPGRADES: SkillUpgradeDef[] = [
-    {
-        id: 'hydro_rationing',
-        label: 'Algae Nutrient Loop (-25% Food Drain)',
-        summary: 'Cuts daily crew food consumption by 25% and boosts Bio yields by 20%.',
-        apply: (m) => ({
-            ...m,
-            foodConsumptionMult: Number((m.foodConsumptionMult * 0.75).toFixed(2)),
-            hydroponicsYieldMult: Number((m.hydroponicsYieldMult * 1.2).toFixed(2)),
-        }),
-    },
-    {
-        id: 'closed_o2',
-        label: 'Closed-Loop Scrubbers (-25% O2 Drain)',
-        summary: 'Recycles cabin CO2 more efficiently, reducing daily oxygen drain by 25%.',
-        apply: (m) => ({
-            ...m,
-            oxygenConsumptionMult: Number((m.oxygenConsumptionMult * 0.75).toFixed(2)),
-        }),
-    },
-    {
-        id: 'rad_hull',
-        label: 'Polyethylene Rad Shielding (-35% Rad)',
-        summary: 'Absorbs 35% of solar flare and cosmic radiation spikes.',
-        apply: (m) => ({
-            ...m,
-            radiationShielding: Math.min(0.75, Number((m.radiationShielding + 0.35).toFixed(2))),
-        }),
-    },
-    {
-        id: 'solar_mppt',
-        label: 'Dust-Repel Solar Coating (+30% Solar)',
-        summary: 'Increases daily solar energy recovery by 30% and trims energy drain by 15%.',
-        apply: (m) => ({
-            ...m,
-            solarOutputMult: Number((m.solarOutputMult * 1.3).toFixed(2)),
-            energyConsumptionMult: Number((m.energyConsumptionMult * 0.85).toFixed(2)),
-        }),
-    },
-    {
-        id: 'ai_logistics',
-        label: 'A.R.I.E.S. Logistics Co-Pilot (-20% Task Cost)',
-        summary: 'Optimizes AI task execution: 20% lower task resource drain and +20% rover loot.',
-        apply: (m) => ({
-            ...m,
-            aiCostDiscountMult: Number((m.aiCostDiscountMult * 0.8).toFixed(2)),
-            roverYieldMult: Number((m.roverYieldMult * 1.2).toFixed(2)),
-        }),
-    },
+type UpgradeEffects = Partial<Omit<SkillTreeModifiers, 'radiationShielding' | 'taskSpeedBonus'>> & {
+    radiationShielding?: number;
+    taskSpeedBonus?: number;
+};
+
+interface UpgradeSpec {
+    id: string;
+    label: string;
+    summary: string;
+    effects: UpgradeEffects;
+}
+
+function upgradeBranch(branch: UpgradeBranch, specs: readonly [UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec]): SkillUpgradeDef[] {
+    const [root, left, right, leftEnd, rightEnd] = specs;
+    const tiers = [1, 2, 2, 3, 3, 4] as const;
+    const slots = ['center', 'left', 'right', 'left', 'right', 'center'] as const;
+    const parents = [[], [root.id], [root.id], [left.id], [right.id], [leftEnd.id, rightEnd.id]];
+    const prices = { 1: 3, 2: 5, 3: 7, 4: 10 };
+    return specs.map(({ effects, ...spec }, index) => {
+        const tier = tiers[index]!;
+        return {
+            ...spec, branch, tier, slot: slots[index]!, cost: prices[tier], prerequisites: parents[index]!,
+            apply(modifiers) {
+                const next = { ...modifiers };
+                for (const key of Object.keys(effects) as Array<keyof SkillTreeModifiers>) {
+                    const amount = effects[key]!;
+                    const current = modifiers[key];
+                    if (key === 'radiationShielding') next[key] = Math.min(0.75, current + amount);
+                    else if (key === 'taskSpeedBonus') next[key] = current + amount;
+                    else next[key] = current * amount;
+                    next[key] = Number(next[key].toFixed(4));
+                }
+                return next;
+            },
+        };
+    });
+}
+
+export const SKILL_TREE_UPGRADES = [
+    ...upgradeBranch('Infrastructure', [
+        { id: 'solar_mppt', label: 'Dust-Repel Solar Coating', summary: '+30% solar output and −15% daily power use.', effects: { solarOutputMult: 1.3, energyConsumptionMult: 0.85 } },
+        { id: 'efficient_inverters', label: 'Efficient Inverters', summary: '+15% solar output.', effects: { solarOutputMult: 1.15 } },
+        { id: 'power_balancing', label: 'Power Balancing', summary: '−10% daily power use.', effects: { energyConsumptionMult: 0.9 } },
+        { id: 'sun_tracking', label: 'Sun Tracking', summary: '+15% solar output.', effects: { solarOutputMult: 1.15 } },
+        { id: 'heat_recovery', label: 'Heat Recovery', summary: '−10% daily power use.', effects: { energyConsumptionMult: 0.9 } },
+        { id: 'habitat_microgrid', label: 'Habitat Microgrid', summary: '+10% solar output and −10% daily power use.', effects: { solarOutputMult: 1.1, energyConsumptionMult: 0.9 } },
+    ]),
+    ...upgradeBranch('Survival', [
+        { id: 'closed_o2', label: 'Closed-Loop Scrubbers', summary: '−25% daily oxygen use.', effects: { oxygenConsumptionMult: 0.75 } },
+        { id: 'hydro_rationing', label: 'Algae Nutrient Loop', summary: '−25% daily food use and +20% Bio yield.', effects: { foodConsumptionMult: 0.75, hydroponicsYieldMult: 1.2 } },
+        { id: 'greywater_reclaimer', label: 'Greywater Reclaimer', summary: '−15% daily water use.', effects: { waterConsumptionMult: 0.85 } },
+        { id: 'grow_trays', label: 'Grow Trays', summary: '+15% Bio yield.', effects: { hydroponicsYieldMult: 1.15 } },
+        { id: 'condenser', label: 'Condenser', summary: '−15% daily water use.', effects: { waterConsumptionMult: 0.85 } },
+        { id: 'redundant_scrubbers', label: 'Redundant Scrubbers', summary: '−15% daily oxygen use and −10% daily water use.', effects: { oxygenConsumptionMult: 0.85, waterConsumptionMult: 0.9 } },
+    ]),
+    ...upgradeBranch('Operations', [
+        { id: 'ai_logistics', label: 'A.R.I.E.S. Logistics Co-Pilot', summary: '−20% AI task cost and +20% rover yield.', effects: { aiCostDiscountMult: 0.8, roverYieldMult: 1.2 } },
+        { id: 'survey_routes', label: 'Survey Routes', summary: '+15% rover yield.', effects: { roverYieldMult: 1.15 } },
+        { id: 'planning_cache', label: 'Planning Cache', summary: '−10% AI task cost.', effects: { aiCostDiscountMult: 0.9 } },
+        { id: 'rover_racks', label: 'Rover Racks', summary: '+15% rover yield.', effects: { roverYieldMult: 1.15 } },
+        { id: 'dispatch_automation', label: 'Dispatch Automation', summary: '+0.1 progress per staffed task each Sol.', effects: { taskSpeedBonus: 0.1 } },
+        { id: 'autonomous_logistics', label: 'Autonomous Logistics', summary: '+10% rover yield and −10% AI task cost.', effects: { roverYieldMult: 1.1, aiCostDiscountMult: 0.9 } },
+    ]),
+    ...upgradeBranch('Crew', [
+        { id: 'rad_hull', label: 'Polyethylene Rad Shielding', summary: 'Absorbs 35% of incoming radiation spikes.', effects: { radiationShielding: 0.35 } },
+        { id: 'habitation_quarters', label: 'Habitation Quarters', summary: '−10% morale loss.', effects: { moraleDecayMult: 0.9 } },
+        { id: 'dosimeter_network', label: 'Dosimeter Network', summary: '+10 percentage points of radiation shielding.', effects: { radiationShielding: 0.1 } },
+        { id: 'shift_scheduling', label: 'Shift Scheduling', summary: '+0.2 progress per staffed task each Sol.', effects: { taskSpeedBonus: 0.2 } },
+        { id: 'storm_shelter', label: 'Storm Shelter', summary: '+15 percentage points of radiation shielding.', effects: { radiationShielding: 0.15 } },
+        { id: 'crew_support', label: 'Crew Support Systems', summary: '−15% morale loss and +0.2 progress per staffed task each Sol.', effects: { moraleDecayMult: 0.85, taskSpeedBonus: 0.2 } },
+    ]),
 ];
 
 export const DEFAULT_CREW: CrewMember[] = [
@@ -352,6 +390,32 @@ export const DEFAULT_MARS_SETUP: MissionSetupInput = {
     skillModifiers: { ...DEFAULT_SKILL_MODIFIERS },
 };
 
+export const AVAILABLE_CREW: CrewMember[] = [
+    ...DEFAULT_CREW,
+    {
+        id: 'crew_scientist', name: 'Hana Ishida', role: 'scientist', trait: 'Field Researcher',
+        bio: 'Planetary scientist who turns rough field samples into reliable measurements and useful supplies.',
+        portraitPath: 'assets/textures/crew_scientist.png', stamina: 89, health: 94, morale: 86,
+        stageAnchor: { x: 0.63, y: 0.55 },
+        perk: {
+            id: 'perk_field_research', title: 'Field Research', bonusCategory: 'SCI',
+            description: '−20% cost, +50% progress, and +30% yield on Science tasks.',
+            costMultiplier: 0.8, speedMultiplier: 1.5, yieldMultiplier: 1.3,
+        },
+    },
+    {
+        id: 'crew_captain', name: 'Alex Keller', role: 'captain', trait: 'Expedition Lead',
+        bio: 'Flight commander who keeps field expeditions coordinated when schedules and conditions turn rough.',
+        portraitPath: 'assets/textures/crew_captain.png', stamina: 91, health: 95, morale: 89,
+        stageAnchor: { x: 0.84, y: 0.63 },
+        perk: {
+            id: 'perk_field_command', title: 'Field Command', bonusCategory: 'GOAL',
+            description: '−10% cost, +30% progress, and +20% yield on Goal tasks.',
+            costMultiplier: 0.9, speedMultiplier: 1.3, yieldMultiplier: 1.2,
+        },
+    },
+];
+
 export const MOON_TEST_SETUP: MissionSetupInput = {
     ...DEFAULT_MARS_SETUP,
     planet: 'moon',
@@ -385,17 +449,17 @@ export const STORAGE_KEYS = {
     PENDING_SETUP: 'mars-outpost:pending-setup',
     ACTIVE_SKILLS: 'mars-outpost:skill-upgrades',
     LAST_RESULT: 'mars-outpost:last-result',
+    PROFILE: 'mars-outpost:profile-v1',
 } as const;
 
 export function cloneSetup(setup: MissionSetupInput): MissionSetupInput {
     return JSON.parse(JSON.stringify(setup)) as MissionSetupInput;
 }
 
-export function computeSkillModifiers(unlockedIds: readonly string[]): SkillTreeModifiers {
-    let mods: SkillTreeModifiers = { ...DEFAULT_SKILL_MODIFIERS };
-    for (const id of unlockedIds) {
-        const def = SKILL_TREE_UPGRADES.find((u) => u.id === id);
-        if (def) mods = def.apply(mods);
-    }
-    return mods;
+export function computeSkillModifiers(
+    unlockedIds: readonly string[],
+    base: SkillTreeModifiers = DEFAULT_SKILL_MODIFIERS,
+): SkillTreeModifiers {
+    const owned = new Set(unlockedIds);
+    return SKILL_TREE_UPGRADES.reduce((mods, upgrade) => owned.has(upgrade.id) ? upgrade.apply(mods) : mods, { ...base });
 }

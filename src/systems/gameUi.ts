@@ -1,42 +1,34 @@
 import {
     ArrayDataSource,
-    Assets,
+    AssetScope,
     createButton,
     createListView,
     createProgress,
     createScrollView,
-    defineSystem,
     Draggable,
-    GetWorld,
     measureText,
     px,
-    Res,
     spawnUIEntity,
-    Storage,
     TextAlign,
     TextVerticalAlign,
-    UIEvents,
     UINode,
     uiNodeWorldBox,
     uiPlugin,
     UIPositionType,
     type ButtonHandle,
+    type AssetsData,
     type Color,
     type Dimension,
     type Entity,
+    type FocusManagerState,
     type ListViewHandle,
     type ProgressHandle,
     type ScrollViewHandle,
     type UIEventQueue,
     type World,
 } from 'esengine';
-import {
-    DEFAULT_MARS_SETUP,
-    STORAGE_KEYS,
-    type CrewMember,
-    type CrewRole,
-    type MissionSetupInput,
-} from '../contracts/gameContract';
+import type { CrewMember, CrewRole, MainLoopResult, MissionSetupInput } from '../contracts/gameContract';
+import { formatResource, resourceEntries } from '../data/missions';
 import {
     advanceSol,
     assignCrewToTask,
@@ -105,23 +97,25 @@ interface DraggableNodeBox {
     insetTop: Dimension;
 }
 
-let initialized = false;
-let updateTick: (() => void) | null = null;
+export interface SurvivalUiOptions {
+    world: World;
+    events: UIEventQueue;
+    assets: AssetsData;
+    gameRoot: Entity;
+    setup: MissionSetupInput;
+    reducedMotion: boolean;
+    focus: FocusManagerState;
+    onFinish: (result: MainLoopResult) => void;
+    onExit: (destination: 'menu' | 'mission' | 'moon') => void;
+}
 
-export const gameUiSystem = defineSystem(
-    [GetWorld(), Res(UIEvents), Res(Assets)],
-    (world: World, events: UIEventQueue, assets) => {
-        if (initialized) {
-            updateTick?.();
-            return;
-        }
-        const gameRoot = world.findEntityByName('GameRoot');
-        if (gameRoot === null) return;
-        initialized = true;
-
-        const savedSetup = Storage.getJSON<MissionSetupInput>(STORAGE_KEYS.PENDING_SETUP);
-        const savedSkills = Storage.getJSON<string[]>(STORAGE_KEYS.ACTIVE_SKILLS) ?? [];
-        let state: OutpostGameState = createInitialGameState(savedSetup ?? DEFAULT_MARS_SETUP, savedSkills);
+export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
+        const { world, events, assets, gameRoot, setup, reducedMotion, focus, onFinish, onExit } = options;
+        const state: OutpostGameState = createInitialGameState(setup);
+        const textures = new AssetScope();
+        const unsubscribe = world.onDespawn(entity => {
+            if (entity === gameRoot) { unsubscribe(); textures.releaseAll(); }
+        });
 
         // ---------------------------------------------------------------------
         // TOP BAR (0..1280, height 68)
@@ -516,12 +510,12 @@ export const gameUiSystem = defineSystem(
             color: PALETTE.cyan,
             wordWrap: true,
         });
-        const statusReqsLbl = makeAbsLabel(world, statusBox, 10, 50, 236, 92, '', {
-            fontSize: 10,
+        const statusReqsLbl = makeAbsLabel(world, statusBox, 10, 50, 236, 102, '', {
+            fontSize: 11,
             color: PALETTE.amber,
             wordWrap: true,
         });
-        const statusForecastLbl = makeAbsLabel(world, statusBox, 10, 144, 236, 34, '', {
+        const statusForecastLbl = makeAbsLabel(world, statusBox, 10, 152, 236, 28, '', {
             fontSize: 10,
             color: PALETTE.textPrimary,
             wordWrap: true,
@@ -600,14 +594,10 @@ export const gameUiSystem = defineSystem(
                     modals.openEventModal();
                     return;
                 }
-                advanceSol(state);
+                if (!advanceSol(state).advanced) return;
                 refreshAllUI();
-                if (state.result !== null) {
-                    Storage.setJSON(STORAGE_KEYS.LAST_RESULT, state.result);
-                    modals.openEndReportModal();
-                } else if (state.currentEvent) {
-                    modals.openEventModal();
-                }
+                if (state.result !== null) onFinish(state.result);
+                modals.openSolReport();
             },
         });
         const endSolLbl = makeAbsLabel(world, endSolBtn.entity, 12, 8, 252, 32, 'END SOL  ▷', {
@@ -721,8 +711,8 @@ export const gameUiSystem = defineSystem(
             setVisualColor(world, card.stripe, roleColor(card.role));
         }
 
-        updateTick = () => {
-            const t = typeof performance !== 'undefined' ? performance.now() * 0.001 : Date.now() * 0.001;
+        const updateTick = () => {
+            const t = reducedMotion ? 0 : typeof performance !== 'undefined' ? performance.now() * 0.001 : Date.now() * 0.001;
             const pulseFast = 0.5 + 0.5 * Math.sin(t * 4.5);
             const pulseSlow = 0.5 + 0.5 * Math.sin(t * 2.4);
 
@@ -851,30 +841,33 @@ export const gameUiSystem = defineSystem(
             world,
             events,
             parent: gameRoot,
+            focus,
             getState: () => state,
             onStateChanged: () => refreshAllUI(),
-            onRestartRun: (setup) => {
-                state = createInitialGameState(setup, state.unlockedSkillIds);
-                refreshAllUI();
-                if (state.currentEvent) modals.openEventModal();
-            },
+            onExit,
         });
 
         // Load placeholder portraits & AI bot icon asynchronously via Assets
         for (const m of state.crew) {
-            void assets.loadTexture(m.portraitPath).then((res) => {
+            void assets.acquireTexture(m.portraitPath).then((lease) => {
+                if (!world.valid(gameRoot)) { lease.release(); return; }
+                const res = lease.value;
                 modals.setPortraitTexture(m.id, res.handle);
                 const card = crewCards.find((c) => c.id === m.id);
                 if (card) {
                     setVisualTexture(world, card.portraitBox, res.handle);
                     setVisualColor(world, card.portraitBox, { r: 1, g: 1, b: 1, a: 1 });
                 }
+                textures.add(lease);
             }).catch(() => {});
         }
-        void assets.loadTexture('assets/textures/ai_robot.png').then((res) => {
+        void assets.acquireTexture('assets/textures/ai_robot.png').then((lease) => {
+            if (!world.valid(gameRoot)) { lease.release(); return; }
+            const res = lease.value;
             modals.setAiRobotTexture(res.handle);
             setVisualTexture(world, aiConsoleIcon, res.handle);
             setVisualColor(world, aiConsoleIcon, { r: 1, g: 1, b: 1, a: 1 });
+            textures.add(lease);
         }).catch(() => {});
 
         // ---------------------------------------------------------------------
@@ -953,7 +946,9 @@ export const gameUiSystem = defineSystem(
                 setText(
                     world,
                     slot.perkLbl,
-                    eff.matchedPerkNames.length > 0
+                    task.category === 'GOAL' && task.staffedSols > 0
+                        ? `Data: ${Math.min(task.staffedSols, Math.ceil(state.goal.durationHours / 24))}/${Math.ceil(state.goal.durationHours / 24)} Sols`
+                        : eff.matchedPerkNames.length > 0
                         ? `★ ${eff.matchedPerkNames[0]}`
                         : eff.progressPerSol > 0
                             ? `Rec: ${task.recommendedRole.toUpperCase()}`
@@ -1041,7 +1036,8 @@ export const gameUiSystem = defineSystem(
             const reqLines = state.goal.requirements.map(
                 (r) => `${r.current >= r.target ? '[DONE]' : '[  ]'} ${Math.min(r.current, r.target)}/${r.target} ${r.label}`,
             );
-            setText(world, statusReqsLbl, `Mission Requirements:\n${reqLines.join('\n')}`);
+            const reserves = resourceEntries(state.goal.minimumReserves).map(([key, amount]) => formatResource(key, amount));
+            setText(world, statusReqsLbl, [...reqLines, ...(reserves.length ? [`Reserves: ${reserves.join(' · ')}`] : [])].join('\n'));
             setText(
                 world,
                 statusForecastLbl,
@@ -1059,6 +1055,5 @@ export const gameUiSystem = defineSystem(
         if (state.currentEvent) {
             modals.openEventModal();
         }
-    },
-    { name: 'GameUiSystem' },
-);
+        return updateTick;
+}
