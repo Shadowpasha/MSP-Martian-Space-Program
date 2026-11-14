@@ -19,7 +19,7 @@ import {
     type TaskCategory,
     type WeatherType,
 } from '../contracts/gameContract';
-import { pickDailyEvent, type DailyEventDef, type EventChoice } from '../data/events';
+import { pickDailyEvent, type DailyEventDef, type EventChoice, type MissionProgressDelta } from '../data/events';
 import type { ProposedTaskSpec } from '../services/geminiPlanner';
 
 export interface ActiveTask {
@@ -73,9 +73,12 @@ export interface OutpostGameState {
     rationPolicy: RationPolicy;
     tasks: ActiveTask[];
     usedEventIds: string[];
+    usedEventTitles: string[];
     currentEvent: DailyEventDef | null;
     lastEventChoiceLabel: string;
     lastEventOutcome: string | null;
+    lastEventScienceFact: string | null;
+    lastEventDeltas: string[];
     lastSolReport: string[];
     dailyLog: LogEntry[];
     timeline: SolSummaryRecord[];
@@ -148,9 +151,12 @@ export function createInitialGameState(
         rationPolicy: 'full',
         tasks: [],
         usedEventIds,
+        usedEventTitles: [firstEvent.title],
         currentEvent: firstEvent,
         lastEventChoiceLabel: 'Pending',
         lastEventOutcome: null,
+        lastEventScienceFact: firstEvent.scienceFact,
+        lastEventDeltas: [],
         lastSolReport: [
             `Touchdown on ${setup.planet.toUpperCase()}! Attempt your mission before Sol ${setup.missionGoal.deadlineSol}.`,
             `Primary Objective: ${setup.missionGoal.title} by Sol ${setup.missionGoal.deadlineSol}.`,
@@ -207,9 +213,66 @@ export function isChoiceAvailable(state: OutpostGameState, choice: EventChoice):
     return { ok: true };
 }
 
+const CARGO_LABELS: Record<keyof CargoInventory, string> = {
+    repairKits: 'Repair Kit',
+    medkits: 'Medkit',
+    batteryPacks: 'Battery Pack',
+    seedPods: 'Seed Pod',
+    extraRations: 'Extra Rations',
+    windSampler: 'Wind Sampler',
+};
+
+function formatChoiceDeltas(
+    choice: EventChoice,
+    radApplied: number,
+    morApplied: number,
+    reqEffects: string[],
+): string[] {
+    const out: string[] = [];
+    if (choice.consumesCargo) {
+        for (const [k, amt] of Object.entries(choice.consumesCargo) as [keyof CargoInventory, number][]) {
+            if (amt) out.push(`-${amt} ${CARGO_LABELS[k]}`);
+        }
+    }
+    const r = choice.resourceDelta;
+    if (r?.energy) out.push(`${r.energy > 0 ? '+' : ''}${r.energy} Power`);
+    if (r?.food) out.push(`${r.food > 0 ? '+' : ''}${r.food} Food`);
+    if (r?.water) out.push(`${r.water > 0 ? '+' : ''}${r.water} Water`);
+    if (r?.oxygen) out.push(`${r.oxygen > 0 ? '+' : ''}${r.oxygen}% O2`);
+    if (r?.res) out.push(`${r.res > 0 ? '+' : ''}${r.res} Res`);
+    if (radApplied) out.push(`${radApplied > 0 ? '+' : ''}${round1(radApplied)} Radiation`);
+    if (morApplied) out.push(`${morApplied > 0 ? '+' : ''}${round1(morApplied)}% Morale`);
+    out.push(...reqEffects);
+    return out;
+}
+
+export function applyMissionRequirementDelta(
+    state: OutpostGameState,
+    delta: MissionProgressDelta,
+): string[] {
+    const effects: string[] = [];
+    for (const [kind, rawAmt] of Object.entries(delta) as [keyof MissionProgressDelta, number][]) {
+        if (!rawAmt) continue;
+        const req = state.goal.requirements.find((r) => r.kind === kind);
+        if (!req) continue;
+        const before = req.current;
+        req.current = clamp(req.current + rawAmt, 0, req.target);
+        const actual = req.current - before;
+        if (actual > 0) {
+            appendLog(state, 'good', `Mission Req +${actual}: ${req.current}/${req.target} ${req.label}`);
+            effects.push(`+${actual} ${req.label}`);
+        } else if (actual < 0) {
+            appendLog(state, 'warn', `Mission Req damaged (${actual}): ${req.current}/${req.target} ${req.label}`);
+            effects.push(`${actual} ${req.label} (damaged!)`);
+        }
+    }
+    return effects;
+}
+
 export function resolveDailyEventChoice(state: OutpostGameState, choiceId: string): { ok: boolean; message: string } {
-    if (!state.currentEvent) return { ok: false, message: 'No active event.' };
-    const choice = state.currentEvent.choices.find((c) => c.id === choiceId);
+    const ev = state.currentEvent;
+    if (!ev) return { ok: false, message: 'No active event.' };
+    const choice = ev.choices.find((c) => c.id === choiceId);
     if (!choice) return { ok: false, message: 'Choice not found.' };
 
     const check = isChoiceAvailable(state, choice);
@@ -223,25 +286,49 @@ export function resolveDailyEventChoice(state: OutpostGameState, choiceId: strin
     if (choice.resourceDelta) {
         applyResourceDelta(state.resources, choice.resourceDelta);
     }
+    let radApplied = 0;
     if (choice.radiationDelta) {
-        const rad = choice.radiationDelta > 0
+        radApplied = choice.radiationDelta > 0
             ? choice.radiationDelta * (1 - state.skillModifiers.radiationShielding)
             : choice.radiationDelta;
-        state.conditions.radiation = clamp(round1(state.conditions.radiation + rad), 0, 100);
+        state.conditions.radiation = clamp(round1(state.conditions.radiation + radApplied), 0, 100);
     }
+    let morApplied = 0;
     if (choice.moraleDelta) {
-        const mor = choice.moraleDelta < 0
+        morApplied = choice.moraleDelta < 0
             ? choice.moraleDelta * state.skillModifiers.moraleDecayMult
             : choice.moraleDelta;
-        state.conditions.morale = clamp(round1(state.conditions.morale + mor), 0, 100);
+        state.conditions.morale = clamp(round1(state.conditions.morale + morApplied), 0, 100);
     }
+    const reqEffects = choice.requirementDelta
+        ? applyMissionRequirementDelta(state, choice.requirementDelta)
+        : [];
 
     state.lastEventChoiceLabel = choice.label;
     state.lastEventOutcome = choice.outcomeText;
-    appendLog(state, 'event', `${state.currentEvent.title}: ${choice.outcomeText}`);
+    state.lastEventScienceFact = ev.scienceFact ?? null;
+    state.lastEventDeltas = formatChoiceDeltas(choice, radApplied, morApplied, reqEffects);
+    appendLog(state, 'event', `${ev.title}: ${choice.outcomeText}`);
     state.currentEvent = null;
     if (state.phase === 'event') state.phase = 'planning';
     return { ok: true, message: choice.outcomeText };
+}
+
+export function applyGeneratedDailyEvent(state: OutpostGameState, event: DailyEventDef): void {
+    if (state.phase === 'ended' || state.result !== null) return;
+    state.currentEvent = event;
+    if (!state.usedEventIds.includes(event.id)) {
+        state.usedEventIds.push(event.id);
+    }
+    if (!state.usedEventTitles.includes(event.title)) {
+        state.usedEventTitles.push(event.title);
+    }
+    const existingIdx = state.dailyLog.findIndex((entry) => entry.sol === state.sol && entry.kind === 'event');
+    if (existingIdx !== -1) {
+        state.dailyLog[existingIdx]!.text = `Alert: ${event.title}`;
+    } else {
+        appendLog(state, 'event', `Alert: ${event.title}`);
+    }
 }
 
 export function enqueueTask(
@@ -686,9 +773,14 @@ export function advanceSol(state: OutpostGameState): { advanced: boolean; reason
         state.goal.completed,
     );
     state.usedEventIds.push(nextEvent.id);
+    if (!state.usedEventTitles.includes(nextEvent.title)) {
+        state.usedEventTitles.push(nextEvent.title);
+    }
     state.currentEvent = nextEvent;
     state.lastEventChoiceLabel = 'Pending';
     state.lastEventOutcome = null;
+    state.lastEventScienceFact = null;
+    state.lastEventDeltas = [];
     state.phase = 'event';
     state.lastSolReport = report;
 

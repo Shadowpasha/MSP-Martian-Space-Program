@@ -39,6 +39,7 @@ import {
 } from '../contracts/gameContract';
 import {
     advanceSol,
+    applyGeneratedDailyEvent,
     assignCrewToTask,
     cancelTask,
     computeTaskEfficiency,
@@ -49,6 +50,8 @@ import {
     type LogEntry,
     type OutpostGameState,
 } from '../simulation/solEngine';
+import { isScriptedStoryEvent } from '../data/events';
+import { generateDailyEventWithGemini, preloadGeminiKey } from '../services/geminiPlanner';
 import { createGameModals, type ModalsController } from '../ui/modals';
 import {
     buttonStates,
@@ -187,21 +190,37 @@ export const gameUiSystem = defineSystem(
             align: TextAlign.Center,
         });
 
-        // Conditions (Radiation, Morale)
-        const radFramed = makeFramedBox(world, topBar, 812, 8, 114, 52, PALETTE.panelCard, PALETTE.panelBorder, true, 2);
-        makeAbsLabel(world, radFramed.inner, 6, 5, 98, 15, 'RADIATION', { fontSize: 10, bold: true, color: PALETTE.textMuted });
-        const radValLbl = makeAbsLabel(world, radFramed.inner, 6, 22, 98, 22, '14 mSv', { fontSize: 14, bold: true, color: PALETTE.green });
+        // Conditions (Radiation, Morale) & Help Button
+        const radFramed = makeFramedBox(world, topBar, 810, 8, 100, 52, PALETTE.panelCard, PALETTE.panelBorder, true, 2);
+        makeAbsLabel(world, radFramed.inner, 6, 5, 84, 15, 'RADIATION', { fontSize: 10, bold: true, color: PALETTE.textMuted });
+        const radValLbl = makeAbsLabel(world, radFramed.inner, 6, 22, 84, 22, '14 mSv', { fontSize: 13, bold: true, color: PALETTE.green });
 
-        const morFramed = makeFramedBox(world, topBar, 932, 8, 114, 52, PALETTE.panelCard, PALETTE.panelBorder, true, 2);
-        makeAbsLabel(world, morFramed.inner, 6, 5, 98, 15, 'MORALE', { fontSize: 10, bold: true, color: PALETTE.textMuted });
-        const morValLbl = makeAbsLabel(world, morFramed.inner, 6, 22, 98, 22, '84%', { fontSize: 14, bold: true, color: PALETTE.green });
+        const morFramed = makeFramedBox(world, topBar, 916, 8, 96, 52, PALETTE.panelCard, PALETTE.panelBorder, true, 2);
+        makeAbsLabel(world, morFramed.inner, 6, 5, 80, 15, 'MORALE', { fontSize: 10, bold: true, color: PALETTE.textMuted });
+        const morValLbl = makeAbsLabel(world, morFramed.inner, 6, 22, 80, 22, '84%', { fontSize: 13, bold: true, color: PALETTE.green });
+
+        const topHelpBtn = createButton({
+            world,
+            events,
+            parent: topBar,
+            node: { position: UIPositionType.Absolute, insetLeft: px(1018), insetTop: px(12), width: px(42), height: px(44) },
+            states: buttonStates(PALETTE.panelCard, PALETTE.cyan, PALETTE.btnPressed),
+            fadeDuration: 0.12,
+            onClick: () => modals.openHelpModal(),
+        });
+        makeAbsLabel(world, topHelpBtn.entity, 0, 0, 42, 44, '?', {
+            fontSize: 18,
+            bold: true,
+            color: PALETTE.amber,
+            align: TextAlign.Center,
+        });
 
         // Top right quick utility buttons (Cargo, Mission)
         const topCargoBtn = createButton({
             world,
             events,
             parent: topBar,
-            node: { position: UIPositionType.Absolute, insetLeft: px(1062), insetTop: px(12), width: px(96), height: px(44) },
+            node: { position: UIPositionType.Absolute, insetLeft: px(1066), insetTop: px(12), width: px(96), height: px(44) },
             states: buttonStates(),
             fadeDuration: 0.12,
             onClick: () => modals.openStationModal('cargo'),
@@ -409,6 +428,20 @@ export const gameUiSystem = defineSystem(
             makeAbsLabel(world, hsInner, 6, 26, 140, 16, hs.sub, { fontSize: 10, color: PALETTE.textMuted, align: TextAlign.Center });
         }
 
+        // GUIDED NEXT-STEP STRIP (Kid-friendly live step indicator)
+        const nextStepFrame = makeFramedBox(world, centerStage, 48, 74, 602, 38, PALETTE.panelCard, PALETTE.cyan, true, 2);
+        const nextStepStripe = makeAbsBox(world, nextStepFrame.inner, 0, 0, 5, 34, PALETTE.cyan, true);
+        const nextStepLbl = makeAbsLabel(
+            world,
+            nextStepFrame.inner,
+            14,
+            0,
+            572,
+            34,
+            'STEP 1 OF 4: Check your Daily Update below!',
+            { fontSize: 12, bold: true, color: PALETTE.textPrimary, align: TextAlign.Center },
+        );
+
         // MIDDLE OF SCREEN: STATION COMMAND MENU (Daily Update + Issue Tasks)
         const cmdHubFrame = makeFramedBox(world, centerStage, 48, 122, 602, 202, PALETTE.modalBg, PALETTE.panelBorderLight, false, 2);
         const cmdHubHeader = makeAbsBox(world, cmdHubFrame.inner, 0, 0, 598, 34, PALETTE.bgDark, true);
@@ -584,6 +617,49 @@ export const gameUiSystem = defineSystem(
         });
 
         // Bottom Right "END SOL ▷" button
+        let endSolPending = false;
+
+        async function runEndOfSolFlow(): Promise<void> {
+            if (endSolPending) return;
+            endSolPending = true;
+            try {
+                advanceSol(state);
+                refreshAllUI();
+                if (state.result !== null) {
+                    Storage.setJSON(STORAGE_KEYS.LAST_RESULT, state.result);
+                    modals.openEndReportModal();
+                    return;
+                }
+                const usedSet = new Set(state.usedEventIds);
+                const scripted = isScriptedStoryEvent(state.sol, state.goal.completed, usedSet);
+                const hasKey = !scripted && (await preloadGeminiKey());
+                if (!hasKey) {
+                    if (state.currentEvent) modals.openEventModal();
+                    return;
+                }
+                modals.openEventScanningModal();
+                const gen = await generateDailyEventWithGemini({
+                    planet: state.planet,
+                    sol: state.sol,
+                    targetSol: state.targetSol,
+                    resources: { ...state.resources },
+                    conditions: { ...state.conditions },
+                    cargo: { ...state.cargo },
+                    crew: state.crew,
+                    goal: state.goal,
+                    usedEventIds: state.usedEventIds,
+                    usedEventTitles: state.usedEventTitles,
+                });
+                if (gen.source === 'gemini') {
+                    applyGeneratedDailyEvent(state, gen.event);
+                    refreshAllUI();
+                }
+                modals.openEventModal();
+            } finally {
+                endSolPending = false;
+            }
+        }
+
         const endSolBtn = createButton({
             world,
             events,
@@ -592,6 +668,7 @@ export const gameUiSystem = defineSystem(
             states: buttonStates(PALETTE.goNormal, PALETTE.goHover, PALETTE.goPressed),
             fadeDuration: 0.12,
             onClick: () => {
+                if (endSolPending) return;
                 if (state.result !== null) {
                     modals.openEndReportModal();
                     return;
@@ -600,14 +677,22 @@ export const gameUiSystem = defineSystem(
                     modals.openEventModal();
                     return;
                 }
-                advanceSol(state);
-                refreshAllUI();
-                if (state.result !== null) {
-                    Storage.setJSON(STORAGE_KEYS.LAST_RESULT, state.result);
-                    modals.openEndReportModal();
-                } else if (state.currentEvent) {
-                    modals.openEventModal();
+                const unassignedTaskCount = state.tasks.filter((t) => t.assignedCrewIds.length === 0).length;
+                if (unassignedTaskCount > 0) {
+                    modals.openIdleConfirmModal(
+                        `You have ${unassignedTaskCount} active job${unassignedTaskCount > 1 ? 's' : ''} with NO astronaut assigned!\nDrag a crew card onto the job on the left, or sleep anyway?`,
+                        () => void runEndOfSolFlow(),
+                    );
+                    return;
                 }
+                if (state.tasks.length === 0 && !state.goal.completed) {
+                    modals.openIdleConfirmModal(
+                        'Your crew has ZERO jobs queued today!\nOpen ISSUE TASKS to grow food, recharge power, or prep your mission first?',
+                        () => void runEndOfSolFlow(),
+                    );
+                    return;
+                }
+                void runEndOfSolFlow();
             },
         });
         const endSolLbl = makeAbsLabel(world, endSolBtn.entity, 12, 8, 252, 32, 'END SOL  ▷', {
@@ -995,8 +1080,28 @@ export const gameUiSystem = defineSystem(
                 setTextColor(world, card.taskLbl, assigned ? PALETTE.cyan : PALETTE.green);
             }
 
-            // Middle Command Hub: Daily Update + Issue Tasks state
+            // Middle Command Hub: Daily Update + Issue Tasks state + Guided Next-Step Banner
             const isEnded = state.result !== null;
+            const assignedCount = state.crew.filter((c) => getCrewAssignment(state, c.id)).length;
+            const hasUnassignedTasks = state.tasks.some((t) => t.assignedCrewIds.length === 0);
+
+            if (isEnded) {
+                setVisualColor(world, nextStepStripe, PALETTE.green);
+                setText(world, nextStepLbl, 'MISSION COMPLETE! Tap VIEW REPORT to see your Mars score and tips!');
+            } else if (state.currentEvent) {
+                setVisualColor(world, nextStepStripe, PALETTE.marsOrange);
+                setText(world, nextStepLbl, 'STEP 1 OF 4: Open DAILY UPDATE below to handle today\'s Mars alert!');
+            } else if (state.tasks.length === 0) {
+                setVisualColor(world, nextStepStripe, PALETTE.cyan);
+                setText(world, nextStepLbl, 'STEP 2 OF 4: Tap ISSUE TASKS below to ask A.R.I.E.S. for a crew job!');
+            } else if (assignedCount === 0 || hasUnassignedTasks) {
+                setVisualColor(world, nextStepStripe, PALETTE.amber);
+                setText(world, nextStepLbl, 'STEP 3 OF 4: Drag Elena, Kenji, Maya, or Marcus onto a task on the left!');
+            } else {
+                setVisualColor(world, nextStepStripe, PALETTE.green);
+                setText(world, nextStepLbl, 'STEP 4 OF 4: All set! Tap END SOL (bottom right) to run today on Mars!');
+            }
+
             if (state.currentEvent && !isEnded) {
                 setText(world, dailyPillLbl, '! NEW UPDATE');
                 setText(world, dailyTitleLbl, state.currentEvent.title);
@@ -1012,7 +1117,6 @@ export const gameUiSystem = defineSystem(
                 setText(world, endSolLbl, 'VIEW REPORT');
                 setText(world, endSolSubLbl, state.result?.outcome === 'victory' ? 'You did it! Tap for report' : 'Tap to see mission tips');
             } else {
-                const assignedCount = state.crew.filter((c) => getCrewAssignment(state, c.id)).length;
                 setText(world, dailyPillLbl, 'ALL CLEAR');
                 setText(world, dailyTitleLbl, `Sol ${state.sol} update done!`);
                 setText(world, dailyCtaLbl, 'VIEW BRIEFING');
