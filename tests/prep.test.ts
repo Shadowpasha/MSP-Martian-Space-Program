@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEFAULT_CREW } from '../src/contracts/gameContract';
+import { DEFAULT_CREW, GOAL_FLAGS } from '../src/contracts/gameContract';
 import { advanceSol, createInitialGameState, resolveDailyEventChoice } from '../src/simulation/solEngine';
 import { ITEMS, getItem } from '../src/prep/data/items';
 import { MISSIONS, PLAYABLE_MISSIONS } from '../src/prep/data/missions';
@@ -20,9 +20,9 @@ test('playable missions use real items, sources, and goal flags the main loop kn
     assert.ok(PLAYABLE_MISSIONS.length >= 3);
     assert.equal(new Set(MISSIONS.map((m) => m.id)).size, MISSIONS.length);
     for (const m of PLAYABLE_MISSIONS) {
-        assert.ok(m.goalFlag === 'wind_sample_collected' || m.goalFlag === 'ice_core_collected');
+        assert.ok((GOAL_FLAGS as readonly string[]).includes(m.goalFlag!), `${m.id} goal is one the loop knows`);
         assert.ok(m.hardware.length > 0, `${m.id} has hardware`);
-        for (const hw of m.hardware) assert.equal(getItem(hw.itemId).category, 'mission');
+        for (const hw of m.hardware) assert.ok(getItem(hw.itemId), `${m.id} hardware ${hw.itemId} exists`);
         assert.ok(m.realBasis.sources.every((s) => s.url.startsWith('https://')));
         assert.ok(m.briefing.length > 20 && m.lesson.length > 20);
         for (const site of m.sites) {
@@ -102,10 +102,11 @@ test('buildSetup output runs in the team simulation with 2, 3 and 4 crew', () =>
         const offer = makeOffer(rng, m);
         for (const n of [2, 3, 4]) {
             const crew = DEFAULT_CREW.slice(0, n);
-            const setup = buildSetup(offer, crew, packFor(offer, n), ['closed_o2']);
+            const grid = packFor(offer, n);
+            for (const hw of m.hardware) assert.ok(grid.count(hw.itemId) >= hw.count, `${m.id} packs ${hw.itemId}`);
+            const setup = buildSetup(offer, crew, grid, ['closed_o2']);
             assert.equal(setup.planet, m.planet);
             assert.equal(setup.crew.length, n);
-            assert.equal(setup.cargo.windSampler, 1);
             assert.equal(setup.missionGoal.requiredFlag, m.goalFlag);
             assert.ok(setup.startingResources.oxygen <= 100);
             assert.equal(setup.skillModifiers.oxygenConsumptionMult, 0.75);

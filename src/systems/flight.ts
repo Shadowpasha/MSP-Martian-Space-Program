@@ -50,6 +50,7 @@ export const flightSystem = defineSystem(
         let selectedCrewId = profile.crewIds[0] ?? 'crew_engineer';
         let selectedUpgradeId = SKILL_TREE_UPGRADES[0]!.id;
         let offer: MissionOffer | null = null;
+        let missionPage = 0;
         let draft: CargoPlacement[] = [];
         let draftKey = '';
         let runSetup: MissionSetupInput | null = null;
@@ -131,7 +132,7 @@ export const flightSystem = defineSystem(
                     break;
                 case 'mission':
                     showShell(ui, page, 'Mission Selection', 'Review the contract before loading the cargo bay.', 'mars', navigate);
-                    showMissions(ui, missionOffers(readPendingSetup()), selectMission);
+                    showMissions(ui, missionOffers(readPendingSetup()), selectMission, missionPage, next => { missionPage = next; navigate('mission'); });
                     break;
                 case 'cargo': {
                     const chosen = offer;

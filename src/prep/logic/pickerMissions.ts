@@ -46,23 +46,43 @@ export function pickerSetup(mission: PrepMission): MissionSetupInput {
                 { id: 'req_crew', label: 'Assign Crew', kind: 'assign_crew', current: 0, target: 2 },
             ],
             minimumReserves: { ...MINIMUM_RESERVES },
-            requiredEquipment: { windSampler: 1 },
+            requiredEquipment: { ...(mission.pickerEquipment ?? { windSampler: 1 }) },
             completed: false,
         },
     };
 }
 
-/** Ice Hunter (Mars) and Shadow Ice (Moon) for slots 2 and 3 of the picker. */
+/** Card art per mission (existing team and outpost art; the Moon mission uses the lunar map). */
+const CARD_ART: Record<string, string> = {
+    ice_hunter: 'assets/textures/mission_2.png',
+    moon_shadow_ice: 'assets/textures/prep/maps/map_lunar_south_pole_320x180.png',
+    oxygen_maker: 'assets/textures/mission_3.png',
+    space_garden: 'assets/textures/outpost/events/event_cloudy_plant_tanks_256x144.png',
+    radiation_detective: 'assets/textures/outpost/events/event_solar_flare_alert_256x144.png',
+};
+
+/** Short NASA names for the card line (the popup shows the full name, fact and source). */
+const CARD_BASIS: Record<string, string> = {
+    ice_hunter: 'the Phoenix lander',
+    moon_shadow_ice: 'LCROSS',
+    oxygen_maker: 'MOXIE on Perseverance',
+    space_garden: 'Veggie on the Space Station',
+    radiation_detective: 'RAD on Curiosity',
+};
+
+/** Mission Prep's missions for the picker, after the Tharsis survey. Storm Watch is left out (same goal as Tharsis). */
+export const PICKER_MISSION_IDS = ['ice_hunter', 'moon_shadow_ice', 'oxygen_maker', 'space_garden', 'radiation_detective'] as const;
+
 export function pickerMissions(): PickerMission[] {
-    return ['ice_hunter', 'moon_shadow_ice'].map((id) => {
+    return PICKER_MISSION_IDS.map((id) => {
         const m = getMission(id);
         const site = m.sites[0]!;
         const setup = pickerSetup(m);
         return {
             title: m.title,
             site: `${m.planet === 'moon' ? 'MOON' : 'MARS'} · ${site.name.toUpperCase()}`,
-            description: `${setup.missionGoal.description} Based on NASA's ${m.realBasis.mission.split(' (')[0]}.`,
-            image: m.planet === 'moon' ? 'assets/textures/prep/maps/map_lunar_south_pole_320x180.png' : undefined,
+            description: `${setup.missionGoal.description} Based on NASA's ${CARD_BASIS[id]}.`,
+            image: CARD_ART[id],
             setup,
             briefing: {
                 task: m.briefing,

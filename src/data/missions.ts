@@ -54,8 +54,9 @@ export const THARSIS_BRIEFING: MissionBriefing = {
     source: 'NASA: Opportunity rover mission comes to end (2019)',
 };
 
-// Slots 2 and 3: Mission Prep's NASA-based missions (Ice Hunter on Mars, Shadow Ice on
-// the Moon). They replace the old "Polar Ice Recon" / "Crater Relay" placeholders.
+// After the Tharsis survey: Mission Prep's NASA-based missions (Ice Hunter, Shadow Ice,
+// Breathe Easy, Space Garden, Radiation Detective). They replace the old placeholders;
+// the picker pages through them three at a time.
 const laterMissions: MissionOffer[] = pickerMissions();
 
 export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {

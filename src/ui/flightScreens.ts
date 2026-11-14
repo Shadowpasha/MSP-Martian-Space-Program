@@ -265,14 +265,29 @@ export function showUpgrades(ui: FlightUi, profile: PlaytestProfile, initial: Sk
     });
 }
 
-export function showMissions(ui: FlightUi, offers: readonly MissionOffer[], onChoose: (offer: MissionOffer) => void): void {
+export const MISSIONS_PER_PAGE = 3;
+
+export function showMissions(
+    ui: FlightUi, offers: readonly MissionOffer[], onChoose: (offer: MissionOffer) => void,
+    page = 0, onPage: (page: number) => void = () => {},
+): void {
     const { root, palette: p } = ui;
     const selectButtons: Array<ReturnType<FlightUi['button']>> = [];
-    offers.forEach((offer, index) => {
+    const pages = Math.max(1, Math.ceil(offers.length / MISSIONS_PER_PAGE));
+    const current = Math.min(Math.max(0, page), pages - 1);
+    if (pages > 1) {
+        // Pager in the header's right side: ◀ 1 / 2 ▶ (arrow keys reach these buttons too).
+        const prev = ui.button(root, [1052, 30, 52, 48], () => onPage(current - 1), { label: '◀', disabled: current === 0 });
+        ui.label(root, [1106, 30, 92, 48], `${current + 1} / ${pages}`, { display: true, size: 20, center: true, color: p.amber });
+        const next = ui.button(root, [1200, 30, 52, 48], () => onPage(current + 1), { label: '▶', disabled: current === pages - 1 });
+        selectButtons.push(prev, next);
+    }
+    const visible = offers.slice(current * MISSIONS_PER_PAGE, current * MISSIONS_PER_PAGE + MISSIONS_PER_PAGE);
+    visible.forEach((offer, index) => {
         const card = ui.frame(root, [248 + index * 340, 108, 336, 596], offer.setup ? p.panel : p.well);
         const active = Boolean(offer.setup);
         ui.box(card, [12, 12, 304, 148], p.ink);
-        ui.image(card, [12, 12, 304, 148], offer.image ?? `assets/textures/mission_${index + 1}.png`);
+        ui.image(card, [12, 12, 304, 148], offer.image ?? `assets/textures/mission_${Math.min(3, index + 1)}.png`);
         ui.label(card, [16, 168, 296, 28], offer.site, { color: active ? p.amber : p.muted, size: 14 });
         ui.label(card, [16, 204, 296, 64], offer.title, { display: true, size: 28, wrap: true, color: active ? p.text : p.muted });
         ui.label(card, [16, 276, 296, 86], offer.description, { size: 15, color: p.secondary, wrap: true, top: true });
@@ -298,6 +313,11 @@ export function showMissions(ui: FlightUi, offers: readonly MissionOffer[], onCh
         if (popup !== null) ui.world.despawn(popup);
         popup = null;
         selectButtons.forEach(button => button.setDisabled(false));
+        // The pager keeps its own edge states.
+        if (pages > 1) {
+            selectButtons[0]!.setDisabled(current === 0);
+            selectButtons[1]!.setDisabled(current === pages - 1);
+        }
     }
 
     function openBriefing(offer: MissionOffer): void {
@@ -308,7 +328,7 @@ export function showMissions(ui: FlightUi, offers: readonly MissionOffer[], onCh
         ui.world.insert(popup, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
         const panel = ui.frame(popup, [280, 70, 720, 580], p.raised);
         ui.box(panel, [12, 12, 240, 136], p.ink);
-        ui.image(panel, [12, 12, 240, 136], offer.image ?? `assets/textures/mission_${offers.indexOf(offer) + 1}.png`);
+        ui.image(panel, [12, 12, 240, 136], offer.image ?? 'assets/textures/mission_1.png');
         ui.label(panel, [272, 14, 420, 22], offer.site, { color: p.amber, size: 14 });
         ui.label(panel, [272, 38, 420, 44], offer.title, { display: true, size: 32 });
         if (offer.setup) {

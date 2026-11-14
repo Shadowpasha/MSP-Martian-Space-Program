@@ -1,9 +1,9 @@
 // Mission Prep (Pick Mission & Crew + Pack the Rocket) — data types.
 // Pure TypeScript: nothing under src/prep/data or src/prep/logic imports 'esengine',
 // so it is unit-tested with plain Node (scripts/verify-prep.mjs).
-import type { CargoInventory, CrewRole, PlanetId, ResourcePool } from '../../contracts/gameContract';
+import type { CargoInventory, CargoItemId, CrewRole, GoalFlag, PlanetId, ResourcePool } from '../../contracts/gameContract';
 
-export type GoalFlag = 'wind_sample_collected' | 'ice_core_collected';
+export type { GoalFlag };
 
 export interface Source {
     label: string;
@@ -60,6 +60,8 @@ export interface PrepMission {
      * mission yet (see docs/CONTRACT-PROPOSAL.md); it stays hidden from the roll.
      */
     goalFlag: GoalFlag | null;
+    /** Cargo the main flow's Cargo Preparation must contain (his item set). Default: 1 Wind Sampler. */
+    pickerEquipment?: Partial<Record<CargoItemId, number>>;
 }
 
 export type ItemCategory = 'supplies' | 'power' | 'tools' | 'mission';
