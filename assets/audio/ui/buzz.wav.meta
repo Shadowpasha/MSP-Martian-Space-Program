@@ -1,0 +1,10 @@
+{
+  "uuid": "dca05fee-28dd-4168-b1af-5b4f98e4868c",
+  "version": "2.0",
+  "type": "audio",
+  "importer": {
+    "loadType": "auto",
+    "compress": true,
+    "bitrateKbps": 128
+  }
+}

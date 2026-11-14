@@ -8,6 +8,10 @@ export interface PlaytestProfile {
     awardedRuns: string[];
     reducedMotion: boolean;
     highContrast: boolean;
+    /** Interface sounds (clicks, chimes, the menu hum). */
+    sound: boolean;
+    /** Vibration on devices that support it. */
+    vibration: boolean;
 }
 
 const CREW_IDS = new Set(AVAILABLE_CREW.map(member => member.id));
@@ -28,6 +32,8 @@ export function loadProfile(stored: unknown, legacySkills: unknown, preferReduce
         awardedRuns: strings(saved.awardedRuns),
         reducedMotion: typeof saved.reducedMotion === 'boolean' ? saved.reducedMotion : preferReducedMotion,
         highContrast: saved.highContrast === true,
+        sound: saved.sound !== false,
+        vibration: saved.vibration !== false,
     };
 }
 
@@ -41,6 +47,17 @@ export function purchaseProblem(profile: PlaytestProfile, node: SkillUpgradeDef)
 export function purchaseUpgrade(profile: PlaytestProfile, node: SkillUpgradeDef): PlaytestProfile {
     if (purchaseProblem(profile, node)) return profile;
     return { ...profile, researchPoints: profile.researchPoints - node.cost, upgradeIds: [...profile.upgradeIds, node.id] };
+}
+
+/** Research points spent on the upgrades this profile owns. */
+export function spentResearch(profile: PlaytestProfile): number {
+    return SKILL_TREE_UPGRADES.filter(node => profile.upgradeIds.includes(node.id)).reduce((sum, node) => sum + node.cost, 0);
+}
+
+/** Sell back every upgrade: all owned upgrades are removed and their full cost is refunded. */
+export function resetUpgrades(profile: PlaytestProfile): PlaytestProfile {
+    if (profile.upgradeIds.length === 0) return profile;
+    return { ...profile, researchPoints: profile.researchPoints + spentResearch(profile), upgradeIds: [] };
 }
 
 export function awardResearch(profile: PlaytestProfile, runId: string, earned: number): PlaytestProfile {
