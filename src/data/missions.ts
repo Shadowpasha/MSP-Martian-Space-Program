@@ -3,7 +3,7 @@ import {
     type CrewMember, type MissionSetupInput, type ResourcePool,
 } from '../contracts/gameContract';
 import { CARGO_BY_ID, normalizeCargo, packedInventory, type CargoPlacement } from './cargo';
-import { nasaMissionOffers } from './nasaMissions';
+import { nasaMissionOffers, type MissionDifficulty } from './nasaMissions';
 
 export const LAUNCH_CREW_SIZE = 4;
 const surveyBase = cloneSetup(DEFAULT_MARS_SETUP);
@@ -29,6 +29,8 @@ export interface MissionOffer {
     prepared?: 'team' | 'moon-test';
     /** Card picture; defaults to assets/textures/mission_<slot>.png. */
     image?: string;
+    /** Difficulty bar on the card (1 Easy, 2 Medium, 3 Hard); a team manifest has none. */
+    difficulty?: MissionDifficulty;
     /** Shown in the mission popup: the real NASA mission it is based on and why it matters. */
     briefing?: MissionBriefing;
 }
@@ -68,6 +70,8 @@ export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
             // The card line is the goal only; the deadline has its own line on the card.
             description: pending ? mission.missionGoal.description : 'Record 48 hours of weather data at Site A.',
             setup: mission,
+            // The starter: one tool to pack, a nearby site and 16 sols for a 2-sol job.
+            difficulty: pending ? undefined : 1,
             prepared: pending ? 'team' : undefined,
             briefing: pending ? undefined : THARSIS_BRIEFING,
         },

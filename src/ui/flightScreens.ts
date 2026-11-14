@@ -1,7 +1,7 @@
 import { Interactable, type Entity, type InputState } from 'esengine';
 import {
     AVAILABLE_CREW, SKILL_TREE_UPGRADES, UPGRADE_BRANCHES,
-    type CrewMember, type SkillUpgradeDef, type TaskCategory, type UpgradeBranch,
+    type CrewMember, type MissionRequirement, type SkillUpgradeDef, type TaskCategory, type UpgradeBranch,
 } from '../contracts/gameContract';
 import { CARGO_BY_ID, normalizeCargo } from '../data/cargo';
 import { LAUNCH_CREW_SIZE, type MissionOffer } from '../data/missions';
@@ -267,6 +267,26 @@ export function showUpgrades(ui: FlightUi, profile: PlaytestProfile, initial: Sk
 
 export const MISSIONS_PER_PAGE = 3;
 
+const DIFFICULTY_NAMES = ['Easy', 'Medium', 'Hard'] as const;
+
+/** Three segments filled up to the level, with the word beside them so colour is never the only cue. */
+function difficultyBar(ui: FlightUi, parent: Entity, x: number, y: number, level: 1 | 2 | 3): void {
+    const p = ui.palette;
+    const tone = level === 1 ? p.good : level === 2 ? p.amber : p.bad;
+    for (let i = 0; i < 3; i++) ui.box(parent, [x + i * 30, y + 7, 26, 10], i < level ? tone : p.edge);
+    ui.label(parent, [x + 100, y, 160, 24], DIFFICULTY_NAMES[level - 1], { size: 15, color: tone });
+}
+
+const REQUIREMENT_ICONS: Partial<Record<MissionRequirement['kind'], IconName>> = {
+    prep_sensor: 'circuit', prep_rover: 'rover', prep_supplies: 'food', assign_crew: 'crew',
+};
+
+function requirementText(r: MissionRequirement): string {
+    if (r.kind === 'assign_crew') return `Assign ${r.target} crew`;
+    if (r.kind === 'prep_supplies') return `Prep supplies × ${r.target}`;
+    return r.target > 1 ? `${r.label} × ${r.target}` : r.label;
+}
+
 export function showMissions(
     ui: FlightUi, offers: readonly MissionOffer[], onChoose: (offer: MissionOffer) => void,
     page = 0, onPage: (page: number) => void = () => {},
@@ -286,23 +306,28 @@ export function showMissions(
     visible.forEach((offer, index) => {
         const card = ui.frame(root, [248 + index * 340, 108, 336, 596], offer.setup ? p.panel : p.well);
         const active = Boolean(offer.setup);
-        ui.box(card, [12, 12, 304, 148], p.ink);
-        ui.image(card, [12, 12, 304, 148], offer.image ?? `assets/textures/mission_${Math.min(3, index + 1)}.png`);
-        ui.label(card, [16, 168, 296, 28], offer.site, { color: active ? p.amber : p.muted, size: 14 });
-        ui.label(card, [16, 200, 296, 70], offer.title, { display: true, size: 28, fit: 18, wrap: true, color: active ? p.text : p.muted });
-        // The goal in one line; the site is above, the deadline and the kit below. Nothing is said twice.
-        ui.label(card, [16, 276, 296, 56], offer.description, { size: 16, color: active ? p.text : p.muted, wrap: true, top: true });
+        ui.box(card, [12, 12, 304, 120], p.ink);
+        ui.image(card, [12, 12, 304, 120], offer.image ?? `assets/textures/mission_${Math.min(3, index + 1)}.png`);
+        ui.label(card, [16, 140, 296, 24], offer.site, { color: active ? p.amber : p.muted, size: 14 });
+        ui.label(card, [16, 166, 296, 62], offer.title, { display: true, size: 28, fit: 18, wrap: true, color: active ? p.text : p.muted });
+        ui.label(card, [16, 230, 296, 42], offer.description, { size: 16, color: active ? p.text : p.muted, wrap: true, top: true });
+        if (offer.difficulty) difficultyBar(ui, card, 16, 278, offer.difficulty);
         if (offer.setup) {
             const { missionGoal: goal } = offer.setup;
-            ui.label(card, [16, 344, 296, 28], `Deadline · Sol ${goal.deadlineSol}`, { size: 16, color: p.amber });
+            ui.label(card, [16, 304, 296, 24], `Deadline · Sol ${goal.deadlineSol}`, { size: 15, color: p.amber });
+            // Everything the mission asks for: the cargo to pack first (checked at launch), then the
+            // prep steps the crew finish on the outpost before the goal task can win.
+            ui.label(card, [16, 336, 296, 24], 'Requirements', { size: 14, color: p.secondary });
             const kit = Object.entries(goal.requiredEquipment ?? {}).filter(([, count]) => (count ?? 0) > 0) as [IconName, number][];
-            if (kit.length) {
-                ui.label(card, [16, 384, 296, 24], 'Must pack', { size: 14, color: p.secondary });
-                kit.forEach(([id, count], row) => {
-                    ui.icon(card, 16, 414 + row * 36, 28, id, p.amber);
-                    ui.label(card, [56, 412 + row * 36, 240, 32], `${CARGO_BY_ID[id as keyof typeof CARGO_BY_ID].name} × ${count}`, { size: 15 });
-                });
-            }
+            const rows: Array<[IconName, string, boolean]> = [
+                ...kit.map(([id, count]): [IconName, string, boolean] => [id, `Pack ${CARGO_BY_ID[id as keyof typeof CARGO_BY_ID].name} × ${count}`, true]),
+                ...goal.requirements.map((r): [IconName, string, boolean] => [REQUIREMENT_ICONS[r.kind] ?? 'check', requirementText(r), false]),
+            ];
+            rows.forEach(([icon, text, cargo], row) => {
+                const y = 362 + row * 26;
+                ui.icon(card, 16, y + 2, 20, icon, cargo ? p.amber : p.secondary);
+                ui.label(card, [44, y, 268, 24], text, { size: 14, color: cargo ? p.text : p.secondary });
+            });
         }
         // Selecting a mission opens its briefing popup first; "Prepare Cargo" there continues.
         const button = ui.button(card, [16, 532, 296, 44], () => (offer.briefing ? openBriefing(offer) : onChoose(offer)), {

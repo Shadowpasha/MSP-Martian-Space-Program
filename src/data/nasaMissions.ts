@@ -22,10 +22,26 @@ interface NasaSite {
     distanceMP: number;
 }
 
+/** 1 Easy, 2 Medium, 3 Hard. Shown as a bar on the mission card. */
+export type MissionDifficulty = 1 | 2 | 3;
+
+/**
+ * Why each mission has its difficulty. Harder means some mix of: a tighter deadline for the work,
+ * more cargo the mission forces you to pack, or a place that is harder to survive.
+ *   Easy   Breathe Easy: a short drive, 4 sols of work with 6 spare, one item type to pack.
+ *   Medium Space Garden: 5 sols of work and the tightest deadline (Sol 13), three items to pack.
+ *   Medium Ice Hunter: a short job, but the long drive means supplies must last 16 sols.
+ *   Hard   Shadow Ice (Moon): no air, so every breath is packed, and a long drive across the pole.
+ *   Hard   Radiation Detective: 4 sols out in radiation; solar storms hurt the crew.
+ * The picker shows three per page, ordered so each page runs Easy, Medium, Hard
+ * and mixes planets, jobs and cargo (the Tharsis survey is the Easy one on page 1).
+ */
 export interface NasaMission {
     id: string;
     title: string;
     planet: PlanetId;
+    /** How hard the run is (1 Easy, 2 Medium, 3 Hard); see DIFFICULTY_BASIS. */
+    difficulty: MissionDifficulty;
     /** What the crew will do, in plain words (popup). */
     briefing: string;
     /** Short goal line used in the card description, e.g. "Drill an ice core for 1 sol". */
@@ -67,30 +83,32 @@ const SRC = {
 
 export const NASA_MISSIONS: NasaMission[] = [
     {
-        id: 'ice_hunter',
-        title: 'Ice Hunter',
+        id: 'space_garden',
+        title: 'Space Garden',
+        difficulty: 2,
         planet: 'mars',
-        briefing: 'Water is the most precious thing on Mars. You can drink it, water plants with it, and split it into oxygen. Drive to the crater rim and drill for buried ice.',
-        objective: 'Drill an ice core for 1 sol',
+        briefing: 'Fresh food keeps the crew healthy and happy. Set up a test greenhouse near the base and grow the first Martian salad.',
+        objective: 'Grow and harvest plants for 5 sols',
         realBasis: {
-            mission: 'Phoenix lander (2008) and the RIMFAX ground radar on Perseverance',
-            fact: 'In 2008 the Phoenix lander dug a trench and found bright, dice-sized chunks. Four days later they were gone: they were water ice turning straight into vapour.',
-            sources: [SRC.phoenixIce, SRC.perseverance],
+            mission: 'NASA Veggie plant system on the International Space Station',
+            fact: 'On August 10, 2015, astronauts on the Space Station ate the first lettuce grown in the Veggie garden for eating in space. It grew for 33 days under LED lights.',
+            sources: [SRC.veggie],
         },
-        cardBasis: 'the Phoenix lander',
-        lesson: 'The crater rim is far away. A long trip means packing much more food, water and air, leaving less room for everything else.',
-        site: { name: 'Jezero Crater Rim', coords: '18.50N, 77.33E', distanceMP: 45 },
-        taskSols: 1,
-        spareSols: 5,
-        durationHours: 24,
-        sensorLabel: 'Prep Ice Drill',
-        goalFlag: 'ice_core_collected',
-        requiredEquipment: { windSampler: 1 },
-        image: 'assets/textures/mission_2.png',
+        cardBasis: 'Veggie on the Space Station',
+        lesson: 'Plants need water and light, and light needs power. Growing food costs supplies now but means carrying less food later.',
+        site: { name: 'Octavia E. Butler Landing', coords: '18.44N, 77.45E', distanceMP: 5 },
+        taskSols: 5,
+        spareSols: 6,
+        durationHours: 120,
+        sensorLabel: 'Prep Grow Beds',
+        goalFlag: 'crop_harvested',
+        requiredEquipment: { seedPods: 2, waterCanisters: 1 },
+        image: 'assets/textures/outpost/events/event_cloudy_plant_tanks_256x144.png',
     },
     {
         id: 'moon_shadow_ice',
         title: 'Shadow Ice',
+        difficulty: 3,
         planet: 'moon',
         briefing: 'Some craters at the Moon\'s south pole never see sunlight, so ice has stayed frozen there for ages. Drill a core from the dark floor.',
         objective: 'Drill polar ice for 1 sol',
@@ -114,6 +132,7 @@ export const NASA_MISSIONS: NasaMission[] = [
     {
         id: 'oxygen_maker',
         title: 'Breathe Easy',
+        difficulty: 1,
         planet: 'mars',
         briefing: 'Mars air is mostly carbon dioxide. Test an oxygen maker out in the field, so future crews can make air instead of carrying it.',
         objective: 'Run the oxygen maker for 4 sols',
@@ -134,30 +153,32 @@ export const NASA_MISSIONS: NasaMission[] = [
         image: 'assets/textures/mission_3.png',
     },
     {
-        id: 'space_garden',
-        title: 'Space Garden',
+        id: 'ice_hunter',
+        title: 'Ice Hunter',
+        difficulty: 2,
         planet: 'mars',
-        briefing: 'Fresh food keeps the crew healthy and happy. Set up a test greenhouse near the base and grow the first Martian salad.',
-        objective: 'Grow and harvest plants for 5 sols',
+        briefing: 'Water is the most precious thing on Mars. You can drink it, water plants with it, and split it into oxygen. Drive to the crater rim and drill for buried ice.',
+        objective: 'Drill an ice core for 1 sol',
         realBasis: {
-            mission: 'NASA Veggie plant system on the International Space Station',
-            fact: 'On August 10, 2015, astronauts on the Space Station ate the first lettuce grown in the Veggie garden for eating in space. It grew for 33 days under LED lights.',
-            sources: [SRC.veggie],
+            mission: 'Phoenix lander (2008) and the RIMFAX ground radar on Perseverance',
+            fact: 'In 2008 the Phoenix lander dug a trench and found bright, dice-sized chunks. Four days later they were gone: they were water ice turning straight into vapour.',
+            sources: [SRC.phoenixIce, SRC.perseverance],
         },
-        cardBasis: 'Veggie on the Space Station',
-        lesson: 'Plants need water and light, and light needs power. Growing food costs supplies now but means carrying less food later.',
-        site: { name: 'Octavia E. Butler Landing', coords: '18.44N, 77.45E', distanceMP: 5 },
-        taskSols: 5,
-        spareSols: 6,
-        durationHours: 120,
-        sensorLabel: 'Prep Grow Beds',
-        goalFlag: 'crop_harvested',
-        requiredEquipment: { seedPods: 2, waterCanisters: 1 },
-        image: 'assets/textures/outpost/events/event_cloudy_plant_tanks_256x144.png',
+        cardBasis: 'the Phoenix lander',
+        lesson: 'The crater rim is far away. A long trip means packing much more food, water and air, leaving less room for everything else.',
+        site: { name: 'Jezero Crater Rim', coords: '18.50N, 77.33E', distanceMP: 45 },
+        taskSols: 1,
+        spareSols: 5,
+        durationHours: 24,
+        sensorLabel: 'Prep Ice Drill',
+        goalFlag: 'ice_core_collected',
+        requiredEquipment: { windSampler: 1 },
+        image: 'assets/textures/mission_2.png',
     },
     {
         id: 'radiation_detective',
         title: 'Radiation Detective',
+        difficulty: 3,
         planet: 'mars',
         briefing: 'Mars has no magnetic shield and very thin air, so radiation from space reaches the ground. Measure how much, and keep the crew safe while you do it.',
         objective: 'Measure radiation for 4 sols',
@@ -223,6 +244,7 @@ export function nasaMissionOffers() {
             // The card shows the goal only; the site, deadline and NASA mission each have their own place.
             description: `${m.objective}.`,
             image: m.image,
+            difficulty: m.difficulty,
             setup,
             briefing: {
                 task: m.briefing,

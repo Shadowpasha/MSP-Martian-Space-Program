@@ -37,10 +37,12 @@ test('mission offers expose one contract and honor a prepared external manifest'
     assert.equal(offers.filter(offer => offer.setup).length, 6);
     assert.equal(offers[0]?.setup?.missionGoal.deadlineSol, 16);
     assert.deepEqual(offers.map(offer => offer.setup?.missionGoal.requiredFlag), [
-        'wind_sample_collected', 'ice_core_collected', 'ice_core_collected', 'oxygen_produced', 'crop_harvested', 'radiation_measured',
+        'wind_sample_collected', 'crop_harvested', 'ice_core_collected', 'oxygen_produced', 'ice_core_collected', 'radiation_measured',
     ]);
+    // Each page of three runs Easy, Medium, Hard.
+    assert.deepEqual(offers.map(offer => offer.difficulty), [1, 2, 3, 1, 2, 3]);
     assert.ok(offers.every(offer => offer.briefing), 'every mission has a NASA briefing for the popup');
-    const ice = buildLaunchSetup(offers[1]!, starterCrew, [sampler])!;
+    const ice = buildLaunchSetup(offers[2]!, starterCrew, [sampler])!;
     assert.equal(ice.missionGoal.requiredFlag, 'ice_core_collected');
     assert.equal(launchProblem(ice), null);
     const external = missionOffers(DEFAULT_MARS_SETUP)[0]!;
