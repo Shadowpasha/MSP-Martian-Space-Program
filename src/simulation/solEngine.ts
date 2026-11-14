@@ -26,6 +26,11 @@ import { pickDailyEvent, type DailyEventDef, type EventChoice, type MissionProgr
 import { CARGO_BY_ID, normalizeCargo } from '../data/cargo';
 import { formatResource, resourceEntries } from '../data/missions';
 import type { ProposedTaskSpec } from '../services/geminiPlanner';
+import { appendLog, applyResourceDelta, canAffordCost, clamp, round1 } from './stateOps';
+import { applyForecast, createTharsis, resolveTharsisSol, useLocalCargo, type TharsisRun, type TharsisState } from './tharsis';
+import { nextBriefing, type SurveyBriefing } from './tharsisEvents';
+
+export { applyResourceDelta, canAffordCost } from './stateOps';
 
 export interface ActiveTask {
     id: string;
@@ -98,14 +103,7 @@ export interface OutpostGameState {
     lowEnergyCount: number;
     lowFoodCount: number;
     lowOxygenCount: number;
-}
-
-function clamp(v: number, min: number, max: number): number {
-    return Math.max(min, Math.min(max, v));
-}
-
-function round1(v: number): number {
-    return Math.round(v * 10) / 10;
+    tharsis?: TharsisRun;
 }
 
 function forecastForSol(sol: number, planet: PlanetId, goalDeadline: number, goalCompleted: boolean): WeatherForecast {
@@ -129,6 +127,7 @@ function forecastForSol(sol: number, planet: PlanetId, goalDeadline: number, goa
 export function createInitialGameState(
     inputSetup: MissionSetupInput = DEFAULT_MARS_SETUP,
     unlockedSkillIds: readonly string[] = [],
+    seed = Math.floor(Math.random() * 0x100000000),
 ): OutpostGameState {
     const setup = cloneSetup(inputSetup);
     const skillModifiers = unlockedSkillIds.length > 0
@@ -185,29 +184,8 @@ export function createInitialGameState(
         lowOxygenCount: 0,
     };
 
+    if (setup.rules === 'tharsis-expedition') state.tharsis = createTharsis(state, seed);
     return state;
-}
-
-function appendLog(state: OutpostGameState, kind: LogEntry['kind'], text: string): void {
-    state.dailyLog.push({ id: state.nextLogSeq++, sol: state.sol, kind, text });
-    if (state.dailyLog.length > 80) state.dailyLog.shift();
-}
-
-export function applyResourceDelta(resources: ResourcePool, delta: Partial<ResourcePool>): void {
-    if (delta.energy) resources.energy = clamp(round1(resources.energy + delta.energy), 0, 120);
-    if (delta.food) resources.food = Math.max(0, round1(resources.food + delta.food));
-    if (delta.water) resources.water = Math.max(0, round1(resources.water + delta.water));
-    if (delta.oxygen) resources.oxygen = clamp(round1(resources.oxygen + delta.oxygen), 0, 100);
-    if (delta.res) resources.res = Math.max(0, round1(resources.res + delta.res));
-}
-
-export function canAffordCost(resources: ResourcePool, cost: Partial<ResourcePool>): boolean {
-    if ((cost.energy ?? 0) > resources.energy) return false;
-    if ((cost.food ?? 0) > resources.food) return false;
-    if ((cost.water ?? 0) > resources.water) return false;
-    if ((cost.oxygen ?? 0) > resources.oxygen) return false;
-    if ((cost.res ?? 0) > resources.res) return false;
-    return true;
 }
 
 export function isChoiceAvailable(state: OutpostGameState, choice: EventChoice): { ok: boolean; reason?: string } {
@@ -339,6 +317,7 @@ export function enqueueTask(
     spec: ProposedTaskSpec,
     source: ActiveTask['source'] = 'ai',
 ): ActiveTask {
+    if (state.tharsis) throw new Error('Tharsis work is scheduled through station work orders.');
     // Pay upfront cost if any (clamped cleanly)
     const upfront: Partial<ResourcePool> = {};
     for (const [k, v] of Object.entries(spec.upfrontCost) as [keyof ResourcePool, number][]) {
@@ -430,6 +409,7 @@ export function advanceMissionRequirement(
     kind: Exclude<MissionRequirementKind, 'assign_crew'>,
     units: number,
 ): void {
+    if (state.tharsis) return;
     const req = state.goal.requirements.find((r) => r.kind === kind);
     if (!req || units <= 0) return;
     const before = req.current;
@@ -538,6 +518,10 @@ export function computeTaskEfficiency(
 }
 
 export function consumeCargoDirectly(state: OutpostGameState, item: CargoItemId): { ok: boolean; text: string } {
+    if (isTharsis(state)) {
+        const reason = useLocalCargo(state, 'station', item);
+        return { ok: !reason, text: reason ?? `Used ${CARGO_BY_ID[item].name}.` };
+    }
     if (state.cargo[item] <= 0) return { ok: false, text: 'Out of stock.' };
     if (item === 'windSampler') return { ok: false, text: 'Use the Wind Sampler during the weather survey.' };
     const supply = CARGO_BY_ID[item];
@@ -567,6 +551,7 @@ export function applySkillTreePresets(state: OutpostGameState, unlockedIds: read
 
 export function advanceSol(state: OutpostGameState): { advanced: boolean; reason?: string } {
     if (state.phase === 'ended') return { advanced: false, reason: 'Mission already ended.' };
+    if (isTharsis(state)) return advanceTharsisSol(state);
     if (state.currentEvent) {
         return { advanced: false, reason: 'Resolve today’s Daily Event before ending the Sol!' };
     }
@@ -745,21 +730,7 @@ export function advanceSol(state: OutpostGameState): { advanced: boolean; reason
         c.morale = Math.round(state.conditions.morale);
     }
 
-    if (state.resources.energy < 15) state.lowEnergyCount += 1;
-    if (state.resources.food < 10) state.lowFoodCount += 1;
-    if (state.resources.oxygen < 25) state.lowOxygenCount += 1;
-
-    // Record timeline snapshot for this Sol
-    state.timeline.push({
-        sol: state.sol,
-        weather: state.conditions.weather,
-        eventTitle: state.lastEventTitle,
-        eventChoiceLabel: state.lastEventChoiceLabel,
-        tasksCompleted: completedTitles,
-        resourcesAfter: { ...state.resources },
-        moraleAfter: state.conditions.morale,
-        radiationAfter: state.conditions.radiation,
-    });
+    recordSol(state, completedTitles);
 
     // 5. Check Loss / Victory
     const collapseReason = checkCollapseReason(state);
@@ -810,6 +781,80 @@ export function advanceSol(state: OutpostGameState): { advanced: boolean; reason
     return { advanced: true };
 }
 
+export function isTharsis(state: OutpostGameState): state is TharsisState {
+    return state.tharsis !== undefined;
+}
+
+export function continueAfterOutcome(state: TharsisState): void {
+    if (state.tharsis.phase !== 'outcome') return;
+    state.tharsis.phase = 'planning';
+    state.phase = 'planning';
+}
+
+export function commitBriefing(state: TharsisState, sol: number, briefing: SurveyBriefing): boolean {
+    const run = state.tharsis;
+    if (state.sol !== sol || run.phase !== 'report' || run.briefingCommitted || briefing.area !== run.briefing.area || briefing.source !== 'Gemini') return false;
+    if (run.briefing.system === 'storm') run.stormBriefing = run.briefing;
+    run.briefing = briefing;
+    run.briefingCommitted = true;
+    return true;
+}
+
+export function continueAfterReport(state: TharsisState): void {
+    const run = state.tharsis;
+    if (run.phase !== 'report') return;
+    if (state.result) {
+        run.phase = 'debrief';
+        return;
+    }
+    run.phase = 'briefing';
+    run.briefingCommitted = true;
+    if (run.briefing.source !== 'Mission control') run.recentSystems = [...run.recentSystems.slice(-2), run.briefing.system];
+    state.lastEventTitle = run.briefing.title;
+    state.lastEventChoiceLabel = 'Pending';
+    state.lastEventOutcome = null;
+    appendLog(state, 'event', `Sol ${state.sol} briefing · ${run.briefing.title}`);
+}
+
+function advanceTharsisSol(state: TharsisState): { advanced: boolean; reason?: string } {
+    const run = state.tharsis;
+    if (run.phase !== 'planning') return { advanced: false, reason: 'Finish the current briefing or report first.' };
+    const report: string[] = [];
+    if (state.rationPolicy === 'half') state.halfRationSols++;
+    const { completed, collapse } = resolveTharsisSol(state, report);
+    recordSol(state, completed);
+    run.reportSol = state.sol;
+    run.phase = 'report';
+    const deadline = Math.min(state.targetSol, state.goal.deadlineSol);
+    if (collapse || state.goal.completed || state.sol >= deadline) {
+        const reason = collapse ?? (state.goal.completed ? `The crew docked with 48 hours of Site A data by Sol ${state.sol}.` :
+            run.rover ? `Sol ${deadline} ended with the crew still in the field (${run.hours}/48h).` :
+                run.returnedWithData ? `Sol ${deadline} ended below the required station reserves.` : `Sol ${deadline} ended without a complete data drive at the station.`);
+        finalizeRun(state, state.goal.completed && !collapse ? 'victory' : 'defeat', reason, report);
+        return { advanced: true };
+    }
+    state.sol++;
+    state.phase = 'event';
+    state.lastSolReport = report;
+    applyForecast(state, run);
+    run.briefing = nextBriefing(state);
+    run.outcome = [];
+    run.briefingCommitted = false;
+    run.stormBriefing = null;
+    return { advanced: true };
+}
+
+function recordSol(state: OutpostGameState, completedTitles: string[]): void {
+    if (state.resources.energy < 15) state.lowEnergyCount++;
+    if (state.resources.food < 10) state.lowFoodCount++;
+    if (state.resources.oxygen < 25) state.lowOxygenCount++;
+    state.timeline.push({
+        sol: state.sol, weather: state.conditions.weather, eventTitle: state.lastEventTitle,
+        eventChoiceLabel: state.lastEventChoiceLabel, tasksCompleted: completedTitles, resourcesAfter: { ...state.resources },
+        moraleAfter: state.conditions.morale, radiationAfter: state.conditions.radiation,
+    });
+}
+
 function checkCollapseReason(state: OutpostGameState): string | null {
     if (state.resources.oxygen <= 0) return 'Habitat Oxygen hit 0%. Life support depressurized.';
     if (state.conditions.morale <= 0) return 'Crew Morale collapsed to 0%. Emergency abort triggered.';
@@ -855,7 +900,11 @@ function finalizeRun(
         lessons.push('Oxygen margins got thin — keep 1 Repair Kit for micrometeorites or unlock "Closed-Loop Scrubbers".');
     }
     if (!state.goal.completed) {
-        lessons.push(`Plan "${state.goal.title}" at least 2-3 Sols before Sol ${state.goal.deadlineSol} using A.R.I.E.S. AI or Rover Bay.`);
+        lessons.push(state.tharsis ? 'Finish prep early, then reserve four Sols with a Pilot or six with a backup driver for the round trip.' :
+            `Plan "${state.goal.title}" at least 2-3 Sols before Sol ${state.goal.deadlineSol} using A.R.I.E.S. AI or Rover Bay.`);
+    }
+    if (state.tharsis && !state.goal.completed && state.timeline.some(sol => sol.weather === 'Dust Storm')) {
+        lessons.unshift('The dust storm lasts three Sols. Prepare shelter and bring extra Power and O₂ for field operations.');
     }
     if (state.perkMatchesCount < state.tasksCompletedCount) {
         lessons.push('Match crew specialties to task categories for better progress, lower costs, and higher yields.');

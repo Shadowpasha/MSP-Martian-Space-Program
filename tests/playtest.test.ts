@@ -45,8 +45,11 @@ test('mission offers expose one contract and honor a prepared external manifest'
     const ice = buildLaunchSetup(offers[2]!, starterCrew, [sampler])!;
     assert.equal(ice.missionGoal.requiredFlag, 'ice_core_collected');
     assert.equal(launchProblem(ice), null);
+    // The Tharsis survey runs as the Tharsis expedition (its own run screen and rules).
+    assert.equal(offers[0]?.setup?.rules, 'tharsis-expedition');
     const external = missionOffers(DEFAULT_MARS_SETUP)[0]!;
     const setup = buildLaunchSetup(external, [], [])!;
+    assert.equal(setup.rules, undefined);
     assert.equal(setup.cargo.batteryPacks, DEFAULT_MARS_SETUP.cargo.batteryPacks);
     assert.equal(setup.cargo.waterCanisters, 0);
     assert.equal(launchProblem(setup), null);
@@ -67,7 +70,7 @@ test('cargo rotations are normalized and rejected moves preserve the draft and s
     assert.deepEqual(draft, [sampler, water, tank]);
 });
 
-test('crew, cargo and one paid upgrade make a keyless survey winnable', () => {
+test('crew, cargo and one paid upgrade transfer into the built-in survey', () => {
     assert.equal(AVAILABLE_CREW.length, 6);
     const crewIds = [...starterCrew.filter(id => id !== 'crew_pilot'), 'crew_captain'];
     const profile = purchaseUpgrade(loadProfile(null, [], false), SKILL_TREE_UPGRADES.find(node => node.id === 'closed_o2')!);
@@ -81,37 +84,16 @@ test('crew, cargo and one paid upgrade make a keyless survey winnable', () => {
     assert.ok(sim.crew.some(member => member.role === 'captain'));
     assert.equal(sim.crew.length, 4);
     assert.equal(sim.cargo.batteryPacks, 0);
-    resolveEvent(sim);
-    const hadWater = sim.resources.water;
-    assert.equal(consumeCargoDirectly(sim, 'waterCanisters').ok, true);
-    assert.equal(sim.resources.water, hadWater + 14);
-    assert.equal(consumeCargoDirectly(sim, 'oxygenTanks').ok, true);
-    assert.equal(sim.cargo.waterCanisters, 0);
-    assert.equal(sim.goal.requirements.find(req => req.kind === 'prep_supplies')?.current, 2);
-    quickTask(sim, 'Prep Sensor', 'crew_engineer');
-    quickTask(sim, 'Prep Rover', 'crew_medic');
-    quickTask(sim, 'Prep Supplies', 'crew_botanist');
-    assert.equal(advanceSol(sim).advanced, true);
-    resolveEvent(sim);
-    const goal = quickTask(sim, 'Gather weather data', 'crew_captain', 'crew_engineer');
-    const captainEfficiency = computeTaskEfficiency(sim, goal);
-    assert.equal(captainEfficiency.progressPerSol, 2);
-    assert.ok(captainEfficiency.matchedPerkNames.some(name => name.includes('Field Command')));
-    advanceSol(sim);
-    assert.equal(sim.goal.completed, false);
-    resolveEvent(sim);
-    advanceSol(sim);
-    assert.equal(sim.result?.outcome, 'victory');
-    assert.equal(sim.result?.solReached, 3);
-    const awarded = awardResearch(profile, 'fresh', sim.result!.researchPointsEarned);
-    const reloaded = loadProfile(JSON.parse(JSON.stringify(awarded)), [], false);
-    assert.equal(awardResearch(reloaded, 'fresh', sim.result!.researchPointsEarned), reloaded);
-    assert.equal(reloaded.researchPoints, sim.result!.researchPointsEarned);
+    assert.equal(sim.cargo.waterCanisters, 1);
+    assert.equal(sim.cargo.oxygenTanks, 1);
+    assert.equal(sim.tharsis?.phase, 'briefing');
 });
 
 test('the finishing Sol checks reserves after other tasks and before expedition rewards', () => {
     for (const resupply of [false, true]) {
-        const state = createInitialGameState(buildLaunchSetup(playableOffer, starterCrew, [sampler])!);
+        const setup = buildLaunchSetup(playableOffer, starterCrew, [sampler])!;
+        delete setup.rules;
+        const state = createInitialGameState(setup);
         for (const req of state.goal.requirements) if (req.kind !== 'assign_crew') req.current = req.target;
         resolveEvent(state);
         state.sol = 15;
@@ -162,7 +144,9 @@ test('each upgrade branch forks and rejoins and purchases debit and unlock toget
 });
 
 test('the AI cost discount applies once and the storm event retains required hardware', () => {
-    const state = createInitialGameState(buildLaunchSetup(playableOffer, starterCrew, [sampler])!, ['ai_logistics']);
+    const setup = buildLaunchSetup(playableOffer, starterCrew, [sampler])!;
+    delete setup.rules;
+    const state = createInitialGameState(setup, ['ai_logistics']);
     const goal = quickTask(state, 'Gather weather data', 'crew_medic');
     assert.equal(goal.dailyCost.energy, 4);
     assert.equal(computeTaskEfficiency(state, goal).effectiveDailyCost.energy, 4);

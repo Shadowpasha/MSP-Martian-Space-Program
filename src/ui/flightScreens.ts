@@ -630,8 +630,9 @@ const REQUIREMENT_ICONS: Partial<Record<MissionRequirement['kind'], IconName>> =
 };
 
 function requirementText(r: MissionRequirement): string {
-    if (r.kind === 'assign_crew') return `Assign ${r.target} crew`;
-    if (r.kind === 'prep_supplies') return `Prep supplies × ${r.target}`;
+    // Shorter wording for the standard labels; a mission's own wording (e.g. Tharsis) is kept.
+    if (r.kind === 'assign_crew' && r.label === 'Assign Crew') return `Assign ${r.target} crew`;
+    if (r.kind === 'prep_supplies' && r.label.startsWith('Prep Supplies')) return `Prep supplies × ${r.target}`;
     return r.target > 1 ? `${r.label} × ${r.target}` : r.label;
 }
 

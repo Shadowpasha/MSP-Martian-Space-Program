@@ -43,7 +43,7 @@ import {
     type OutpostGameState,
 } from '../simulation/solEngine';
 import { isScriptedStoryEvent } from '../data/events';
-import { generateDailyEventWithGemini, preloadGeminiKey } from '../services/geminiPlanner';
+import { generateDailyEventWithGemini, geminiReady } from '../services/geminiPlanner';
 import { playSfx } from '../audio/soundManager';
 import { createGameModals, type ModalsController } from '../ui/modals';
 import {
@@ -642,7 +642,7 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
             playSfx('confirm');
             const usedSet = new Set(state.usedEventIds);
             const scripted = isScriptedStoryEvent(state.sol, state.goal.completed, usedSet);
-            const hasKey = !scripted && (await preloadGeminiKey());
+            const hasKey = !scripted && (await geminiReady());
             if (hasKey) {
                 modals.openEventScanningModal();
                 const gen = await generateDailyEventWithGemini({

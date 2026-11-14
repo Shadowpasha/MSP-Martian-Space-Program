@@ -31,10 +31,10 @@ import {
 import { CARGO_ITEMS } from '../data/cargo';
 import { formatResource, resourceEntries } from '../data/missions';
 import {
+    checkGeminiConnection,
     evaluatePlanOffline,
     generateTaskWithGemini,
     getGeminiStatusLabel,
-    preloadGeminiKey,
     type ProposedTaskSpec,
 } from '../services/geminiPlanner';
 import {
@@ -530,7 +530,7 @@ export function createGameModals(opts: {
     // Right column: MSP Framed Task Preview Card
     const propFrame = makeFramedBox(world, aiDlg.panelEntity, 480, 68, 346, 430, PALETTE.panelCard, PALETTE.panelBorder, false, 2);
     const propCard = propFrame.inner;
-    makeAbsLabel(world, propCard, 12, 10, 318, 22, 'TASK PREVIEW', {
+    const propHeaderLbl = makeAbsLabel(world, propCard, 12, 10, 318, 22, 'TASK PREVIEW', {
         fontSize: 12,
         bold: true,
         color: PALETTE.cyan,
@@ -603,6 +603,7 @@ export function createGameModals(opts: {
 
     function refreshProposalCard(): void {
         setText(world, aiModeLbl, getGeminiStatusLabel());
+        setText(world, propHeaderLbl, 'TASK PREVIEW');
         if (!pendingProposal) {
             aiAcceptBtn.setDisabled(true);
             setVisualColor(world, propCatBox, PALETTE.btnDisabled);
@@ -643,6 +644,8 @@ export function createGameModals(opts: {
         const text = rawText.trim();
         if (!text || aiBusy) return;
         aiBusy = true;
+        pendingProposal = null;
+        refreshProposalCard();
         aiSendBtn.setDisabled(true);
         setText(world, aiSendLbl, 'Thinking...');
         appendChat('user', text);
@@ -659,13 +662,16 @@ export function createGameModals(opts: {
             const res = quickPlan ? evaluatePlanOffline(text, context) : await generateTaskWithGemini(text, context);
 
             if (!world.valid(parent)) return;
+            if (!quickPlan && res.source !== 'gemini') {
+                setText(world, aiModeLbl, 'A.R.I.E.S. unavailable');
+                return;
+            }
             pendingProposal = res.task;
-            appendChat('aries', res.replyText);
+            appendChat('aries', res.replyText.replace(/^A\.R\.I\.E\.S\. \[Local Sim\]: /, ''));
             refreshProposalCard();
-        } catch (err) {
+        } catch {
             if (!world.valid(parent)) return;
-            const msg = err instanceof Error ? err.message : 'Unexpected planner error';
-            appendChat('aries', `A.R.I.E.S. error: ${msg}`);
+            setText(world, aiModeLbl, 'A.R.I.E.S. unavailable');
         } finally {
             aiBusy = false;
             if (world.valid(parent)) aiSendBtn.setDisabled(false);
@@ -1188,8 +1194,8 @@ export function createGameModals(opts: {
         closeAll();
         playSfx('open');
         refreshProposalCard();
-        void preloadGeminiKey().then((ready) => {
-            if (ready && world.valid(parent) && aiDlg.isOpen()) refreshProposalCard();
+        void checkGeminiConnection().then(() => {
+            if (world.valid(parent) && aiDlg.isOpen()) refreshProposalCard();
         });
         if (prefillPrompt) aiInput.setValue(prefillPrompt);
         aiDlg.open();

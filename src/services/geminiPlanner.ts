@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import {
     GOAL_FLAGS,
     type GoalFlag, CREW_ROLES } from '../contracts/gameContract';
@@ -21,91 +20,65 @@ import {
     type MissionProgressDelta,
 } from '../data/events';
 
-/**
- * Optional in-code override for local development. The packaged playtest leaves this empty.
- * When no key is found, the planner uses the built-in deterministic offline task simulator.
- */
-export const GEMINI_API_KEY = '';
-
-export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
-const GEMINI_TIMEOUT_MS = 18000;
-
-export interface GeminiConfig {
-    apiKey: string;
-    model: string;
-    endpointOverride?: string;
-}
-
-let cachedEnvApiKey: string | null = null;
-
-function stripQuotes(raw: string): string {
-    const trimmed = raw.trim();
-    if (
-        (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-        (trimmed.startsWith("'") && trimmed.endsWith("'"))
-    ) {
-        return trimmed.slice(1, -1).trim();
-    }
-    return trimmed;
-}
-
-export function parseDotEnvApiKey(envText: string): string {
-    let fallbackViteKey = '';
-    for (const rawLine of envText.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (!line || line.startsWith('#')) continue;
-        const clean = line.startsWith('export ') ? line.slice(7).trim() : line;
-        const eqIdx = clean.indexOf('=');
-        if (eqIdx <= 0) continue;
-        const key = clean.slice(0, eqIdx).trim();
-        const value = stripQuotes(clean.slice(eqIdx + 1));
-        if (!value) continue;
-        if (key === 'GEMINI_API_KEY') return value;
-        if (key === 'VITE_GEMINI_API_KEY' && !fallbackViteKey) fallbackViteKey = value;
-    }
-    return fallbackViteKey;
-}
-
-function readSyncEnvApiKey(): string {
-    if (GEMINI_API_KEY.trim()) return GEMINI_API_KEY.trim();
-    if (cachedEnvApiKey) return cachedEnvApiKey;
-
-    const procEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-    const nodeKey = procEnv?.GEMINI_API_KEY?.trim() || procEnv?.VITE_GEMINI_API_KEY?.trim() || '';
-    if (nodeKey) {
-        cachedEnvApiKey = nodeKey;
-        return nodeKey;
-    }
-
-    const metaEnv = (import.meta as { env?: Record<string, string | undefined> }).env;
-    const bundleKey = metaEnv?.GEMINI_API_KEY?.trim() || metaEnv?.VITE_GEMINI_API_KEY?.trim() || '';
-    if (bundleKey) {
-        cachedEnvApiKey = bundleKey;
-        return bundleKey;
-    }
-
-    return '';
-}
-
-export async function resolveGeminiApiKey(explicitKey?: string): Promise<string> {
-    return explicitKey?.trim() || readSyncEnvApiKey();
-}
-
-export async function preloadGeminiKey(): Promise<boolean> {
-    return (await resolveGeminiApiKey()).length > 0;
-}
+const GEMINI_ROUTE = '/api/gemini-plan';
+let geminiModel: string | null = null;
 
 export function getGeminiStatusLabel(): string {
-    return readSyncEnvApiKey()
-        ? `A.R.I.E.S. AI Online (${DEFAULT_GEMINI_MODEL})`
-        : 'A.R.I.E.S. Offline Planner';
+    return geminiModel ? 'A.R.I.E.S. connected' : 'A.R.I.E.S. unavailable';
 }
 
-export function getActiveGeminiConfig(): GeminiConfig {
-    return {
-        apiKey: readSyncEnvApiKey(),
-        model: DEFAULT_GEMINI_MODEL,
-    };
+export function assistantIsAvailable(): boolean { return geminiModel !== null; }
+
+function isLocalPlaytest(): boolean {
+    return typeof location !== 'undefined' && location.protocol === 'http:' &&
+        (location.hostname === '127.0.0.1' || location.hostname === 'localhost');
+}
+
+export async function checkGeminiConnection(): Promise<void> {
+    if (!isLocalPlaytest()) return;
+    try {
+        const response = await fetch(GEMINI_ROUTE, { cache: 'no-store', signal: AbortSignal.timeout(2_000) });
+        if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
+            const status: { model?: string | null } = await response.json();
+            geminiModel = status.model ?? null;
+            return;
+        }
+    } catch {
+        // A static export can still use the local task planner.
+    }
+    geminiModel = null;
+}
+
+export async function requestGemini(systemInstruction: string, input: string, options: {
+    kind?: 'discussion' | 'briefing';
+    timeout?: number;
+    signal?: AbortSignal;
+} = {}): Promise<{ text: string } | { error: string }> {
+    if (!geminiModel) await checkGeminiConnection();
+    if (!geminiModel) return { error: 'Gemini is unavailable.' };
+    try {
+        const timeout = AbortSignal.timeout(options.timeout ?? 20_000);
+        const response = await fetch(GEMINI_ROUTE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: options.signal ? AbortSignal.any([timeout, options.signal]) : timeout,
+            body: JSON.stringify({ systemInstruction, input, ...(options.kind && { kind: options.kind }) }),
+        });
+        if (!response.headers.get('content-type')?.includes('application/json')) {
+            geminiModel = null;
+            return { error: 'Local Gemini server is unavailable.' };
+        }
+        const result: { text?: string; error?: string } = await response.json();
+        if (!response.ok || typeof result.text !== 'string' || !result.text.trim()) {
+            geminiModel = null;
+            return { error: result.error || 'Gemini returned an empty response.' };
+        }
+        return { text: result.text };
+    } catch (error) {
+        if (!options.signal?.aborted) geminiModel = null;
+        return { error: error instanceof Error && error.name === 'TimeoutError'
+            ? 'Gemini request timed out.' : 'Could not reach the local Gemini server.' };
+    }
 }
 
 export interface ProposedTaskSpec {
@@ -131,6 +104,7 @@ export interface AiPlannerResponse {
     source: 'gemini' | 'offline-fallback';
     replyText: string;
     task: ProposedTaskSpec;
+    fallbackReason?: string;
 }
 
 export interface PlannerContextSnapshot {
@@ -146,7 +120,7 @@ export interface PlannerContextSnapshot {
 }
 
 function clamp(n: number, min: number, max: number): number {
-    return Math.max(min, Math.min(max, Math.round(n)));
+    return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : min;
 }
 
 function sanitizePartialPool(
@@ -221,36 +195,8 @@ function extractJsonPayload(rawText: string): string {
     return body;
 }
 
-function readInteractionText(interaction: {
-    output_text?: string;
-    outputs?: Array<{ type?: string; text?: string }>;
-}): string | undefined {
-    if (interaction.output_text?.trim()) {
-        return interaction.output_text.trim();
-    }
-    if (Array.isArray(interaction.outputs)) {
-        const joined = interaction.outputs
-            .filter((o) => o && typeof o.text === 'string')
-            .map((o) => o.text ?? '')
-            .join('')
-            .trim();
-        if (joined) return joined;
-    }
-    return undefined;
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-        return await Promise.race([
-            promise,
-            new Promise<T>((_, reject) => {
-                timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
-            }),
-        ]);
-    } finally {
-        if (timer !== undefined) clearTimeout(timer);
-    }
+function useOfflinePlanner(userPlan: string, ctx: PlannerContextSnapshot, fallbackReason?: string): AiPlannerResponse {
+    return { ...evaluatePlanOffline(userPlan, ctx), fallbackReason };
 }
 
 export interface DailyEventContextSnapshot {
@@ -437,49 +383,27 @@ function buildDailyEventPrompt(ctx: DailyEventContextSnapshot): string {
     ].join('\n');
 }
 
-export async function generateDailyEventWithGemini(
-    ctx: DailyEventContextSnapshot,
-    config: GeminiConfig = getActiveGeminiConfig(),
-): Promise<DailyEventGenerationResult> {
+/** True when the local Gemini server is reachable (checks once, then remembers). */
+export async function geminiReady(): Promise<boolean> {
+    if (!assistantIsAvailable()) await checkGeminiConnection();
+    return assistantIsAvailable();
+}
+
+export async function generateDailyEventWithGemini(ctx: DailyEventContextSnapshot): Promise<DailyEventGenerationResult> {
     const fallbackEvent = () =>
         pickDailyEvent(ctx.sol, ctx.conditions.weather, new Set(ctx.usedEventIds), ctx.goal.completed);
-
-    const trimmedKey = await resolveGeminiApiKey(config.apiKey);
-    if (!trimmedKey && !config.endpointOverride) {
-        return { source: 'fallback', event: fallbackEvent() };
-    }
-
-    const model = config.model.trim() || DEFAULT_GEMINI_MODEL;
     const aliveRoles = new Set<CrewRole>(ctx.crew.filter((c) => c.health > 0).map((c) => c.role));
 
+    // Same route as the task planner and the Tharsis briefings: the API key stays on the local server.
+    const result = await requestGemini(
+        `${buildDailyEventPrompt(ctx)}\nRespond with raw JSON only.`,
+        `Generate Sol ${ctx.sol} Mars morning event during ${ctx.conditions.weather}.`,
+        { timeout: 18_000 },
+    );
+    if ('error' in result) return { source: 'fallback', event: fallbackEvent() };
     try {
-        const ai = new GoogleGenAI({ apiKey: trimmedKey, apiVersion: 'v1beta' });
-        const interaction = await withTimeout(
-            ai.interactions.create(
-                {
-                    model,
-                    system_instruction: `${buildDailyEventPrompt(ctx)}\nRespond with raw JSON only.`,
-                    input: `Generate Sol ${ctx.sol} Mars morning event during ${ctx.conditions.weather}.`,
-                    generation_config: {
-                        temperature: 0.85,
-                    },
-                },
-                {
-                    retries: { strategy: 'none' },
-                    timeout_ms: GEMINI_TIMEOUT_MS,
-                },
-            ),
-            GEMINI_TIMEOUT_MS + 1000,
-            `Gemini Event (${model})`,
-        );
-
-        const rawText = readInteractionText(interaction);
-        if (!rawText) return { source: 'fallback', event: fallbackEvent() };
-
-        const parsed = parseDailyEventJson(rawText, ctx.sol, aliveRoles);
-        if (!parsed) return { source: 'fallback', event: fallbackEvent() };
-
-        return { source: 'gemini', event: parsed };
+        const parsed = parseDailyEventJson(result.text, ctx.sol, aliveRoles);
+        return parsed ? { source: 'gemini', event: parsed } : { source: 'fallback', event: fallbackEvent() };
     } catch {
         return { source: 'fallback', event: fallbackEvent() };
     }
@@ -488,83 +412,19 @@ export async function generateDailyEventWithGemini(
 export async function generateTaskWithGemini(
     userPlan: string,
     ctx: PlannerContextSnapshot,
-    config: GeminiConfig = getActiveGeminiConfig(),
 ): Promise<AiPlannerResponse> {
-    const trimmedKey = await resolveGeminiApiKey(config.apiKey);
-    if (!trimmedKey && !config.endpointOverride) {
-        return evaluatePlanOffline(userPlan, ctx);
-    }
-
-    const model = config.model.trim() || DEFAULT_GEMINI_MODEL;
+    const result = await requestGemini(buildSystemPrompt(ctx), `Player Action Plan: ${JSON.stringify(userPlan)}`);
+    if ('error' in result) return useOfflinePlanner(userPlan, ctx, result.error);
 
     try {
-        let rawText: string | undefined;
-
-        if (config.endpointOverride?.trim()) {
-            const ac = new AbortController();
-            const timer = setTimeout(() => ac.abort(), GEMINI_TIMEOUT_MS);
-            try {
-                const res = await fetch(config.endpointOverride.trim(), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    signal: ac.signal,
-                    body: JSON.stringify({
-                        contents: [
-                            {
-                                role: 'user',
-                                parts: [
-                                    { text: buildSystemPrompt(ctx) },
-                                    { text: `Player Action Plan: "${userPlan}"` },
-                                ],
-                            },
-                        ],
-                    }),
-                });
-                if (!res.ok) {
-                    const fallback = evaluatePlanOffline(userPlan, ctx);
-                    fallback.replyText = `[Gemini HTTP ${res.status} - using local sim] ${fallback.replyText}`;
-                    return fallback;
-                }
-                const json = (await res.json()) as {
-                    output_text?: string;
-                    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-                };
-                rawText = json.output_text ?? json.candidates?.[0]?.content?.parts?.[0]?.text;
-            } finally {
-                clearTimeout(timer);
-            }
-        } else {
-            const ai = new GoogleGenAI({ apiKey: trimmedKey, apiVersion: 'v1beta' });
-            const interaction = await withTimeout(
-                ai.interactions.create(
-                    {
-                        model,
-                        system_instruction: `${buildSystemPrompt(ctx)}\nRespond with raw JSON only (no markdown fences).`,
-                        input: `Player Action Plan: "${userPlan}"`,
-                        generation_config: {
-                            temperature: 0.4,
-                        },
-                    },
-                    {
-                        retries: { strategy: 'none' },
-                        timeout_ms: GEMINI_TIMEOUT_MS,
-                    },
-                ),
-                GEMINI_TIMEOUT_MS + 1000,
-                `Gemini (${model})`,
-            );
-            rawText = readInteractionText(interaction);
-        }
-
-        if (!rawText) {
-            return evaluatePlanOffline(userPlan, ctx);
-        }
-
-        const parsed = JSON.parse(extractJsonPayload(rawText)) as {
+        const parsed = JSON.parse(extractJsonPayload(result.text)) as {
             replyText?: string;
             task?: Record<string, unknown>;
         };
-        const t = parsed.task ?? {};
+        const t = parsed?.task;
+        if (!t || typeof t.title !== 'string' || !t.title.trim()) {
+            return useOfflinePlanner(userPlan, ctx, 'Gemini returned an invalid task proposal.');
+        }
         const category = normalizeCategory(t.category);
         const durationSols = clamp(Number(t.durationSols ?? 2), 1, 4);
         const discount = ctx.skillModifiers.aiCostDiscountMult;
@@ -617,14 +477,11 @@ export async function generateTaskWithGemini(
 
         return {
             source: 'gemini',
-            replyText: String(parsed.replyText || 'Task telemetry computed via Gemini. Review costs and assign crew.').slice(0, 320),
+            replyText: String(parsed.replyText || 'Review the procedure and choose a crew lead.').slice(0, 320),
             task,
         };
-    } catch (err) {
-        const fallback = evaluatePlanOffline(userPlan, ctx);
-        const reason = err instanceof Error ? err.message.slice(0, 72) : 'request failed';
-        fallback.replyText = `[Gemini fallback: ${reason}] ${fallback.replyText}`;
-        return fallback;
+    } catch {
+        return useOfflinePlanner(userPlan, ctx, 'Gemini returned an invalid task proposal.');
     }
 }
 

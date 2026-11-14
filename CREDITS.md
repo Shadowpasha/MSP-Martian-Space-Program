@@ -5,7 +5,7 @@ MSP: Mars Station Program, made for the NASA Space Apps Challenge 2026
 
 ## Team
 
-- Mokhtar Ouardi ([@MokhtarOuardi](https://github.com/MokhtarOuardi)): launch flow, menus, Tharsis expedition
+- Mokhtar Ouardi ([@MokhtarOuardi](https://github.com/MokhtarOuardi)): launch flow, menus, Tharsis Ridge expedition, A.R.I.E.S. terminal and work console
 - Anas Aburaya
 - [@Shadowpasha](https://github.com/Shadowpasha): Sol survival loop, Gemini planner and events, music and sound system
 - Adam ([@amer-adam](https://github.com/amer-adam)): missions, Mission Selection, Cargo Preparation, Launch Summary,
@@ -37,7 +37,7 @@ See also `assets/audio/CREDITS.txt`.
 | `assets/textures/launch/*` (rocket, flames, Earth, Mars, Moon) | Original pixel art, drawn in code by `scripts/art/launch_sprites.py` |
 | `assets/textures/outpost/*` (HUD, cargo, station, badges, banners, event cards, Moon backdrop) | Original pixel art, drawn in code by `scripts/art/outpost_sprites.py` |
 | `assets/textures/missions/map_lunar_south_pole_320x180.png` | Original pixel art, drawn in code by `scripts/art/prep_sprites.py` |
-| `menu_station.png`, `menu_landscape.png`, `mission_1..3.png`, crew portraits (`crew_*.png`) | AI image generation (ImageGen), exported as pixel art. Sources and prompts: [`art/README.md`](art/README.md), [`art/image-prompts.md`](art/image-prompts.md) |
+| `menu_station.png`, `menu_landscape.png`, `mission_1..3.png`, crew portraits (`crew_*.png`), Tharsis backgrounds (`tharsis_station.png`, `tharsis_site.png`) | AI image generation (ImageGen), exported as pixel art. Sources and prompts: [`art/README.md`](art/README.md), [`art/image-prompts.md`](art/image-prompts.md) |
 | `flight_icons.png` | Supplied MSP icons plus glyphs made for this build. See [`art/README.md`](art/README.md) |
 | `outpost_bg.png` (pixel-art Mars station interior), `ai_robot.png` | Added by the team. **TODO: record the source and licence here.** |
 
