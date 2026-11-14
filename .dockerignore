@@ -1,0 +1,4 @@
+# The image only needs the web export and the nginx config.
+*
+!dist/web/
+!deploy/nginx.conf
