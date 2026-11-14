@@ -1,36 +1,35 @@
-# Mars Outpost: Sol Survival (NASA Space Apps 2026)
+# Mars Station Program
 
-Main Survival Loop built in **Estella Engine** (`1280x720`), implementing the 1-Sol Martian outpost loop with clickable crew perks, Gemini AI action-plan cost estimation, 60-Seconds-style daily events, and external Skill Tree modifier hooks.
+A pixel-art survival game built in Estella for NASA Space Apps. Pick four crew, plan station upgrades, pack a cargo bay, and complete the Tharsis Ridge Weather Survey before Sol 16.
 
-## Opening and Playing in Estella Editor
+## Windows playtest
 
-1. Open **Estella Editor** and select **Open Project** -> `d:\Programming_Projects\Nasa_Space_Apps_2026`.
-2. Open `assets/scenes/main.esscene` and press **Play**.
-3. If you want live Gemini task estimation, paste your Gemini API key directly into `GEMINI_API_KEY` inside `src/services/geminiPlanner.ts` (`gemini-2.5-flash`). Without a key, **Issue Tasks** automatically uses the built-in offline cost estimator.
+1. Install [Estella Editor 0.104.1](https://github.com/esengine/estella/releases/tag/v0.104.1) and [Node.js 24 LTS with npm](https://nodejs.org/en/download).
+2. Open PowerShell in the folder that contains `project.esproject`.
 
-## Verification
+   ```powershell
+   npm.cmd ci
+   npm.cmd run verify
+   ```
 
-Run the TypeScript check (against Estella's `sdk-types`) and simulation unit tests:
+3. In Estella, use **Open Project** to select that folder, open `assets/scenes/main.esscene`, and press **F5**.
+4. To play the Web export, choose **Build → Package Project → Web** and set the output directory to `dist/web`. After packaging, run `npm.cmd run playtest` and visit [the local game](http://127.0.0.1:4173/). Keep that address for a consistent browser save. The package dialog also has **Preview over HTTP**.
 
-```powershell
-node scripts/verify.mjs
-```
+The four mission quick actions use the built-in planner. The complete game runs offline without a Gemini key. The local preview serves the Web build directory.
 
-## Team Integration Contracts (`src/contracts/gameContract.ts`)
+## First mission
 
-Teammates building **Pick Mission & Crew**, **Pack the Rocket**, and the **Outer Skill Tree Menu** connect to the main loop via `MissionSetupInput`, `SkillTreeModifiers`, and `MainLoopResult` (either via TypeScript import or `esengine` `Storage` keys):
+- Start in **Crew** to swap specialists. Remove one to free a seat, then add a replacement. Exactly four crew must launch.
+- Open **Upgrade** to spend the three starting research points on a Tier 1 node. Completed missions award research based on their results.
+- Choose **Play → Tharsis Ridge Weather Survey**. In cargo preparation, place the Wind Sampler and any supplies you want. Select an inventory item and then a cell to place it. Select an existing piece to rotate, move, or remove it. Use **Tab**, **arrows**, and **Enter** to navigate. **R**, **M**, and **Delete** are cargo shortcuts.
+- Resolve the daily event, read the outcome, and continue to planning. Use **Issue Task** to open the quick actions. For a quick win, prepare the sensor, rover, and supplies on Sol 1. Two completed supply tasks or one supply task plus two consumed cargo supplies fill the four prep units. Run **Gather Data** with two living crew for two Sols, and keep 10 Food, 10 Water, and 25% O₂ after the final day's costs. Read the Sol report after each **End Sol**.
 
-- `mars-outpost:pending-setup` (`MissionSetupInput`): planet (`mars` / `moon`), `targetSol`, `missionGoal`, starting `resources`, `conditions`, packed `cargo` counts, `crew` roster, and `skillModifiers`.
-- `mars-outpost:skill-upgrades` (`string[]`): unlocked Skill Tree upgrade IDs supplied from the outer menu (`SkillTreeModifiers` still scales food/O2/energy/radiation inside the simulation, with no Skill Tree UI rendered in the main loop).
-- `mars-outpost:last-result` (`MainLoopResult`): saved automatically when a run finishes with outcome, score, `researchPointsEarned`, and tactical lessons for the next run.
+## Team integration
 
-## Placeholder Art (`assets/textures/`)
+`MissionSetupInput` defines the mission, roster, starting conditions and packed quantities. The optional goal fields `minimumReserves` and `requiredEquipment` gate completion. Missing water-container and oxygen-tank counts in older manifests are treated as zero.
 
-All placeholder textures have stable `.png.meta` UUIDs. Your art team can overwrite these filenames directly without editing scenes or code:
+- `mars-outpost:pending-setup` accepts a team-provided `MissionSetupInput`. Play offers that mission and its prepared cargo and crew. The launch consumes the pending setup.
+- `mars-outpost:skill-upgrades` retains the legacy unlocked-ID list. The current profile lives under `mars-outpost:profile-v1`.
+- `mars-outpost:last-result` holds the latest `MainLoopResult`, including the expedition outcome and earned research.
 
-- `assets/textures/outpost_bg.png` (`1280x720`)
-- `assets/textures/crew_engineer.png` (`256x256`)
-- `assets/textures/crew_botanist.png` (`256x256`)
-- `assets/textures/crew_pilot.png` (`256x256`)
-- `assets/textures/crew_medic.png` (`256x256`)
-- `assets/textures/ai_robot.png` (`256x256`)
+See [the art sources](art/README.md) for the station, portraits, icons, and bundled font licenses.

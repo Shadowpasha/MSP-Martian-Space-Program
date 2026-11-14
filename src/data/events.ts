@@ -156,10 +156,9 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         choices: [
             {
                 id: 'prep_wind_sampler',
-                label: 'Spin Up Wind Sampler [-1 Wind Sampler]',
+                label: 'Spin Up Wind Sampler',
                 summary: '+1 Prep Sensor, +5 Res, +6 Morale (-3 Power)',
                 requiresCargo: 'windSampler',
-                consumesCargo: { windSampler: 1 },
                 resourceDelta: { res: 5, energy: -3 },
                 moraleDelta: 6,
                 requirementDelta: { prep_sensor: 1 },
@@ -383,7 +382,7 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         badge: 'STORM HIT',
         scienceFact: 'Real NASA Fact: Martian dust storms whip winds up to 100 km/h and pack grit into outdoor weather booms like Mars Perseverance sensors!',
         preferredWeather: 'Dust Storm',
-        minSol: 3,
+        minSol: 4,
         choices: [
             {
                 id: 'engineer_brace_mast',
@@ -420,7 +419,8 @@ export const DAILY_EVENTS: DailyEventDef[] = [
         prompt: 'Red regolith packed tight around our rover drive axle before the big expedition.',
         badge: 'ROVER ALERT',
         scienceFact: 'Real NASA Fact: Mars rovers wiggle and reverse-steer their aluminum wheels to shake off sticky sand and protect their motors!',
-        minSol: 3,
+        preferredWeather: 'Dust Haze',
+        minSol: 4,
         choices: [
             {
                 id: 'pilot_wiggle_clean',
