@@ -1,4 +1,6 @@
-# The image only needs the web export and the nginx config.
+# The image only needs the server, its dependencies list and the web export.
 *
+!package.json
+!package-lock.json
+!scripts/playtest.mjs
 !dist/web/
-!deploy/nginx.conf

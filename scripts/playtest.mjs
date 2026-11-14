@@ -1,17 +1,57 @@
+// The game server: serves the Estella web export and the A.R.I.E.S. Gemini route.
+//
+// Locally: `npm run playtest` (http://127.0.0.1:4173). On a server: the Docker image runs this same
+// script. Everything is configured with environment variables (or a .env file next to package.json);
+// see deploy/.env.example. Nothing about a particular deployment is written in the code.
+//
+//   MSP_PUBLIC_URL      Public address(es) of the game, comma-separated, e.g. https://msp.example.com.
+//                       A.R.I.E.S. only answers pages opened from these or from localhost.
+//   GEMINI_API_KEY      Turns A.R.I.E.S. on. Without it the game uses its authored briefings.
+//   GEMINI_MODEL        Gemini model (default gemini-3-flash-preview).
+//   MSP_AI_PER_MINUTE   A.R.I.E.S. requests per visitor per minute (default 6).
+//   MSP_AI_PER_DAY      A.R.I.E.S. requests per day for the whole server (default 300).
+//   MSP_HOST / MSP_PORT Listen address and port (default 127.0.0.1:4173).
+//   MSP_BUILD_DIR       Folder with the web export (default dist/web).
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { extname, resolve, sep } from 'node:path';
+import { extname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
+import { gzipSync } from 'node:zlib';
 import { ApiError, GoogleGenAI } from '@google/genai';
 
-const buildDir = fileURLToPath(new URL('../dist/web/', import.meta.url));
-const types = {
-    '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-    '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png', '.ttf': 'font/ttf',
+let localEnv = {};
+try {
+    localEnv = parseEnv(await readFile(new URL('../.env', import.meta.url), 'utf8'));
+} catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+}
+/** A setting from the environment, or from the .env file beside package.json. */
+const env = name => process.env[name]?.trim() || localEnv[name]?.trim() || '';
+const count = (name, fallback) => {
+    const value = Number(env(name));
+    return env(name) && Number.isFinite(value) && value >= 0 ? value : fallback;
 };
-const port = Number(process.env.MSP_PLAYTEST_PORT ?? 4173);
+
+const repoRoot = fileURLToPath(new URL('../', import.meta.url));
+const buildDir = resolve(isAbsolute(env('MSP_BUILD_DIR')) ? env('MSP_BUILD_DIR') : resolve(repoRoot, env('MSP_BUILD_DIR') || 'dist/web'));
+const host = env('MSP_HOST') || '127.0.0.1';
+const port = count('MSP_PORT', count('MSP_PLAYTEST_PORT', 4173));
+const publicOrigins = env('MSP_PUBLIC_URL').split(',').map(url => url.trim()).filter(Boolean).map(url => {
+    try { return new URL(url).origin; } catch { throw new Error(`MSP_PUBLIC_URL has an invalid address: ${url}`); }
+});
+const allowedOrigins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`, ...publicOrigins]);
+const perMinute = count('MSP_AI_PER_MINUTE', 6);
+const perDay = count('MSP_AI_PER_DAY', 300);
+
+const types = {
+    '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json', '.esscene': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png',
+    '.ttf': 'font/ttf', '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.svg': 'image/svg+xml',
+};
+/** Text and WebAssembly shrink a lot with gzip; images and audio are already compressed. */
+const compressible = new Set(['.html', '.js', '.css', '.json', '.esscene', '.wasm', '.svg', '.ttf']);
 const modelName = 'gemini-3-flash-preview';
 const maxPlannerRequestBytes = 32_768;
 const string = { type: 'string' };
@@ -40,19 +80,12 @@ const schemas = {
 try {
     await stat(resolve(buildDir, 'index.html'));
 } catch {
-    console.error('Export the project as Web into dist/web in Estella Editor first.');
+    console.error(`No web export in ${buildDir}. Export the project as Web into dist/web in Estella Editor first.`);
     process.exit(1);
 }
 
-let localEnv = {};
-try {
-    localEnv = parseEnv(await readFile(new URL('../.env', import.meta.url), 'utf8'));
-} catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-}
-const apiKey = process.env.GEMINI_API_KEY?.trim() || localEnv.GEMINI_API_KEY?.trim()
-    || process.env.VITE_GEMINI_API_KEY?.trim() || localEnv.VITE_GEMINI_API_KEY?.trim();
-const model = process.env.GEMINI_MODEL?.trim() || localEnv.GEMINI_MODEL?.trim() || modelName;
+const apiKey = env('GEMINI_API_KEY') || env('VITE_GEMINI_API_KEY');
+const model = env('GEMINI_MODEL') || modelName;
 const gemini = apiKey ? new GoogleGenAI({ apiKey, apiVersion: 'v1beta' }) : null;
 
 function sendJson(response, status, data) {
@@ -60,15 +93,39 @@ function sendJson(response, status, data) {
     response.end(JSON.stringify(data));
 }
 
+/** The visitor's address: Cloudflare and other proxies pass it on in a header. */
+function visitor(request) {
+    const forwarded = request.headers['cf-connecting-ip'] ?? request.headers['x-forwarded-for']?.split(',')[0];
+    return (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.trim() || request.socket.remoteAddress || 'unknown';
+}
+
+const recent = new Map();
+let today = new Date().toISOString().slice(0, 10);
+let usedToday = 0;
+
+/** A reason to refuse this request, or null. Counts it when it is allowed. */
+function rateLimit(request) {
+    const now = Date.now();
+    const day = new Date(now).toISOString().slice(0, 10);
+    if (day !== today) { today = day; usedToday = 0; recent.clear(); }
+    if (usedToday >= perDay) return 'A.R.I.E.S. reached today’s limit. The briefings continue without it.';
+    const id = visitor(request);
+    const times = (recent.get(id) ?? []).filter(time => now - time < 60_000);
+    if (times.length >= perMinute) return 'A.R.I.E.S. is busy. Try again in a minute.';
+    times.push(now);
+    recent.set(id, times);
+    usedToday++;
+    return null;
+}
+
 async function handlePlanner(request, response) {
-    const host = request.headers.host;
-    if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(host) ||
-        (request.headers.origin && request.headers.origin !== `http://${host}`)) {
-        sendJson(response, 403, { error: 'Open the planner from the local game.' });
+    if (request.method === 'GET') {
+        sendJson(response, 200, { model: gemini && perDay > 0 ? model : null });
         return;
     }
-    if (request.method === 'GET') {
-        sendJson(response, 200, { model: gemini ? model : null });
+    // Only pages of this game may use the key: browsers always send Origin with a POST.
+    if (!allowedOrigins.has(request.headers.origin ?? '')) {
+        sendJson(response, 403, { error: 'Open A.R.I.E.S. from the game. (Is MSP_PUBLIC_URL set to this site?)' });
         return;
     }
     if (request.method !== 'POST' || request.headers['content-type']?.split(';')[0]?.trim() !== 'application/json') {
@@ -76,7 +133,12 @@ async function handlePlanner(request, response) {
         return;
     }
     if (!gemini) {
-        sendJson(response, 503, { error: 'Gemini key is missing from the local playtest server.' });
+        sendJson(response, 503, { error: 'No Gemini API key is set on this server.' });
+        return;
+    }
+    const limited = rateLimit(request);
+    if (limited) {
+        sendJson(response, 429, { error: limited });
         return;
     }
 
@@ -134,7 +196,7 @@ async function handlePlanner(request, response) {
     } catch (error) {
         const status = error instanceof ApiError || typeof error?.status === 'number' ? error.status : null;
         const reason = status === 429 ? 'Gemini quota or rate limit reached.'
-            : status === 401 || status === 403 ? 'Gemini rejected the local API key.'
+            : status === 401 || status === 403 ? 'Gemini rejected the server’s API key.'
             : status ? `Gemini request failed (HTTP ${status}).` : 'Could not reach Gemini.';
         sendJson(response, 502, { error: reason });
     }
@@ -147,6 +209,16 @@ function isJsonObject(text) {
     } catch {
         return false;
     }
+}
+
+/** Gzipped files, made once per file version and kept in memory (the whole export is a few MB). */
+const zipped = new Map();
+async function gzipped(file, version) {
+    const cached = zipped.get(file);
+    if (cached?.version === version) return cached.body;
+    const body = gzipSync(await readFile(file), { level: 9 });
+    zipped.set(file, { version, body });
+    return body;
 }
 
 createServer(async (request, response) => {
@@ -171,16 +243,27 @@ createServer(async (request, response) => {
             response.writeHead(404).end();
             return;
         }
-        response.writeHead(200, {
-            'Content-Type': types[extname(file)] ?? 'application/octet-stream',
-            'Content-Length': info.size, 'Cache-Control': 'no-store',
-        });
+        const type = extname(file);
+        // The export names assets/ and chunks/ files by their content, so they can be cached for good
+        // (Cloudflare then serves them); everything else is revalidated so a new release shows at once.
+        const cache = /^\/(assets|chunks)\//.test(url.pathname) ? 'public, max-age=31536000, immutable' : 'no-cache';
+        const headers = { 'Content-Type': types[type] ?? 'application/octet-stream', 'Cache-Control': cache, Vary: 'Accept-Encoding' };
+        if (compressible.has(type) && /\bgzip\b/.test(request.headers['accept-encoding'] ?? '')) {
+            const body = await gzipped(file, info.mtimeMs);
+            response.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', 'Content-Length': body.length });
+            response.end(request.method === 'HEAD' ? undefined : body);
+            return;
+        }
+        response.writeHead(200, { ...headers, 'Content-Length': info.size });
         if (request.method === 'HEAD') response.end();
         else createReadStream(file).pipe(response);
     } catch {
         response.writeHead(404).end();
     }
-}).listen(port, '127.0.0.1', () => {
-    console.log(`Mars Station Program · http://127.0.0.1:${port}/`);
-    console.log(gemini ? `Gemini ready · ${model}` : 'Offline planner · no Gemini API key configured');
+}).listen(port, host, () => {
+    console.log(`Mars Station Program · http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}/`);
+    for (const origin of publicOrigins) console.log(`Public address · ${origin}`);
+    console.log(!gemini ? 'A.R.I.E.S. off · no GEMINI_API_KEY (the game uses its authored briefings)'
+        : perDay === 0 ? 'A.R.I.E.S. off · MSP_AI_PER_DAY is 0'
+        : `A.R.I.E.S. ready · ${model} · ${perMinute}/min per visitor · ${perDay}/day`);
 });

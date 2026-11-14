@@ -1,5 +1,5 @@
-// Gemini through the local playtest server (scripts/playtest.mjs): the API key stays on the
-// server, the game only calls /api/gemini-plan. Used by A.R.I.E.S. (src/services/tharsisAries.ts).
+// Gemini through the game's own server (scripts/playtest.mjs, locally or in Docker): the API key
+// stays on the server, the game only calls /api/gemini-plan on the address it was opened from. Used by A.R.I.E.S. (src/services/tharsisAries.ts).
 // When the server is not running, A.R.I.E.S. falls back to the authored briefings.
 const GEMINI_ROUTE = '/api/gemini-plan';
 let geminiModel: string | null = null;
@@ -10,13 +10,16 @@ export function getGeminiStatusLabel(): string {
 
 export function assistantIsAvailable(): boolean { return geminiModel !== null; }
 
-function isLocalPlaytest(): boolean {
-    return typeof location !== 'undefined' && location.protocol === 'http:' &&
-        (location.hostname === '127.0.0.1' || location.hostname === 'localhost');
+/**
+ * A page served over the web (local playtest or a deployed site). The game asks its own server
+ * whether A.R.I.E.S. is available; a plain static host answers with no route and A.R.I.E.S. stays off.
+ */
+function isServedPage(): boolean {
+    return typeof location !== 'undefined' && (location.protocol === 'http:' || location.protocol === 'https:');
 }
 
 export async function checkGeminiConnection(): Promise<void> {
-    if (!isLocalPlaytest()) return;
+    if (!isServedPage()) return;
     try {
         const response = await fetch(GEMINI_ROUTE, { cache: 'no-store', signal: AbortSignal.timeout(2_000) });
         if (response.ok && response.headers.get('content-type')?.includes('application/json')) {

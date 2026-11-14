@@ -1,10 +1,17 @@
-# On the server: put this file in a folder (for example ~/msp) and run
+# On the server: put this file and a .env (copied from .env.example) in one folder, then run
 #   docker compose pull && docker compose up -d
-# The game listens on 127.0.0.1:8070 only; the Cloudflare Tunnel (msp.amerai.top) points at localhost:8070.
+# The game listens on 127.0.0.1 only; point a Cloudflare Tunnel (or a reverse proxy) at it.
 services:
   msp:
-    image: ghcr.io/shadowpasha/msp-martian-space-program:latest
+    image: ${MSP_IMAGE:-ghcr.io/shadowpasha/msp-martian-space-program:latest}
     container_name: msp
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Inside the container the server always listens on 0.0.0.0:8070.
+      MSP_HOST: 0.0.0.0
+      MSP_PORT: "8070"
     ports:
-      - "127.0.0.1:8070:8070"
+      - "127.0.0.1:${MSP_HOST_PORT:-8070}:8070"
