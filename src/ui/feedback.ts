@@ -1,4 +1,5 @@
-// Sound and vibration for the flight screens.
+// Sound effects and vibration for the flight screens. Music, volumes and mute belong to
+// src/audio/soundManager.ts; these sounds play on the SFX bus, so its sliders apply to them.
 //
 // One place decides what a moment sounds and feels like, so every screen stays consistent:
 //   tick   hovering a button          blip    clicking a button
@@ -25,7 +26,6 @@ const SPACING_MS: Partial<Record<Sfx, number>> = { tick: 45, blip: 30, buzz: 150
 let audio: AudioAPI | null = null;
 let soundOn = true;
 let vibrationOn = true;
-let humOn = false;
 const lastPlayed = new Map<Sfx, number>();
 
 /** Called once by the audio bridge system when the engine's audio is ready. */
@@ -33,16 +33,13 @@ export function connectAudio(api: AudioAPI): void {
     if (audio) return;
     audio = api;
     try {
-        void api.preloadAll(['tick', 'blip', 'chime', 'success', 'buzz', 'thunk', 'whoosh', 'beep', 'sparkle', 'launch', 'slam', 'count', 'go', 'hum'].map(PATH)).catch(() => {});
+        void api.preloadAll(['tick', 'blip', 'chime', 'success', 'buzz', 'thunk', 'whoosh', 'beep', 'sparkle', 'launch', 'slam', 'count', 'go'].map(PATH)).catch(() => {});
     } catch { /* audio unavailable: stay silent */ }
-    if (humOn) startHum();
 }
 
 export function setFeedbackPrefs(prefs: { sound: boolean; vibration: boolean }): void {
     soundOn = prefs.sound;
     vibrationOn = prefs.vibration;
-    if (!soundOn) stopHum();
-    else if (humOn) startHum();
 }
 
 export function play(name: Sfx, pitch = 1): void {
@@ -62,26 +59,5 @@ export function vibrate(kind: 'short' | 'long' = 'short'): void {
     try {
         if (!Device.capabilities().vibration) return;
         void Device.vibrate({ duration: kind }).catch(() => {});
-    } catch { /* ignore */ }
-}
-
-/** The menu's background hum: on while the title screen is showing. */
-export function menuAmbience(on: boolean): void {
-    humOn = on;
-    if (on) startHum();
-    else stopHum();
-}
-
-function startHum(): void {
-    if (!soundOn || !audio) return;
-    try {
-        audio.playBGM(PATH('hum'), { volume: 0.22, fadeIn: 1.2 });
-    } catch { /* ignore */ }
-}
-
-function stopHum(): void {
-    if (!audio) return;
-    try {
-        audio.stopBGM(0.6);
     } catch { /* ignore */ }
 }

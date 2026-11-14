@@ -1,10 +1,11 @@
 import {
-    AssetScope, createButton, GamepadButton, Interactable, px, spawnUIEntity, Text, TextAlign, TextVerticalAlign,
+    AssetScope, createButton, createSlider, GamepadButton, Interactable, px, spawnUIEntity, Text, TextAlign, TextVerticalAlign,
     UIDisplay, UINode, UIPointerEvents, UIPositionType, UIVisual, UIVisualFit, UIVisualType, uiNodeWorldBox,
     type AssetsData, type Color, type Entity, type FocusManagerState, type InputState, type UIEventQueue, type World,
 } from 'esengine';
 import { play, vibrate } from './feedback';
 import { makeAbsBox, setNodeDisplayed, setText, setTextColor, setVisualColor } from './theme';
+import { playSfx } from '../audio/soundManager';
 
 export type Bounds = readonly [x: number, y: number, width: number, height: number];
 
@@ -232,8 +233,8 @@ export function makeFlightUi(
             fadeDuration: options.reducedMotion ? 0 : 0.1,
             onClick: () => {
                 if (!live()) return;
-                // `still` controls (the cargo grid) make their own sound for what happened, so no blip.
-                if (!opts.still) play('blip');
+                // One click sound per press. `still` controls (the cargo grid) make their own sound.
+                if (!opts.still) playSfx(tone === 'primary' || tone === 'hero' ? 'confirm' : 'click');
                 onClick();
             },
         });
@@ -316,6 +317,32 @@ export function makeFlightUi(
         }
     }
 
+    function slider(
+        parent: Entity,
+        bounds: Bounds,
+        value: number,
+        onChange: (next: number) => void,
+        opts: { step?: number; disabled?: boolean; fillColor?: Color } = {},
+    ) {
+        const [x, y, w, h] = bounds;
+        return createSlider({
+            world,
+            events,
+            parent,
+            node: { position: UIPositionType.Absolute, insetLeft: px(x), insetTop: px(y), width: px(w), height: px(h) },
+            min: 0,
+            max: 1,
+            step: opts.step ?? 0.05,
+            value,
+            handleWidth: 16,
+            disabled: opts.disabled,
+            trackVisual: { color: palette.well },
+            fillVisual: { color: opts.fillColor ?? palette.cyan },
+            handleVisual: { color: palette.amber },
+            onChange,
+        });
+    }
+
     let lastFocused: Entity | null = null;
     function isEnabled(control: Control): boolean {
         return world.valid(control.entity) && world.isEntityActive(control.entity) &&
@@ -363,7 +390,7 @@ export function makeFlightUi(
     }
 
     return {
-        world, root, palette, box, group, frame, label, image, icon, button, updateFocus,
+        world, root, palette, box, group, frame, label, image, icon, button, slider, updateFocus,
         /** The player's Reduced Motion setting; screens with motion read it. */
         reducedMotion: options.reducedMotion,
         setText: (entity: Entity | null, content: string) => setText(world, entity, content),

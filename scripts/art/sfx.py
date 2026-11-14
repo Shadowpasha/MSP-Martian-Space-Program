@@ -128,18 +128,6 @@ def main():
     # Launch intro: lift-off fanfare, a bright held chord.
     chord = [tone(lambda t, f=f: f, 0.75, square, 0.16, 2.5) for f in (523.25, 659.25, 783.99, 1046.5)]
     save('go', mix(*chord, tone(lambda t: 1046.5 * 2, 0.4, triangle, 0.2, 5), offsets=[0, 0, 0, 0, 0.05]))
-    # Menu ambience: a soft station hum that loops cleanly (whole cycles in 4 s).
-    seconds = 4.0
-    count = int(RATE * seconds)
-    hum = []
-    rng = random.Random(11)
-    air = 0.0
-    for i in range(count):
-        t = i / RATE
-        air = air * 0.995 + rng.uniform(-1, 1) * 0.005
-        wobble = 1 + 0.15 * math.sin(2 * math.pi * 0.5 * t)
-        hum.append(0.18 * math.sin(2 * math.pi * 60 * t) * wobble + 0.07 * math.sin(2 * math.pi * 120 * t) + 0.9 * air)
-    save('hum', hum)
 
 
 if __name__ == '__main__':

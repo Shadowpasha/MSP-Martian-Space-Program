@@ -1,0 +1,5 @@
+All audio files in this directory are licensed under CC0 1.0 Universal (Public Domain):
+
+- bgm_menu.ogg: "Another Space Background Track (Observing The Star)" via OpenGameArt.org (CC0)
+- bgm_game.ogg: "Crimson Space Station Background Ambient Music 1" via OpenGameArt.org (CC0)
+- sfx_*.ogg: Kenney "Interface Sounds" pack via OpenGameArt.org / kenney.nl (CC0 1.0)

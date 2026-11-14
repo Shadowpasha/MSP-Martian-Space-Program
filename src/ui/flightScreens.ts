@@ -7,10 +7,11 @@ import { CARGO_BY_ID, normalizeCargo } from '../data/cargo';
 import { LAUNCH_CREW_SIZE, type MissionOffer } from '../data/missions';
 import { purchaseProblem, type PlaytestProfile } from '../data/profile';
 import { MENU_BACKGROUND, SIDEBAR_BACKGROUND, type Bounds, type FlightUi, type IconName } from './flightUi';
-import { menuAmbience, play, vibrate } from './feedback';
+import { play, vibrate } from './feedback';
 import { burst } from './fx';
 import { easeOutBack, makeMotion, type Motion } from './motion';
 import { makeAbsBox } from './theme';
+import { playSfx } from '../audio/soundManager';
 
 export type Page = 'menu' | 'crew' | 'upgrade' | 'settings' | 'mission' | 'cargo' | 'review' | 'quit' | 'exit' | 'run';
 type Navigate = (page: Page) => void;
@@ -188,7 +189,6 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
         });
     }
     let lastGlow = -1;
-    menuAmbience(true);
     return () => {
         motion.tick();
         if (reducedMotion) return;
@@ -759,22 +759,66 @@ export function showPreparedManifest(ui: FlightUi, offer: MissionOffer, problem:
     ui.button(summary, [20, 524, 368, 48], onLaunch, { label: 'Launch Mission', tone: 'primary', disabled: Boolean(problem) });
 }
 
-export type SettingField = 'sound' | 'vibration' | 'reducedMotion' | 'highContrast';
+export type SettingField = 'soundEnabled' | 'vibration' | 'reducedMotion' | 'highContrast';
 
-export function showSettings(ui: FlightUi, profile: PlaytestProfile, change: (field: SettingField) => void): void {
+export function showSettings(
+    ui: FlightUi,
+    profile: PlaytestProfile,
+    change: (field: SettingField) => void,
+    onVolume?: (field: 'masterVolume' | 'musicVolume' | 'sfxVolume', value: number) => void,
+): void {
     const { root, palette: p } = ui;
-    const panel = ui.frame(root, [248, 108, 1016, 440]);
+    const panel = ui.frame(root, [248, 108, 1016, 588]);
     for (const [index, [field, title, description]] of ([
-        ['sound', 'Sound', 'Clicks, chimes and the station hum.'],
+        ['soundEnabled', 'Music & Sound', 'Mars music, button clicks and game sounds.'],
         ['vibration', 'Vibration', 'Buzz on taps and launch, on phones and tablets that can vibrate.'],
         ['reducedMotion', 'Reduced Motion', 'Keep the screen still: no slides, hops, shakes or drifting dust.'],
         ['highContrast', 'High Contrast', 'Brighten text, outlines, and focus markers.'],
     ] as const).entries()) {
-        const y = 28 + index * 104;
-        ui.label(panel, [24, y, 600, 40], title, { display: true, size: 28 });
-        ui.label(panel, [24, y + 40, 700, 28], description, { color: p.secondary });
-        ui.button(panel, [800, y + 12, 160, 44], () => change(field), { label: profile[field] ? 'On' : 'Off', tone: profile[field] ? 'primary' : 'plain' });
+        const y = 16 + index * 66;
+        ui.label(panel, [24, y, 600, 32], title, { display: true, size: 24 });
+        ui.label(panel, [24, y + 32, 700, 22], description, { color: p.secondary, size: 14 });
+        ui.button(panel, [800, y + 8, 160, 40], () => change(field), { label: profile[field] ? 'On' : 'Off', tone: profile[field] ? 'primary' : 'plain' });
     }
+
+    ui.box(panel, [24, 286, 936, 2], p.edge);
+
+    let lastSfxSample = 0;
+    const volumeRows = [
+        { field: 'masterVolume', title: 'Master Volume', desc: 'Overall volume across music and sound effects.', fill: p.amber },
+        { field: 'musicVolume', title: 'Music Volume', desc: 'Ambient menu and Mars station background music.', fill: p.cyan },
+        { field: 'sfxVolume', title: 'SFX Volume', desc: 'Button clicks, crew drops, and event alert cues.', fill: p.good },
+    ] as const;
+
+    volumeRows.forEach((row, index) => {
+        const y = 304 + index * 88;
+        ui.label(panel, [24, y, 360, 34], row.title, { display: true, size: 24 });
+        ui.label(panel, [24, y + 34, 460, 24], row.desc, { color: p.secondary, size: 14 });
+        const pctLabel = ui.label(panel, [896, y + 14, 72, 32], `${Math.round(profile[row.field] * 100)}%`, {
+            display: true,
+            size: 20,
+            color: profile.soundEnabled ? p.amber : p.muted,
+            center: true,
+        });
+        ui.slider(
+            panel,
+            [520, y + 18, 360, 24],
+            profile[row.field],
+            (next) => {
+                const rounded = Math.round(next * 20) / 20;
+                ui.setText(pctLabel, `${Math.round(rounded * 100)}%`);
+                onVolume?.(row.field, rounded);
+                if (row.field === 'sfxVolume') {
+                    const now = Date.now();
+                    if (now - lastSfxSample > 140) {
+                        lastSfxSample = now;
+                        playSfx('click');
+                    }
+                }
+            },
+            { disabled: !profile.soundEnabled, fillColor: row.fill },
+        );
+    });
 }
 
 export function showQuit(ui: FlightUi, navigate: Navigate): void {
