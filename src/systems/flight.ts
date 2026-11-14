@@ -7,18 +7,18 @@ import {
     type MainLoopResult, type MissionSetupInput,
 } from '../contracts/gameContract';
 import type { CargoPlacement } from '../data/cargo';
-import { buildLaunchSetup, LAUNCH_CREW_SIZE, launchProblem, missionOffers, preparedMoonOffer, type MissionOffer } from '../data/missions';
+import { buildLaunchSetup, LAUNCH_CREW_SIZE, launchProblem, missionOffers, type MissionOffer } from '../data/missions';
 import { awardResearch, loadProfile, purchaseUpgrade, resetUpgrades, type PlaytestProfile } from '../data/profile';
 import { showCargoPacker } from '../ui/cargoPacker';
 import { showLaunchSummary } from '../ui/launchSummary';
 import {
     showCrew, showExit, showMenu, showMissions, showPreparedManifest, showQuit, showSettings, showShell, showUpgrades, type Page,
 } from '../ui/flightScreens';
-import { makeFlightArt, makeFlightUi } from '../ui/flightUi';
+import { makeFlightArt, makeFlightUi, type IconName } from '../ui/flightUi';
 import { makeAbsBox, setNodeDisplayed } from '../ui/theme';
 import { setFeedbackPrefs } from '../ui/feedback';
 import { bindAudio, playMusic, setSoundEnabled, setVolumes, unlockAudio } from '../audio/soundManager';
-import { mountSurvivalUi } from './gameUi';
+import { mountTharsisFlight } from '../ui/tharsisFlight';
 
 const controllers = new WeakMap<World, { root: Entity; update: () => void }>();
 
@@ -104,7 +104,8 @@ export const flightSystem = defineSystem(
             const root = makeAbsBox(world, sceneRoot, 0, 0, 1280, 720);
             pageRoot = root;
             tickPage = null;
-            setNodeDisplayed(world, backdrop, page === 'run');
+            // The expedition draws its own station and site; the scene's old outpost backdrop stays hidden.
+            setNodeDisplayed(world, backdrop, false);
             playMusic(page === 'run' ? 'game' : 'menu');
 
             if (page === 'run' && runSetup) {
@@ -113,15 +114,9 @@ export const flightSystem = defineSystem(
                     saveProfile(awardResearch(profile, runId, result.researchPointsEarned));
                     Storage.setJSON(STORAGE_KEYS.LAST_RESULT, result);
                 };
-                const exit = (target: 'menu' | 'mission' | 'moon') => {
-                    if (target === 'moon') {
-                        const moon = preparedMoonOffer();
-                        launch(moon, profile.crewIds.length !== LAUNCH_CREW_SIZE);
-                    } else navigate(target);
-                };
-                tickPage = mountSurvivalUi({
-                    world, events, assets, focus, gameRoot: root, setup: runSetup, reducedMotion: profile.reducedMotion, onFinish: finish, onExit: exit,
-                });
+                // Every mission is an expedition; a team manifest without rules runs as the Tharsis survey.
+                const setup: MissionSetupInput = { ...runSetup, rules: 'tharsis-expedition' };
+                tickPage = mountTharsisFlight({ world, events, input, focus, root, art, setup, profile, onFinish: finish, onExit: target => navigate(target) });
                 return;
             }
 
@@ -162,7 +157,8 @@ export const flightSystem = defineSystem(
                 case 'cargo': {
                     const chosen = offer;
                     if (!chosen?.setup) { navigate('mission'); break; }
-                    showShell(ui, page, 'Cargo Preparation', `${chosen.title} · pack what the mission needs`, 'windSampler', navigate);
+                    showShell(ui, page, 'Cargo Preparation', `${chosen.title} · pack what the mission needs`,
+                        (Object.keys(chosen.setup.missionGoal.requiredEquipment ?? {})[0] ?? 'windSampler') as IconName, navigate);
                     const problem = (placements: CargoPlacement[]) => {
                         const setup = buildLaunchSetup(chosen, profile.crewIds, placements);
                         return setup ? launchProblem(setup) : 'Choose a mission to launch.';

@@ -1,4 +1,5 @@
-"""Pixel sprites for the launch intro: a rocket, two flame frames, and Earth / Mars / Moon discs.
+"""Pixel sprites for the launch intro (a rocket, two flame frames, Earth / Mars / Moon discs) and the
+expedition instrument icons (RAD Detector, Ice Drill), which do not fit in the flight icon atlas.
 
 Drawn in code with the same palette and .meta helper as prep_sprites.py (filterMode nearest),
 at 1x; the game shows them at integer scales. Run from the repo root:
@@ -121,12 +122,54 @@ def planet(kind: str) -> Image.Image:
     return img
 
 
+def icon_rad_detector() -> Image.Image:
+    """32 x 32: a handheld radiation detector with a readout and a trefoil badge."""
+    img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.line([(22, 2), (22, 8)], fill=rgba("steel"))               # antenna
+    d.rectangle([21, 1, 23, 2], fill=rgba("red"))
+    d.rectangle([5, 8, 26, 29], fill=rgba("ink7"), outline=rgba("ink9"))   # case
+    d.line([(6, 9), (25, 9)], fill=rgba("edge3"))
+    d.rectangle([8, 11, 23, 17], fill=rgba("cyan8"), outline=rgba("ink9"))  # screen
+    for i, h in enumerate((2, 4, 3, 5, 4)):                     # bar graph
+        d.rectangle([10 + i * 3, 16 - h, 11 + i * 3, 16], fill=rgba("cyan"))
+    d.ellipse([10, 19, 21, 28], fill=rgba("yellow"), outline=rgba("ink9"))  # trefoil badge
+    d.rectangle([15, 23, 16, 24], fill=rgba("ink9"))
+    for pts in (((15, 20), (16, 20), (14, 22), (17, 22)), ((11, 25), (12, 26), (13, 27)), ((20, 25), (19, 26), (18, 27))):
+        for x, y in pts:
+            d.point((x, y), fill=rgba("ink9"))
+    return img
+
+
+def icon_ice_drill() -> Image.Image:
+    """32 x 32: a drill motor with a spiral auger bit and ice chips."""
+    img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rectangle([9, 1, 22, 9], fill=rgba("amber"), outline=rgba("ink9"))   # motor
+    d.line([(10, 2), (21, 2)], fill=rgba("amber3"))
+    d.rectangle([12, 4, 19, 6], fill=rgba("ink7"))
+    d.rectangle([13, 10, 18, 12], fill=rgba("steel"), outline=rgba("ink9"))  # chuck
+    for y in range(13, 26):                                       # auger with a spiral
+        half = 2 if y < 24 else 1
+        d.line([(16 - half, y), (15 + half, y)], fill=rgba("cream2"))
+        if (y - 13) % 3 == 0:
+            d.line([(14, y), (17, y + 1)], fill=rgba("edge5"))
+    d.point((15, 26), fill=rgba("cream2"))
+    for x, y in ((9, 27), (12, 29), (20, 28), (23, 26), (17, 30), (7, 30)):  # ice chips
+        d.rectangle([x, y, x + 1, y + 1], fill=rgba("blue"))
+        d.point((x, y), fill=rgba("white"))
+    return img
+
+
 def main() -> int:
     save(rocket(), OUT / "launch_rocket_24x48.png")
     save(flame(0), OUT / "launch_flame_a_12x16.png")
     save(flame(1), OUT / "launch_flame_b_12x16.png")
     for kind in ("earth", "mars", "moon"):
         save(planet(kind), OUT / f"launch_planet_{kind}_64.png")
+    icons = ROOT / "assets" / "textures" / "icons"
+    save(icon_rad_detector(), icons / "icon_rad_detector_32.png")
+    save(icon_ice_drill(), icons / "icon_ice_drill_32.png")
     # A preview sheet for review (not used by the game).
     sheet = Image.new("RGBA", (24 * 6 + 12 * 6 + 64 * 3 * 3 + 40, 64 * 3), rgba("ink9"))
     x = 0

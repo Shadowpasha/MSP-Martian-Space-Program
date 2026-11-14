@@ -60,6 +60,9 @@ function exportPng(name, data) {
 
 const station = read(path.join(art, 'menu_station_source.png'));
 exportPng('menu_station.png', resize(station, 640, 360));
+for (const name of ['tharsis_station', 'tharsis_site']) {
+    exportPng(name + '.png', resize(read(path.join(art, name + '_source.png')), 640, 360));
+}
 const sidebar = resize(station, 124, 252, [540, 116, 295, 600]);
 for (let i = 0; i < sidebar.data.length; i += 4) {
     const y = Math.floor((i / 4) / sidebar.width);

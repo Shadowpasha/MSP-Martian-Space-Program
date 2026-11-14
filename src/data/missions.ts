@@ -1,22 +1,26 @@
 import {
-    AVAILABLE_CREW, cloneSetup, DEFAULT_MARS_SETUP, MOON_TEST_SETUP,
+    AVAILABLE_CREW, cloneSetup, DEFAULT_MARS_SETUP,
     type CrewMember, type MissionSetupInput, type ResourcePool,
 } from '../contracts/gameContract';
 import { CARGO_BY_ID, normalizeCargo, packedInventory, type CargoPlacement } from './cargo';
+import { EXPEDITION_RESERVES, expeditionRequirements } from './expeditions';
 import { nasaMissionOffers, type MissionDifficulty } from './nasaMissions';
 
 export const LAUNCH_CREW_SIZE = 4;
 const surveyBase = cloneSetup(DEFAULT_MARS_SETUP);
 export const WEATHER_SURVEY: MissionSetupInput = {
     ...surveyBase,
+    rules: 'tharsis-expedition',
+    expedition: 'tharsis',
     targetSol: 16,
     missionGoal: {
         ...surveyBase.missionGoal,
         id: 'tharsis_weather_survey',
         title: 'Tharsis Ridge Weather Survey',
-        description: 'Collect 48 hours of weather data at Site A, Tharsis Ridge, by the end of Sol 16.',
+        description: 'Deploy to Site A, collect 48 consecutive hours of weather data, and return by Sol 16. Seasonal dust risk is elevated.',
         deadlineSol: 16,
-        minimumReserves: { food: 10, water: 10, oxygen: 25 },
+        requirements: expeditionRequirements(),
+        minimumReserves: { ...EXPEDITION_RESERVES },
         requiredEquipment: { windSampler: 1 },
     },
 };
@@ -26,7 +30,7 @@ export interface MissionOffer {
     site: string;
     description: string;
     setup?: MissionSetupInput;
-    prepared?: 'team' | 'moon-test';
+    prepared?: 'team';
     /** Card picture; defaults to assets/textures/mission_<slot>.png. */
     image?: string;
     /** Difficulty bar on the card (1 Easy, 2 Medium, 3 Hard); a team manifest has none. */
@@ -66,7 +70,7 @@ export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
     return [
         {
             title: mission.missionGoal.title,
-            site: pending ? mission.planet.toUpperCase() + ' · TEAM MANIFEST' : 'MARS · SITE A',
+            site: pending ? mission.planet.toUpperCase() + ' · TEAM SETUP' : 'MARS · SITE A',
             // The card line is the goal only; the deadline has its own line on the card.
             description: pending ? mission.missionGoal.description : 'Record 48 hours of weather data at Site A.',
             setup: mission,
@@ -77,13 +81,6 @@ export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
         },
         ...laterMissions,
     ];
-}
-
-export function preparedMoonOffer(): MissionOffer {
-    return {
-        title: MOON_TEST_SETUP.missionGoal.title, site: 'MOON · TEST MISSION',
-        description: MOON_TEST_SETUP.missionGoal.description, setup: MOON_TEST_SETUP, prepared: 'moon-test',
-    };
 }
 
 export const RESOURCE_LABELS: Record<keyof ResourcePool, string> = {

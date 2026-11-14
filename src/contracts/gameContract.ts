@@ -39,6 +39,10 @@ export interface CargoInventory {
     windSampler: number;   // mission-critical hardware
     waterCanisters?: number;
     oxygenTanks?: number;
+    /** Survey instrument for the radiation expedition. */
+    radDetector?: number;
+    /** Survey instrument for the ice expedition. */
+    iceDrill?: number;
 }
 
 export type CargoItemId = keyof CargoInventory;
@@ -134,6 +138,9 @@ export interface MissionSetupInput {
     planet: PlanetId;
     targetSol: number;
     missionGoal: MissionGoal;
+    rules?: 'tharsis-expedition';
+    /** Which expedition profile (src/data/expeditions.ts) the run uses; Tharsis when absent. */
+    expedition?: 'tharsis' | 'radiation' | 'ice';
     startingResources: ResourcePool;
     startingConditions: ConditionState;
     cargo: CargoInventory;

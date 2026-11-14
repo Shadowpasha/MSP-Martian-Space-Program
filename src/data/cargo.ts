@@ -33,6 +33,10 @@ export const CARGO_ITEMS: readonly CargoItem[] = [
         cells: [[0, 0], [0, 1]], effect: '+14 Water', resources: { water: 14 } },
     { id: 'oxygenTanks', name: 'Oxygen Tank', shortName: 'O₂ Tank', stock: 2,
         cells: [[0, 0], [1, 0], [2, 0]], effect: '+16 O₂', resources: { oxygen: 16 } },
+    { id: 'radDetector', name: 'RAD Detector', shortName: 'RAD', stock: 1,
+        cells: [[0, 0], [1, 0]], effect: 'Required for the radiation survey.' },
+    { id: 'iceDrill', name: 'Ice Drill', shortName: 'Drill', stock: 1,
+        cells: [[0, 0], [0, 1], [0, 2]], effect: 'Required to drill the ice cores.' },
 ];
 
 export const CARGO_BY_ID = Object.fromEntries(CARGO_ITEMS.map(item => [item.id, item])) as Record<CargoItemId, CargoItem>;
@@ -48,7 +52,10 @@ export interface CargoPlacement {
 }
 
 export function normalizeCargo(cargo: CargoInventory): Required<CargoInventory> {
-    return { ...cargo, waterCanisters: cargo.waterCanisters ?? 0, oxygenTanks: cargo.oxygenTanks ?? 0 };
+    return {
+        ...cargo, waterCanisters: cargo.waterCanisters ?? 0, oxygenTanks: cargo.oxygenTanks ?? 0,
+        radDetector: cargo.radDetector ?? 0, iceDrill: cargo.iceDrill ?? 0,
+    };
 }
 
 export function packedInventory(placements: readonly CargoPlacement[]): Required<CargoInventory> {
