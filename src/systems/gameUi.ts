@@ -44,6 +44,7 @@ import {
 } from '../simulation/solEngine';
 import { isScriptedStoryEvent } from '../data/events';
 import { generateDailyEventWithGemini, preloadGeminiKey } from '../services/geminiPlanner';
+import { playSfx } from '../audio/soundManager';
 import { createGameModals, type ModalsController } from '../ui/modals';
 import {
     buttonStates,
@@ -276,6 +277,7 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
         fadeDuration: 0.12,
         onClick: () => {
             setRationPolicy(state, state.rationPolicy === 'full' ? 'half' : 'full');
+            playSfx('select');
             refreshAllUI();
         },
     });
@@ -323,6 +325,7 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
                 const slot = taskSlots[i]!;
                 if (!slot.taskId) return;
                 cancelTask(state, slot.taskId);
+                playSfx('close');
                 refreshAllUI();
             },
         });
@@ -376,19 +379,24 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
         const currentId = task.assignedCrewIds[slotIndex];
         if (currentId) {
             assignCrewToTask(state, currentId, null);
+            playSfx('click');
             refreshAllUI();
             return;
         }
         // Pick best idle crew (preferring matching specialty), else cycle next crew member
         const idle = state.crew.filter((c) => c.health > 0 && !getCrewAssignment(state, c.id));
         const candidates = idle.length > 0 ? idle : state.crew.filter((c) => c.health > 0 && !task.assignedCrewIds.includes(c.id));
-        if (candidates.length === 0) return;
+        if (candidates.length === 0) {
+            playSfx('error');
+            return;
+        }
 
         const preferred = candidates.find(
             (c) => c.perk.bonusCategory === task.category || (task.category === 'GOAL' && c.role === 'pilot'),
         );
         const chosen = preferred ?? candidates[0]!;
         assignCrewToTask(state, chosen.id, task.id);
+        playSfx('drop');
         refreshAllUI();
     }
 
@@ -626,10 +634,12 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
             if (!advanceSol(state).advanced) return;
             refreshAllUI();
             if (state.result !== null) {
+                playSfx(state.result.outcome === 'victory' ? 'success' : 'error');
                 onFinish(state.result);
                 modals.openSolReport();
                 return;
             }
+            playSfx('confirm');
             const usedSet = new Set(state.usedEventIds);
             const scripted = isScriptedStoryEvent(state.sol, state.goal.completed, usedSet);
             const hasKey = !scripted && (await preloadGeminiKey());
@@ -779,6 +789,7 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
             events.on(btn.entity, 'drag_start', () => {
                 activeDraggingIds.add(card.id);
                 suppressClickFrames.set(card.id, 6);
+                playSfx('select');
                 setVisualColor(world, card.stripe, PALETTE.cyan);
             }),
             events.on(btn.entity, 'drag_end', () => {
@@ -787,6 +798,9 @@ export function mountSurvivalUi(options: SurvivalUiOptions): () => void {
                 const dropSlot = findDropTaskSlot(card.btn.entity);
                 if (dropSlot) {
                     assignCrewToTask(state, card.id, dropSlot.taskId);
+                    playSfx('drop');
+                } else {
+                    playSfx('click');
                 }
                 resetCardPosition(card);
                 for (const slot of taskSlots) {

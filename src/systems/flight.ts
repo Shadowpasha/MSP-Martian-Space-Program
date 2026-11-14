@@ -1,5 +1,5 @@
 import {
-    Assets, defineSystem, FocusManager, GamepadButton, GetWorld, Input, Res, Storage, UIEvents,
+    Assets, Audio, defineSystem, FocusManager, GamepadButton, GetWorld, Input, Res, Storage, UIEvents,
     type Entity, type World,
 } from 'esengine';
 import {
@@ -16,7 +16,8 @@ import {
 } from '../ui/flightScreens';
 import { makeFlightArt, makeFlightUi } from '../ui/flightUi';
 import { makeAbsBox, setNodeDisplayed } from '../ui/theme';
-import { menuAmbience, setFeedbackPrefs } from '../ui/feedback';
+import { setFeedbackPrefs } from '../ui/feedback';
+import { bindAudio, playMusic, setSoundEnabled, setVolumes, unlockAudio } from '../audio/soundManager';
 import { mountSurvivalUi } from './gameUi';
 
 const controllers = new WeakMap<World, { root: Entity; update: () => void }>();
@@ -28,8 +29,8 @@ function readPendingSetup(): MissionSetupInput | undefined {
 }
 
 export const flightSystem = defineSystem(
-    [GetWorld(), Res(UIEvents), Res(Assets), Res(Input), Res(FocusManager)],
-    (world, events, assets, input, focus) => {
+    [GetWorld(), Res(UIEvents), Res(Assets), Res(Input), Res(FocusManager), Res(Audio)],
+    (world, events, assets, input, focus, audio) => {
         const foundRoot = world.findEntityByName('GameRoot');
         if (foundRoot === null) return;
         const sceneRoot: Entity = foundRoot;
@@ -44,7 +45,10 @@ export const flightSystem = defineSystem(
         const legacySkills = Storage.getJSON<unknown>(STORAGE_KEYS.ACTIVE_SKILLS);
         const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
         let profile = loadProfile(Storage.getJSON<unknown>(STORAGE_KEYS.PROFILE), legacySkills, reducedMotion);
-        setFeedbackPrefs(profile);
+        bindAudio(audio);
+        setVolumes(profile.masterVolume, profile.musicVolume, profile.sfxVolume);
+        setSoundEnabled(profile.soundEnabled);
+        setFeedbackPrefs({ sound: profile.soundEnabled, vibration: profile.vibration });
         let page: Page = 'menu';
         let nextPage: Page | null = null;
         let pageRoot: Entity | null = null;
@@ -65,7 +69,7 @@ export const flightSystem = defineSystem(
             if (next === profile) return;
             Storage.setJSON(STORAGE_KEYS.PROFILE, next);
             profile = next;
-            setFeedbackPrefs(profile);
+            setFeedbackPrefs({ sound: profile.soundEnabled, vibration: profile.vibration });
         }
 
         function navigate(destination: Page): void {
@@ -95,14 +99,13 @@ export const flightSystem = defineSystem(
         function render(destination: Page): void {
             const previousPage = page;
             page = destination;
-            // The station hum belongs to the title screen only.
-            if (destination !== 'menu') menuAmbience(false);
             focus.blur();
             if (pageRoot !== null) world.despawn(pageRoot);
             const root = makeAbsBox(world, sceneRoot, 0, 0, 1280, 720);
             pageRoot = root;
             tickPage = null;
             setNodeDisplayed(world, backdrop, page === 'run');
+            playMusic(page === 'run' ? 'game' : 'menu');
 
             if (page === 'run' && runSetup) {
                 const runId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -179,8 +182,22 @@ export const flightSystem = defineSystem(
                     break;
                 }
                 case 'settings':
-                    showShell(ui, page, 'Settings', 'Sound, vibration, motion and contrast.', 'settings', navigate);
-                    showSettings(ui, profile, setting => { saveProfile({ ...profile, [setting]: !profile[setting] }); navigate('settings'); });
+                    showShell(ui, page, 'Settings', 'Sound, vibration, motion, contrast and volume.', 'settings', navigate);
+                    showSettings(
+                        ui,
+                        profile,
+                        setting => {
+                            const updated = { ...profile, [setting]: !profile[setting] };
+                            saveProfile(updated);
+                            if (setting === 'soundEnabled') setSoundEnabled(updated.soundEnabled);
+                            navigate('settings');
+                        },
+                        (field, value) => {
+                            const updated = { ...profile, [field]: value };
+                            saveProfile(updated);
+                            setVolumes(updated.masterVolume, updated.musicVolume, updated.sfxVolume);
+                        },
+                    );
                     break;
                 case 'quit':
                     showQuit(ui, navigate);
@@ -206,6 +223,9 @@ export const flightSystem = defineSystem(
         controllers.set(world, {
             root: sceneRoot,
             update() {
+                if (input.isMouseButtonPressed(0) || input.isKeyPressed('Enter') || input.isKeyPressed('Space')) {
+                    unlockAudio();
+                }
                 if (nextPage) {
                     const requested = nextPage;
                     nextPage = null;

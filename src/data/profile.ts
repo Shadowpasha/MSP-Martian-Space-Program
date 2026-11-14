@@ -8,10 +8,17 @@ export interface PlaytestProfile {
     awardedRuns: string[];
     reducedMotion: boolean;
     highContrast: boolean;
-    /** Interface sounds (clicks, chimes, the menu hum). */
-    sound: boolean;
+    /** Music and sound effects (the mixer mutes everything when off). */
+    soundEnabled: boolean;
+    masterVolume: number;
+    musicVolume: number;
+    sfxVolume: number;
     /** Vibration on devices that support it. */
     vibration: boolean;
+}
+
+function clampUnit(value: unknown, fallback: number): number {
+    return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
 }
 
 const CREW_IDS = new Set(AVAILABLE_CREW.map(member => member.id));
@@ -32,7 +39,11 @@ export function loadProfile(stored: unknown, legacySkills: unknown, preferReduce
         awardedRuns: strings(saved.awardedRuns),
         reducedMotion: typeof saved.reducedMotion === 'boolean' ? saved.reducedMotion : preferReducedMotion,
         highContrast: saved.highContrast === true,
-        sound: saved.sound !== false,
+        // `sound` was the toggle's name in an earlier build; honour it if a save still has it.
+        soundEnabled: saved.soundEnabled !== false && (saved as { sound?: unknown }).sound !== false,
+        masterVolume: clampUnit(saved.masterVolume, 0.53),
+        musicVolume: clampUnit(saved.musicVolume, 0.18),
+        sfxVolume: clampUnit(saved.sfxVolume, 0.34),
         vibration: saved.vibration !== false,
     };
 }
