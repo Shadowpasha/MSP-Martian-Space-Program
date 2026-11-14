@@ -3,6 +3,7 @@ import {
     type CrewMember, type MissionSetupInput, type ResourcePool,
 } from '../contracts/gameContract';
 import { CARGO_BY_ID, normalizeCargo, packedInventory, type CargoPlacement } from './cargo';
+import { pickerMissions } from '../prep/logic/pickerMissions';
 
 export const LAUNCH_CREW_SIZE = 4;
 const surveyBase = cloneSetup(DEFAULT_MARS_SETUP);
@@ -26,12 +27,13 @@ export interface MissionOffer {
     description: string;
     setup?: MissionSetupInput;
     prepared?: 'team' | 'moon-test';
+    /** Card picture; defaults to assets/textures/mission_<slot>.png. */
+    image?: string;
 }
 
-const laterMissions: MissionOffer[] = [
-    { title: 'Polar Ice Recon', site: 'PLANUM BOREUM', description: 'Survey water-ice deposits near the polar cap.' },
-    { title: 'Crater Relay', site: 'GALE CRATER', description: 'Recover a remote communications relay.' },
-];
+// Slots 2 and 3: Mission Prep's NASA-based missions (Ice Hunter on Mars, Shadow Ice on
+// the Moon). They replace the old "Polar Ice Recon" / "Crater Relay" placeholders.
+const laterMissions: MissionOffer[] = pickerMissions();
 
 export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
     const mission = pending ?? WEATHER_SURVEY;

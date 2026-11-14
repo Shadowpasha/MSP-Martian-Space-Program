@@ -33,9 +33,13 @@ function quickTask(state: OutpostGameState, plan: string, ...crew: string[]) {
 test('mission offers expose one contract and honor a prepared external manifest', () => {
     const offers = missionOffers();
     assert.equal(offers.length, 3);
-    assert.equal(offers.filter(offer => offer.setup).length, 1);
+    // Slots 2-3 are Mission Prep's NASA-based missions (Ice Hunter, Shadow Ice): all three are playable now.
+    assert.equal(offers.filter(offer => offer.setup).length, 3);
     assert.equal(offers[0]?.setup?.missionGoal.deadlineSol, 16);
-    assert.equal(buildLaunchSetup(offers[1]!, starterCrew, []), null);
+    assert.deepEqual(offers.map(offer => offer.setup?.planet), ['mars', 'mars', 'moon']);
+    const ice = buildLaunchSetup(offers[1]!, starterCrew, [sampler])!;
+    assert.equal(ice.missionGoal.requiredFlag, 'ice_core_collected');
+    assert.equal(launchProblem(ice), null);
     const external = missionOffers(DEFAULT_MARS_SETUP)[0]!;
     const setup = buildLaunchSetup(external, [], [])!;
     assert.equal(setup.cargo.batteryPacks, DEFAULT_MARS_SETUP.cargo.batteryPacks);

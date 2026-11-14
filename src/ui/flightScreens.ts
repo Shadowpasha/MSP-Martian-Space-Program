@@ -270,7 +270,7 @@ export function showMissions(ui: FlightUi, offers: readonly MissionOffer[], onCh
         const card = ui.frame(root, [248 + index * 340, 108, 336, 596], offer.setup ? p.panel : p.well);
         const active = Boolean(offer.setup);
         ui.box(card, [12, 12, 304, 148], p.ink);
-        ui.image(card, [12, 12, 304, 148], `assets/textures/mission_${index + 1}.png`);
+        ui.image(card, [12, 12, 304, 148], offer.image ?? `assets/textures/mission_${index + 1}.png`);
         ui.label(card, [16, 168, 296, 28], offer.site, { color: active ? p.amber : p.muted, size: 14 });
         ui.label(card, [16, 204, 296, 64], offer.title, { display: true, size: 28, wrap: true, color: active ? p.text : p.muted });
         ui.label(card, [16, 276, 296, 86], offer.description, { size: 15, color: p.secondary, wrap: true, top: true });
