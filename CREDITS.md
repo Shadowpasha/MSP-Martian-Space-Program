@@ -44,6 +44,7 @@ See also `assets/audio/CREDITS.txt`.
 | `assets/audio/sfx_cat_meow.mp3` (the cat's meow) | Sound Effect by [SOUND_GARAGE](https://pixabay.com/users/sound_garage-47313534/?utm_source=link-attribution&utm_medium=referral&utm_campaign=music&utm_content=306184) from [Pixabay](https://pixabay.com/sound-effects/?utm_source=link-attribution&utm_medium=referral&utm_campaign=music&utm_content=306184), Pixabay Content License |
 | `menu_walker.png` (the walking crew member) | Back view cut from `menu_station.png`; walk frames made with [Sprite AI](https://www.sprite-ai.art) Restyle from that cut-out. Built by `art/menu_walker.py` |
 | `menu_station_empty.png`, `menu_glow_*.png`, `menu_door_*.png`, `menu_sky_clouds.png` (main menu ambience) | Derived from `menu_station.png` by `art/menu_station_empty.py`, `art/menu_glow.py`, `art/menu_sky.py` and `art/menu_door.py` (the door is drawn in code) |
+| `run_station_*.png`, `run_site_*.png` (expedition background ambience) | Derived from `tharsis_station.png` and `tharsis_site.png` by `art/run_ambience.py`. The Site A rover's cut-out mask (`art/run_site_rover_mask.png`) was made with the [rembg](https://github.com/danielgatis/rembg) ISNet segmentation model, then touched up |
 | `outpost_bg.png` (pixel-art Mars station interior), `ai_robot.png` | Added by the team. **TODO: record the source and licence here.** |
 
 ## Fonts
