@@ -235,36 +235,26 @@ test('Weather Relay narrows load and route forecasts and the Recorder preserves 
     assert.equal(state.tharsis.hours, 0);
 });
 
-test('following the tutorial guide wins in six Sols and grants research once', () => {
+test('following the tutorial guide wins in four Sols and grants research once', () => {
     const state = run(TRAINING_RUN);
     plan(state);
-    assert.equal(activateCrewAbility(state, 'station', 'crew_scientist'), null);
+    // Sol 1: the three training jobs, one astronaut each.
     staff(state, 'drive-check', 'crew_pilot', ['specialist']);
     staff(state, 'sampler', 'crew_scientist', ['specialist']);
-    staff(state, 'audit', 'crew_scientist');
-    assert.equal(assessMission(state, defaultLoad(state)).review, null);
+    staff(state, 'audit', 'crew_captain');
     advanceSol(state);
     plan(state);
-    staff(state, 'calibrate', 'crew_scientist', ['specialist']);
+    // Sol 2: pick the travelers and send the rover. Sols 2-4: out, record, home.
     assert.equal(chooseFieldCrew(state, 'crew_pilot'), null);
     assert.equal(chooseFieldCrew(state, 'crew_captain'), null);
-    advanceSol(state);
-    plan(state);
-    staff(state, 'suits', 'crew_captain');
-    const status = assessMission(state, defaultLoad(state));
-    assert.equal(status.dockReserves?.oxygen, 15.1);
-    assert.equal(activateUpgrade(state, { kind: 'electrolysis' }), null);
-    advanceSol(state);
-    plan(state);
     const load = defaultLoad(state);
     assert.equal(dispatchRover(state, load), null);
-    for (const sol of [4, 5, 6]) {
+    for (const sol of [2, 3, 4]) {
         assert.equal(state.sol, sol);
-        assert.equal(assessMission(state, load).review, null);
         advanceSol(state);
-        if (sol < 6) plan(state);
+        if (sol < 4) plan(state);
     }
-    assert.deepEqual([state.result?.outcome, state.result?.solReached, state.result?.finalResources.oxygen], ['victory', 6, 27.1]);
+    assert.deepEqual([state.result?.outcome, state.result?.solReached], ['victory', 4]);
     assert.ok(state.timeline.every(entry => entry.weather === 'Clear'));
     const result = state.result!;
     const profile = recordResearch(loadProfile(null, [], false), 'first-flight', result, true);

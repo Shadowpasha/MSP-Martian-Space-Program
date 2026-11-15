@@ -54,6 +54,7 @@ function sidebar(ui: FlightUi, page: Page, navigate: Navigate, hero: boolean, mo
         motion?.enter(button.entity, x, y, { dx: -56, delay: 120 + i * 70, duration: 340, reveal: true });
         if (hero && i === 0) playButton = button.entity;
         if (i === 0) tutorial.targets.set('play', button.entity);
+        tutorial.targets.set(`nav-${destination}`, button.entity);
         const ink = active ? p.ink : hero && i === 0 ? p.cyan : p.text;
         ui.label(button.entity, [8, 0, width - 16, 52], label, { display: true, size: 26, color: ink, center: true });
     });
@@ -319,6 +320,7 @@ export function showCrew(
             if (cardTaps.count === 2) { toggleSelected(); return; }
             refresh();
         }, { tone: 'tile' });
+        tutorial.targets.set(`crew-card-${member.id}`, button.entity);
         const outline = [
             ui.box(button.entity, [4, 4, 184, 4], p.amber),
             ui.box(button.entity, [4, 254, 184, 4], p.amber),
@@ -407,6 +409,7 @@ export function showCrew(
         motion.shake(fullPlate, 16, 532, 3, 240);
     }
     const add = ui.button(inspector, [16, 532, 332, 44], addSelected, { tone: 'primary', label: 'Add to Crew' });
+    tutorial.targets.set('crew-add', add.entity);
     const remove = ui.button(inspector, [16, 532, 332, 44], removeSelected, { label: 'Remove from Crew' });
     const fullPlate = ui.box(inspector, [16, 532, 332, 44], p.well);
     ui.icon(fullPlate, 12, 12, 20, 'lock', p.muted);
@@ -561,6 +564,7 @@ export function showUpgrades(
         const affordable = !locked && !isOwned && points >= node.cost;
         const selected = node.id === initial.id;
         const button = ui.button(graph, [x, y, 132, 84], () => select(node.id), { tone: 'tile' });
+        tutorial.targets.set(`upgrade-node-${node.id}`, button.entity);
         if (selected || isOwned) {
             const thickness = selected ? 4 : 2;
             ui.box(button.entity, [4, 4, 124, thickness], p.amber);
@@ -649,9 +653,10 @@ export function showUpgrades(
         ui.icon(plate, 12, 12, 20, isOwned ? 'check' : 'lock', isOwned ? p.good : p.muted);
         ui.label(plate, [44, 0, 276, 44], isOwned ? 'Owned' : 'Locked', { size: 15, color: isOwned ? p.good : p.muted });
     } else {
-        ui.button(inspector, [16, 532, 332, 44], () => unlock(initial), {
+        const unlockButton = ui.button(inspector, [16, 532, 332, 44], () => unlock(initial), {
             tone: problem ? 'plain' : 'primary', disabled: Boolean(problem), label: `Unlock · ${initial.cost} points`,
         });
+        tutorial.targets.set('upgrade-unlock', unlockButton.entity);
     }
     return motion.tick;
 }
@@ -741,12 +746,15 @@ export function showMissions(
         });
         if (active) selectButtons.push(button);
         if (offer.prepared === 'training') tutorial.targets.set('open-training', button.entity);
+        // The first real mission on the page, for chapter 2 of the tutorial.
+        else if (active && !offer.prepared && !tutorial.targets.has('select-mission')) tutorial.targets.set('select-mission', button.entity);
     });
 
     let popup: Entity | null = null;
     function closeBriefing(): void {
         if (popup !== null) ui.world.despawn(popup);
         popup = null;
+        tutorial.view.missionPopup = false;
         selectButtons.forEach(button => button.setDisabled(false));
         // The pager keeps its own edge states.
         if (pages > 1) {
@@ -789,7 +797,9 @@ export function showMissions(
         ui.label(why, [16, 42, 648, 52], brief.lesson, { size: 15, color: p.secondary, wrap: true, top: true });
 
         ui.button(panel, [12, 460, 200, 48], closeBriefing, { label: 'Back' });
-        ui.button(panel, [452, 460, 248, 48], () => { closeBriefing(); onChoose(offer); }, { label: 'Prepare Cargo', tone: 'primary' });
+        const prepare = ui.button(panel, [452, 460, 248, 48], () => { closeBriefing(); onChoose(offer); }, { label: 'Prepare Cargo', tone: 'primary' });
+        tutorial.targets.set('prepare-cargo', prepare.entity);
+        tutorial.view.missionPopup = true;
     }
     return motion.tick;
 }
