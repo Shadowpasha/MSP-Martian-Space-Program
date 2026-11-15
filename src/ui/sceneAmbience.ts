@@ -37,8 +37,19 @@ export interface SceneAmbience {
     meteors?: boolean;
     glows: { name: string; pulse: Pulse; strength?: number; speed?: number }[];
     emitters: Emitter[];
-    /** A crane trolley and hook (layers crane + crane_hole) that travels along its beam by dx painting px. */
-    crane?: { range: readonly [number, number] };
+    /**
+     * A crane (layers trolley + hook over crane_hole) that works through its items one after
+     * another: rolls over each, lowers its hook on a lengthening chain, lifts it off with a burst of
+     * sparks (its gap layer <name>_hole shows what is behind), carries it along the beam, brings it
+     * back and sets it down with sparks again.
+     */
+    crane?: {
+        /** The chain's x (painting px, at dx 0) and the row the hook hangs from. */
+        chainX: number; hookTop: number;
+        /** Each item: its texture name and box, the trolley offset that puts the hook over it, how far
+         * the hook drops to reach it, and where along the beam it is carried. */
+        items: { name: string; x0: number; y0: number; w: number; h: number; dx: number; drop: number; carry: number }[];
+    };
     /** Monitor screens that show live data (painting px). */
     screens?: { area: Area; kind: ScreenKind }[];
     /** Lockers whose doors (layer locker<n>, hinged on the left) swing open now and then. */
@@ -84,9 +95,22 @@ export function mountSceneAmbience(ui: FlightUi, parent: Entity, motion: Motion,
     })) : [];
     if (config.clouds) layer('front', 1);
 
-    // Moving copies: the crane over its fill, the idling rover.
-    let crane: Entity | null = null;
-    if (config.crane) { layer('crane_hole', 1); crane = layer('crane', 1); }
+    // Moving copies: the crane over its fill (trolley, chain, hook, and the item it lifts), the idling rover.
+    let crane: { trolley: Entity; hook: Entity; links: Entity[]; items: { sprite: Entity; gap: Entity }[] } | null = null;
+    if (config.crane) {
+        const c = config.crane;
+        layer('crane_hole', 1);
+        const items = c.items.map(item => {
+            const gap = layer(item.name + '_hole', 1);
+            ui.show(gap, false);
+            const sprite = ui.image(parent, [item.x0 * S, item.y0 * S, item.w * S, item.h * S], 'assets/textures/run_' + config.scene + '_' + item.name + '.png');
+            ui.show(sprite, false);
+            return { sprite, gap };
+        });
+        const trolley = layer('trolley', 1);
+        const links = Array.from({ length: 52 }, () => ui.box(parent, [0, 0, 2 * S, S], { r: 0, g: 0, b: 0, a: 0 }));
+        crane = { trolley, hook: layer('hook', 1), links, items };
+    }
     const rumble = config.rumble ? layer(config.rumble, 1) : null;
 
     const glows = config.glows.map(glow => ({ ...glow, entity: layer(glow.name), phase: Math.random() * 6 }));
@@ -123,9 +147,36 @@ export function mountSceneAmbience(ui: FlightUi, parent: Entity, motion: Motion,
         const sprite = ui.image(parent, [0, 0, cw * S, ch * S], 'assets/textures/run_' + config.scene + '_cup.png');
         return { arm, sprite };
     }) : [];
+    // Crane state: dx along the beam, dy of the hook below where it hangs, and what it is doing.
+    type CraneStep = { kind: 'move'; to: number } | { kind: 'drop'; to: number } | { kind: 'wait'; ms: number }
+        | { kind: 'grab' } | { kind: 'release' };
     let craneX = 0;
-    let craneTarget = 0;
-    let craneWait = Date.now() + 2500;
+    let craneY = 0;
+    let carrying = false;
+    let craneSteps: CraneStep[] = [{ kind: 'wait', ms: 1500 }];
+    let stepStarted = Date.now();
+    /** Which item the crane is working on (they take turns). */
+    let job = -1;
+    function planCrane(): void {
+        const c = config.crane!;
+        job = (job + 1) % c.items.length;
+        const i = c.items[job]!;
+        craneSteps = [
+            { kind: 'move', to: i.dx }, { kind: 'drop', to: i.drop }, { kind: 'grab' }, { kind: 'wait', ms: 500 },
+            { kind: 'drop', to: 0 }, { kind: 'move', to: i.carry }, { kind: 'wait', ms: rand(2500, 4000) },
+            { kind: 'move', to: i.dx }, { kind: 'drop', to: i.drop }, { kind: 'release' }, { kind: 'wait', ms: 500 },
+            { kind: 'drop', to: 0 },
+        ];
+    }
+    /** A burst of sparks where the hook meets the item. */
+    function sparks(x: number, y: number): void {
+        for (let k = 0; k < 14; k++) {
+            const angle = rand(0, Math.PI * 2);
+            const speed = rand(40, 110);
+            spawn(x * S, y * S, Math.cos(angle) * speed, Math.sin(angle) * speed - 20, rand(220, 480), 2,
+                { r: 1, g: rand(0.8, 1), b: rand(0.35, 0.7), a: 1 });
+        }
+    }
     const particles: Particle[] = [];
     function spawn(x: number, y: number, vx: number, vy: number, life: number, size: number, color: Color, grow = 0): void {
         particles.push({ entity: ui.box(parent, [Math.round(x), Math.round(y), size, size], color), x, y, vx, vy, born: Date.now(), life, size, grow, color });
@@ -180,17 +231,51 @@ export function mountSceneAmbience(ui: FlightUi, parent: Entity, motion: Motion,
             ui.fill(glow.entity, white(Math.max(0, Math.min(1, level * strength))));
         }
 
-        // Crane: rolls to a new spot along the beam, waits, rolls on.
+        // Crane: rolls along the beam; now and then lowers its hook, lifts the item off with a burst
+        // of sparks, carries it along the beam, brings it back and sets it down (sparks again).
         if (crane && config.crane) {
-            if (now >= craneWait) {
-                const step = (6 * dt) / 1000;
-                if (Math.abs(craneTarget - craneX) <= step) {
-                    craneX = craneTarget;
-                    craneWait = now + rand(3000, 7000);
-                    craneTarget = rand(config.crane.range[0], config.crane.range[1]);
-                } else craneX += Math.sign(craneTarget - craneX) * step;
+            const c = config.crane;
+            if (!craneSteps.length) { planCrane(); stepStarted = now; }
+            const step = craneSteps[0]!;
+            let done = false;
+            if (step.kind === 'move' || step.kind === 'drop') {
+                const speed = step.kind === 'move' ? 6 : 7;          // painting px per second
+                const current = step.kind === 'move' ? craneX : craneY;
+                const delta = (speed * dt) / 1000;
+                const next = Math.abs(step.to - current) <= delta ? step.to : current + Math.sign(step.to - current) * delta;
+                if (step.kind === 'move') craneX = next; else craneY = next;
+                done = next === step.to;
+            } else if (step.kind === 'wait') {
+                done = now - stepStarted >= step.ms;
+            } else {
+                const i = c.items[job]!;
+                const parts = crane.items[job]!;
+                carrying = step.kind === 'grab';
+                // Lifted: the item is a sprite on the hook and its gap shows; set down: the painting again.
+                ui.show(parts.gap, carrying);
+                ui.show(parts.sprite, carrying);
+                sparks(c.chainX + craneX, i.y0);
+                done = true;
             }
-            motion.set(crane, Math.round(craneX * S), 0);
+            if (done) { craneSteps.shift(); stepStarted = now; }
+
+            const sx = Math.round(craneX * S);
+            const sy = Math.round(craneY * S);
+            motion.set(crane.trolley, sx, 0);
+            motion.set(crane.hook, sx, sy);
+            // The chain grows between where the hook hung and where it is: a solid dark line with a faint
+            // glint on every third link (bright links read as a dotted line over the rover).
+            const extra = Math.round(craneY);
+            crane.links.forEach((link, k) => {
+                const on = k < extra;
+                motion.set(link, Math.round((c.chainX + craneX) * S) - S, (c.hookTop + k) * S);
+                ui.fill(link, { ...(k % 3 === 2 ? { r: 0.3, g: 0.27, b: 0.26 } : { r: 0.14, g: 0.12, b: 0.13 }), a: on ? 1 : 0 });
+            });
+            // The item being carried rides on the hook.
+            if (carrying && job >= 0) {
+                const i = c.items[job]!;
+                motion.set(crane.items[job]!.sprite, Math.round((i.x0 + craneX - i.dx) * S), Math.round((i.y0 + craneY - i.drop) * S));
+            }
         }
         // Engine idle: the car lifts a screen pixel for a short beat about every 0.7 s (the engine's
         // pulse), then rests. Calm, not a constant jitter.
@@ -345,7 +430,6 @@ export const STATION_AMBIENCE: SceneAmbience = {
         { name: 'lamps', pulse: 'hum', strength: 0.3 },
         { name: 'wall_lamps', pulse: 'hum', strength: 0.4, speed: 1.4 },
         { name: 'screens', pulse: 'flicker', strength: 0.35, speed: 0.15 },
-        { name: 'rover_lights', pulse: 'breathe', strength: 0.5, speed: 0.6 },
         { name: 'vents', pulse: 'flicker', strength: 0.6 },
     ],
     emitters: [
@@ -362,7 +446,16 @@ export const STATION_AMBIENCE: SceneAmbience = {
         { kind: 'steam', at: [452, 327], every: 4200 },
         { kind: 'steam', at: [548, 327], every: 5200 },
     ],
-    crane: { range: [-44, 30] },
+    crane: {
+        chainX: 91, hookTop: 195,
+        // Off the bay rover, in turn: the roof light bar, the antenna, a front wheel. dx puts the hook
+        // over each one's middle; drop takes the hook (bottom at row 202) down to its top.
+        items: [
+            { name: 'bar', x0: 75, y0: 213, w: 35, h: 8, dx: 2, drop: 11, carry: -32 },
+            { name: 'antenna', x0: 66, y0: 204, w: 4, h: 18, dx: -23, drop: 2, carry: 24 },
+            { name: 'wheel', x0: 75, y0: 246, w: 27, h: 24, dx: -3, drop: 45, carry: 28 },
+        ],
+    },
     screens: [
         // The screens' glass, measured from the painting, one pixel inside its edge.
         { area: [255, 227, 276, 237], kind: 'graph' },

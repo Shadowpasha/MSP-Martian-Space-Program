@@ -133,7 +133,6 @@ build('station', 'tharsis_station.png', band=(5, 30, 635), sun_box=(480, 40, 545
     'lamps': ('cream', ('box', 0, 140, 640, 172)),
     'wall_lamps': ('hot', ('box', 150, 182, 495, 202)),
     'screens': ('cyan', ('box', 245, 220, 480, 245)),
-    'rover_lights': ('lamp', ('box', 40, 210, 135, 262)),
     'vents': ('hot', ('box', 100, 314, 615, 338)),
 })
 build('site', 'tharsis_site.png', band=(0, 0, 640), sun_box=(455, 25, 525, 80), glows={
@@ -168,6 +167,48 @@ def parts() -> None:
     rim[:, :-1] |= links[:, 1:]
     crane[CLAMP:HOOK1, X0:X1] = rim
     save('run_station_crane.png', np.dstack([st, crane * 255.0]))
+    # For the pick-up: the crane split at the hook (rows 195-202 hang on a chain the game can
+    # lengthen) - the trolley with the top of the chain, and the hook on its own.
+    HOOK_TOP = 195
+    upper = crane.copy()
+    upper[HOOK_TOP:] = False
+    lower = crane.copy()
+    lower[:HOOK_TOP] = False
+    save('run_station_trolley.png', np.dstack([st, upper * 255.0]))
+    save('run_station_hook.png', np.dstack([st, lower * 255.0]))
+    # Things the crane lifts off the bay rover. Each is saved as its own small texture
+    # (run_station_<name>.png, its box's size) and a gap layer (run_station_<name>_hole.png) that
+    # shows what is behind it once it is lifted.
+    def item(name, x0, y0, x1, y1, keep, behind):
+        region = st[y0:y1, x0:x1]
+        mask = keep[y0:y1, x0:x1].copy()
+        # Fill each row between its outermost kept pixels, so nothing inside the item is see-through.
+        for y in range(mask.shape[0]):
+            xs = np.nonzero(mask[y])[0]
+            if len(xs):
+                mask[y, xs.min():xs.max() + 1] = True
+        save(f'run_station_{name}.png', np.dstack([region, mask * 255.0]))
+        gap = np.zeros(shape, bool)
+        gap[y0:y1, x0:x1] = mask
+        save(f'run_station_{name}_hole.png', np.dstack([behind, gap * 255.0]))
+    not_wall = ~((st.max(-1) < 75) & (st[..., 2] >= st[..., 0] - 5))
+    yy, xx = np.mgrid[0:shape[0], 0:shape[1]]
+    # The roof light bar with its rack (x 75-109, rows 213-220); behind it, the wall from just above.
+    behind = st.copy()
+    behind[213:221, 75:110] = st[205:213, 75:110]
+    item('bar', 75, 213, 110, 221, not_wall, behind)
+    # The antenna (x 66-69, rows 204-221); behind it, the wall from just to its right.
+    behind = st.copy()
+    behind[204:222, 66:70] = st[204:222, 71:75]
+    item('antenna', 66, 204, 70, 222, not_wall, behind)
+    # The front wheel's whole tyre (x 76-100, rows 247-269: an ellipse centred 88,258; the hub sits
+    # left of centre in this view); behind it, the dark under the rover, with the floor along the bottom.
+    wheel = (((xx - 88) / 12.5) ** 2 + ((yy - 258) / 11.5) ** 2 <= 1) & (yy <= 269)
+    behind = st.copy()
+    behind[246:270, 75:102] = (24, 21, 28)
+    floor = st[265:270, 68:75]                                  # the floor between the two wheels
+    behind[265:270, 75:102] = np.tile(floor, (1, 4, 1))[:, :27]
+    item('wheel', 75, 246, 102, 270, wheel, behind)
     fill = st.copy()
     fill[TOP:HOOK1 + 1, X0:X1 + 1] = st[TOP:HOOK1 + 1, X0 - 11:X1 - 10]
     hole = np.zeros(shape, bool)
