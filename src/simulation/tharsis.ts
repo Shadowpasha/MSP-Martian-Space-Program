@@ -150,7 +150,7 @@ export function useLocalCargo(state: TharsisState, area: Area, id: CargoItemId):
     local.cargo[id]--;
     applyResourceDelta(local.resources, item.resources ?? {});
     if (item.morale) changeAreaMorale(local.crew, local.conditions, item.morale);
-    local.conditions.radiation = clamp(local.conditions.radiation + (item.radiation ?? 0), 0, 100);
+    local.conditions.radiation = radiationAfterDose(local.conditions.radiation, item.radiation ?? 0);
     if (item.crewHealth) for (const member of local.crew) if (member.health > 0) member.health = clamp(member.health + item.crewHealth, 0, 100);
     appendLog(state, 'good', `${area === 'station' ? 'Station' : 'Rover'} used ${item.name} · ${item.effect}.`);
     return null;
