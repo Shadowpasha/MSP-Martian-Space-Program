@@ -82,6 +82,11 @@ export const flightSystem = defineSystem(
             nextPage = destination;
         }
 
+        function navigateFromSidebar(destination: Page): void {
+            if (destination === 'mission') tutorial.startOnPlay();
+            navigate(destination);
+        }
+
         function changeVolume(field: VolumeField, value: number): void {
             if (profile[field] === value) return;
             saveProfile({ ...profile, [field]: value });
@@ -149,11 +154,11 @@ export const flightSystem = defineSystem(
             let surfaceTick: ((state: typeof input) => boolean | void) | undefined;
             switch (page) {
                 case 'crew':
-                    showShell(ui, page, 'Crew', 'Pick 4 crew for your next mission. Double-tap a card to add or remove.', 'crew', navigate);
+                    showShell(ui, page, 'Crew', 'Pick 4 crew for your next mission. Double-tap a card to add or remove.', 'crew', navigateFromSidebar);
                     surfaceTick = showCrew(ui, profile, selectedCrewId, crewIds => saveProfile({ ...profile, crewIds }), id => { selectedCrewId = id; });
                     break;
                 case 'upgrade':
-                    showShell(ui, page, 'Upgrade', 'Spend research points to unlock station systems and procedures.', 'upgrade', navigate);
+                    showShell(ui, page, 'Upgrade', 'Spend research points to unlock station systems and procedures.', 'upgrade', navigateFromSidebar);
                     surfaceTick = showUpgrades(ui, profile, SKILL_TREE_UPGRADES.find(node => node.id === selectedUpgradeId)!, id => {
                         if (id !== selectedUpgradeId) { selectedUpgradeId = id; navigate('upgrade'); }
                     }, node => {
@@ -176,7 +181,7 @@ export const flightSystem = defineSystem(
                     justUnlocked = null;
                     break;
                 case 'mission':
-                    showShell(ui, page, 'Mission Selection', 'Pick a job for your crew. A Sol is one day on Mars: 24 hours 39 minutes.', 'mars', navigate);
+                    showShell(ui, page, 'Mission Selection', 'Pick a job for your crew. A Sol is one day on Mars: 24 hours 39 minutes.', 'mars', navigateFromSidebar);
                     surfaceTick = showMissions(ui, missionOffers(readPendingSetup()), selectMission, missionPage, next => { missionPage = next; navigate('mission'); });
                     break;
                 case 'cargo': {
@@ -184,7 +189,7 @@ export const flightSystem = defineSystem(
                     if (!chosen?.setup) { navigate('mission'); break; }
                     const readyMade = chosen.prepared === 'team';
                     showShell(ui, page, readyMade ? 'Launch Briefing' : 'Cargo Preparation', readyMade ? chosen.title : `${chosen.title} · pack what the mission needs`,
-                        (Object.keys(chosen.setup.missionGoal.requiredEquipment ?? {})[0] ?? 'windSampler') as IconName, navigate);
+                        (Object.keys(chosen.setup.missionGoal.requiredEquipment ?? {})[0] ?? 'windSampler') as IconName, navigateFromSidebar);
                     // Prepared missions launch from here, so they check everything. Packed missions only
                     // check the cargo: the crew is picked next, on the Launch Summary.
                     const problem = (placements: CargoPlacement[]) => {
@@ -202,7 +207,7 @@ export const flightSystem = defineSystem(
                     const chosen = offer;
                     const preview = chosen?.setup ? buildLaunchSetup(chosen, profile.crewIds, draft) : null;
                     if (!chosen || !preview) { navigate('mission'); break; }
-                    showShell(ui, page, 'Launch Summary', `${chosen.title} · last check before launch`, 'check', navigate);
+                    showShell(ui, page, 'Launch Summary', `${chosen.title} · last check before launch`, 'check', navigateFromSidebar);
                     // The training run keeps its own crew (the guide names them), so it has no Edit Crew.
                     surfaceTick = showLaunchSummary(ui, preview, draft, launchProblem(preview), () => launch(chosen, Boolean(chosen.prepared)), () => navigate('cargo'), chosen.image,
                         chosen.prepared ? undefined : {
@@ -213,7 +218,7 @@ export const flightSystem = defineSystem(
                     break;
                 }
                 case 'settings':
-                    showShell(ui, page, 'Settings', 'Sound, vibration, motion, contrast, volume and the tutorial.', 'settings', navigate);
+                    showShell(ui, page, 'Settings', 'Sound, vibration, motion, contrast, volume and the tutorial.', 'settings', navigateFromSidebar);
                     showSettings(
                         ui,
                         profile,
@@ -224,7 +229,7 @@ export const flightSystem = defineSystem(
                             navigate('settings');
                         },
                         changeVolume,
-                        () => { tutorial.begin(); navigate('menu'); },
+                        () => { tutorial.begin(); missionPage = 0; navigate('mission'); },
                     );
                     break;
                 case 'quit':
@@ -234,9 +239,7 @@ export const flightSystem = defineSystem(
                     showExit(ui, navigate);
                     break;
                 default:
-                    // "How to Play" sits on the main menu only until the tutorial is done; then it is in Settings.
-                    surfaceTick = showMenu(ui, navigate, profile.reducedMotion,
-                        tutorial.finished ? undefined : () => { tutorial.begin(); navigate('menu'); });
+                    surfaceTick = showMenu(ui, navigateFromSidebar, profile.reducedMotion);
             }
             // The first-time tutorial: ARIES points at the next button on this page.
             // The step is worked out again every frame and redrawn when it changes, so the coach

@@ -64,7 +64,7 @@ Each Sol moves through a structured command loop across two views (**Station** a
 
 ### 5. ARIES Coach & Kid-Friendly Controls
 
-- **First-Time Interactive Tutorial**: **ARIES** highlights the exact next button to press from the main menu, through packing the cargo and meeting the team, to the end of the short Training Run (won in 4 Sols). Click **How to Play** on the main menu to restart it anytime.
+- **First-Time Interactive Tutorial**: Press **Play** to meet **ARIES**, who guides you through packing cargo, meeting the crew, and flying the Training Run. The game remembers if you skip or finish the tutorial. Use **Settings → How to Play** to start it again anytime.
 - **In-Game Helper**: A clickable **Next step** guide and clear plain-language crew ability labels (`Best time:` hints and `Show Help`) keep younger players oriented without clutter.
 
 ## Windows Playtest

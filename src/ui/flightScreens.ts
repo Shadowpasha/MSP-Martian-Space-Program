@@ -67,7 +67,7 @@ function sidebar(ui: FlightUi, page: Page, navigate: Navigate, hero: boolean, mo
     return playButton;
 }
 
-export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolean, onHowToPlay?: () => void): (input: InputState) => void {
+export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolean): (input: InputState) => void {
     const { root, palette: p } = ui;
     const motion = makeMotion(ui.world, reducedMotion);
     ui.box(root, [0, 0, 1280, 720], p.ink);
@@ -180,11 +180,6 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
     hotspot([965, 430, 60, 90], () => greet(1));
 
     const play_ = sidebar(ui, 'menu', navigate, true, motion);
-    // Under the menu: starts the first-time tutorial again.
-    if (onHowToPlay) {
-        const howTo = ui.button(root, [36, 236 + NAV.length * 64, 228, 44], onHowToPlay, { label: 'How to Play', labelSize: 20 });
-        motion.enter(howTo.entity, 36, 236 + NAV.length * 64, { dx: -56, delay: 120 + NAV.length * 70, duration: 340, reveal: true });
-    }
     // Hovering Play runs a chase of launch lights along its bottom edge.
     const lights = play_ ? Array.from({ length: 9 }, (_, i) => ui.box(play_, [14 + i * 22, 44, 12, 3], { ...p.cyan, a: 0.25 })) : [];
     let playHovered = false;
@@ -830,8 +825,8 @@ export function showSettings(
     ui: FlightUi,
     profile: PlaytestProfile,
     change: (field: SettingField) => void,
-    onVolume?: (field: 'masterVolume' | 'musicVolume' | 'sfxVolume', value: number) => void,
-    onHowToPlay?: () => void,
+    onVolume: (field: VolumeField, value: number) => void,
+    onHowToPlay: () => void,
 ): void {
     const { root, palette: p } = ui;
     const panel = ui.frame(root, [248, 108, 1016, 588]);
@@ -850,15 +845,12 @@ export function showSettings(
         const y = row(index, title, description);
         ui.button(panel, [800, y + 5, 160, 40], () => change(field), { label: profile[field] ? 'On' : 'Off', tone: profile[field] ? 'primary' : 'plain' });
     }
-    if (onHowToPlay) {
-        // The tutorial again, from the welcome on the main menu.
-        const y = row(4, 'How to Play', 'Play the tutorial again, with A.R.I.E.S. showing you each step.');
-        ui.button(panel, [800, y + 5, 160, 40], onHowToPlay, { label: 'Start', tone: 'hero' });
-    }
+    const y = row(4, 'How to Play', 'Play the tutorial with A.R.I.E.S. showing you each step.');
+    ui.button(panel, [800, y + 5, 160, 40], onHowToPlay, { label: 'Start', tone: 'hero' });
 
     ui.box(panel, [24, 286, 936, 2], p.edge);
 
-    showVolumeControls(ui, panel, 304, profile, (field: VolumeField, value) => onVolume?.(field, value));
+    showVolumeControls(ui, panel, 304, profile, onVolume);
 }
 
 export function showQuit(ui: FlightUi, navigate: Navigate): void {

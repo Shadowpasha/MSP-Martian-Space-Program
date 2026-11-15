@@ -102,14 +102,14 @@ function follower(setup: MissionSetupInput = TRAINING_RUN) {
 
 const launchView = (change: Partial<LaunchView> = {}): LaunchView => ({ lessons: newLessons(), missionPopup: false, launching: false, cargo: null, ...change });
 
-test('before training the tutorial goes Play, training, pack the cargo, meet the team, launch', () => {
+test('after Play the tutorial welcomes the player, then guides training, cargo, crew, and launch', () => {
     const lessons = newLessons();
     const sampler = { id: 'windSampler', name: 'Wind Sampler', tab: 'Mission' };
     const cargo = { needed: sampler, tab: 'Mission', held: false, short: true, ready: false };
     const at = (page: Parameters<typeof menuStep>[0], change: Partial<LaunchView> = {}, welcomed = true) =>
         menuStep(page, { ...launchView({ lessons, ...change }), welcomed });
-    assert.equal(at('menu', {}, false)?.next, 'Go!');
-    assert.equal(at('menu')?.target, 'play');
+    assert.equal(at('menu', {}, false)?.target, 'play');
+    assert.equal(at('mission', {}, false)?.next, 'Go!');
     assert.equal(at('mission')?.target, 'open-training');
 
     // Cargo: one thing to read, pick up the needed item, put it down, Auto Fill, go on.

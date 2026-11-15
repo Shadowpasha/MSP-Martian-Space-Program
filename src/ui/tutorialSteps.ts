@@ -111,16 +111,16 @@ function reviewStep(view: LaunchView): CoachStep | null {
 }
 
 /**
- * Chapter 1, before the training mission starts: Play, open the training, pack the cargo, meet
+ * Chapter 1, before the training mission starts: welcome, open the training, pack the cargo, meet
  * the team, launch. `null` when there is nothing to say.
  */
 export function menuStep(page: Page, view: LaunchView & { welcomed: boolean }): CoachStep | null {
     switch (page) {
         case 'menu':
-            return view.welcomed ? { id: 'menu-play', target: 'play', text: 'Click the big PLAY button.' }
-                : { id: 'menu-welcome', next: 'Go!', text: 'Hi! I am ARIES. Let us go to Mars! I show you where to click.' };
+            return { id: 'menu-play', target: 'play', text: 'Click the big PLAY button.' };
         case 'mission':
-            return { id: 'mission-training', target: 'open-training', text: 'Click OPEN TRAINING. It is a practice trip.' };
+            return view.welcomed ? { id: 'mission-training', target: 'open-training', text: 'Click OPEN TRAINING. It is a practice trip.' }
+                : { id: 'mission-welcome', next: 'Go!', text: 'Hi! I am ARIES. Let us go to Mars! I show you where to click.' };
         case 'cargo':
             return view.cargo ? cargoStep(view.cargo, view.lessons) : null;
         case 'review':
