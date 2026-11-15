@@ -19,7 +19,7 @@ const HEAD_X = 20 * SCALE;
 const FEET_Y = 62 * SCALE;
 /** The ground beside the rover, and the stretch he hops about in (screen px, head centre x). */
 const GROUND_Y = 490;
-const AREA = [480, 720] as const;
+const AREA = [470, 610] as const;
 /** The rover's door: where he hops up to (head centre x) and how far up the sill is. */
 const DOOR_X = 808;
 const DOOR_RISE = 56;
