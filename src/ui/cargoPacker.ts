@@ -14,7 +14,7 @@ import { Interactable, type Color, type Entity, type InputState } from 'esengine
 import { makeAbsBox } from './theme';
 import type { CargoItemId, MissionSetupInput, ResourcePool } from '../contracts/gameContract';
 import {
-    CARGO_BY_ID, CARGO_COLUMNS, CARGO_ITEMS, CARGO_ROWS, occupiedCells, packedInventory, placementProblem, rotatedCells,
+    autoFillCargo, CARGO_BY_ID, CARGO_COLUMNS, CARGO_ITEMS, CARGO_ROWS, occupiedCells, packedInventory, placementProblem, rotatedCells,
     type CargoPlacement, type Rotation,
 } from '../data/cargo';
 import { INSTRUMENTS } from '../data/expeditions';
@@ -135,9 +135,10 @@ export function showCargoPacker(
         }, { tone: 'tile', still: true });
         return { button, x, y };
     });
-    const rotate = ui.button(bay, [20, 460, 164, 44], rotateHeld, { label: 'Rotate (R)' });
-    const empty = ui.button(bay, [196, 460, 164, 44], emptyBay, { label: 'Empty Bay' });
-    const cancel = ui.button(bay, [372, 460, 176, 44], cancelHeld, { label: 'Put Back (Esc)' });
+    const rotate = ui.button(bay, [20, 460, 124, 44], rotateHeld, { label: 'Rotate (R)', labelSize: 16, labelFit: 12 });
+    const empty = ui.button(bay, [152, 460, 124, 44], emptyBay, { label: 'Empty Bay', labelSize: 16, labelFit: 12 });
+    const cancel = ui.button(bay, [284, 460, 132, 44], cancelHeld, { label: 'Put Back (Esc)', labelSize: 16, labelFit: 12 });
+    const autoFill = ui.button(bay, [424, 460, 124, 44], autoFillBay, { label: 'Auto Fill', tone: 'primary', labelSize: 16, labelFit: 12 });
     ui.label(bay, [20, 516, 528, 28], 'Click a packed item to take it out. Drag it to move it.', { size: 14, color: p.muted });
 
     // ---- Inventory: tabbed by kind, so items are quick to find ----
@@ -339,6 +340,24 @@ export function showCargoPacker(
         held = null;
         commit([]);
         say('Cargo bay emptied.', false);
+    }
+
+    /** Packs the required equipment and one of each basic supply around what is already in the bay. */
+    function autoFillBay(): void {
+        cancelHeld();
+        const before = placements.length;
+        const short = (packed: readonly CargoPlacement[]) => supplyLasts(setup, packed).filter(entry => !entry.ok).map(entry => entry.key);
+        const next = autoFillCargo(placements, required, short);
+        const stillShort = short(next).map(key => (key === 'oxygen' ? 'O₂' : key[0]!.toUpperCase() + key.slice(1)));
+        const gap = stillShort.length ? ` ${stillShort.join(' and ')} still run short: no room or stock left.` : '';
+        if (next.length === before) {
+            say(gap ? `Auto Fill could not add anything.${gap}` : 'Auto Fill found nothing to add: every meter already covers the trip.', Boolean(gap));
+            return;
+        }
+        commit(next);
+        play('chime');
+        const added = next.length - before;
+        say(`Auto Fill packed ${added} item${added === 1 ? '' : 's'}.${gap || ' Every supply lasts the whole trip.'}`, Boolean(gap));
     }
 
     function commit(next: CargoPlacement[]): void {
