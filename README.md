@@ -13,19 +13,13 @@ A pixel-art Mars survival and mission-planning game built in Estella for NASA Sp
 | **Radiation Detective** | Medium | Sol 20 | Drive the RAD Detector to Hawksbill Gap and record 72 hours | Solar particle storm window; higher radiation risk |
 | **Ice Hunter** | Hard | Sol 22 | Drive the Ice Drill to Jezero Crater Rim and drill 48 hours of cores | Extreme `-70°C` to `-90°C` cold and heavy storm pressure |
 
-## Gameplay Screenshots
-
-| Crew Selection | Cargo Preparation |
-| :---: | :---: |
-| ![Crew Selection](docs/screenshots/crew-select.jpg) | ![Cargo Preparation](docs/screenshots/cargo-prep.jpg) |
-
-| Launch Sequence | Station Operations |
-| :---: | :---: |
-| ![Launch Sequence](docs/screenshots/launch-sequence.jpg) | ![Station Operations](docs/screenshots/station-ops.jpg) |
+![Launch Sequence](docs/screenshots/launch-sequence.jpg)
 
 ## Game Systems
 
 ### 1. Crew Selection & Abilities
+
+![Crew Selection](docs/screenshots/crew-select.jpg)
 
 Before launch (or via **Edit Crew** on the Launch Summary), pick 4 astronauts from a 6-member NASA-inspired roster. Each crew member brings a role affinity (30% fewer supplies, 50% faster work, and 15% higher yield on matching tasks) plus an active signature ability:
 
@@ -37,6 +31,8 @@ Before launch (or via **Edit Crew** on the Launch Summary), pick 4 astronauts fr
 - **Neil Armstrong (Captain, Read the Situation)**: Preview one briefing response each morning while the Captain is present.
 
 ### 2. Cargo Preparation System (6x4 Spatial Grid)
+
+![Cargo Preparation](docs/screenshots/cargo-prep.jpg)
 
 Your rover has a **24-cell Cargo Bay** (`6 columns x 4 rows`) that must hold your mission instrument alongside enough supplies for the trip:
 
@@ -54,6 +50,8 @@ You start with **3 Research Points (RP)** and earn more by completing missions (
 - **Crew**: Slows morale decay (`Habitation Quarters`), adds radiation shielding (`Dosimeter Network`, `Storm Shelter`), speeds up tasks (`Shift Scheduling`), and unlocks **Cross-Training** (spend 4 Power to train one crew member in a second role) and **Protected Rotation** (spend 2 Food to grant rest Morale while working).
 
 ### 4. Daily Station & Rover Loop
+
+![Station Operations](docs/screenshots/station-ops.jpg)
 
 Each Sol moves through a structured command loop across two views (**Station** and **Expedition**):
 
