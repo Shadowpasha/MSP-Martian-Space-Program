@@ -42,6 +42,8 @@ Your rover has a **24-cell Cargo Bay** (`6 columns x 4 rows`) that must hold you
 
 ### 3. Upgrade System (4-Branch Skill Tree)
 
+![Upgrade System](docs/screenshots/upgrade-system.jpg)
+
 You start with **3 Research Points (RP)** and earn more by completing missions (including a one-time clear bonus on the Training Run). Spend RP across 4 branches, each with 6 nodes across 4 tiers (`3 / 5 / 7 / 10` RP). You can sell back and refund all upgrades at any time between missions.
 
 - **Infrastructure**: Boosts solar output (`Efficient Inverters`, `Sun Tracking`), cuts daily power drain (`Power Balancing`, `Heat Recovery`), and unlocks **Battery Bank** (store/return 12 station Power once per Sol) and **Habitat Microgrid** (run indoor Life Support orders during full storm shelter).
