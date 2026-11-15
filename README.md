@@ -2,7 +2,7 @@
 
 A pixel-art Mars survival and mission-planning game built in Estella for NASA Space Apps. Manage your station crew, pack the rover, ride out dust and solar storms, and bring your field team and science data home before the deadline.
 
-![Mars Station Main Menu](assets/textures/menu_station.png)
+![Mars Station Program Main Menu](docs/screenshots/main-menu.jpg)
 
 ## Playable Missions
 
@@ -11,9 +11,15 @@ A pixel-art Mars survival and mission-planning game built in Estella for NASA Sp
 - **Radiation Detective (Medium)**: Drive the RAD detector to Hawksbill Gap, record 72 hours of readings by Sol 20, and protect your crew through a solar particle storm.
 - **Ice Hunter (Hard)**: Travel to Jezero Crater Rim in `-70°C` to `-90°C` cold and drill 48 hours of ice cores by Sol 22.
 
-| Station Operations | Rover Survey Site |
+## Gameplay Screenshots
+
+| Crew Selection | Cargo Preparation |
 | :---: | :---: |
-| ![Station Operations](assets/textures/tharsis_station.png) | ![Rover Survey Site](assets/textures/tharsis_site.png) |
+| ![Crew Selection](docs/screenshots/crew-select.jpg) | ![Cargo Preparation](docs/screenshots/cargo-prep.jpg) |
+
+| Launch Sequence | Station Operations |
+| :---: | :---: |
+| ![Launch Sequence](docs/screenshots/launch-sequence.jpg) | ![Station Operations](docs/screenshots/station-ops.jpg) |
 
 ## Key Features
 
