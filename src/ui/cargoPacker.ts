@@ -10,7 +10,7 @@
 //
 // It uses the same data as cargoScreen.ts (CARGO_ITEMS, CargoPlacement, stock limits),
 // so the launch, the manifest and the survival loop are unchanged.
-import { Interactable, type Color, type InputState } from 'esengine';
+import { Interactable, type Color, type Entity, type InputState } from 'esengine';
 import { makeAbsBox } from './theme';
 import type { CargoItemId, MissionSetupInput, ResourcePool } from '../contracts/gameContract';
 import {
@@ -42,6 +42,13 @@ const TAB_OF: Partial<Record<CargoItemId, InventoryTab>> = {
 };
 const PIECE = 76;
 const STEP = 84;
+/** Inventory row: the shape preview's box and its mini cells (three cells fit across or down). */
+const SHAPE_BOX = 52;
+const SHAPE_CELL = 16;
+const SHAPE_GAP = 2;
+const SHAPE_STEP = SHAPE_CELL + SHAPE_GAP;
+const SHAPE_X = 262;
+const TAG_X = 192;
 
 function cargoColor(item: CargoItemId, strength: number): Color {
     const shade = CARGO_COLORS[item];
@@ -153,16 +160,39 @@ export function showCargoPacker(
             if (ui.hasKeyboardFocus(button.entity)) pick(item.id, true);
         }, { quiet: true });
         ui.icon(button.entity, 10, 12, 32, item.id, p.amber);
-        ui.label(button.entity, [54, 4, 200, 26], item.name, { display: true, size: 18 });
-        ui.label(button.entity, [54, 28, 258, 36], item.effect, { size: 13, color: p.secondary, wrap: true, top: true });
+        ui.label(button.entity, [54, 4, 136, 26], item.name, { display: true, size: 18, fit: 13 });
+        ui.label(button.entity, [54, 28, 204, 34], item.effect, { size: 13, fit: 11, color: p.secondary, wrap: true, top: true });
         const need = required[item.id] ?? 0;
         // NEEDED turns into PACKED once enough of the item is in the bay.
-        const tag = need > 0 ? ui.box(button.entity, [254, 8, 68, 20], p.amber) : null;
-        const tagText = tag ? ui.label(tag, [0, 0, 68, 20], 'NEEDED', { size: 11, color: p.ink, center: true }) : null;
+        const tag = need > 0 ? ui.box(button.entity, [TAG_X, 8, 64, 20], p.amber) : null;
+        const tagText = tag ? ui.label(tag, [0, 0, 64, 20], 'NEEDED', { size: 11, color: p.ink, center: true }) : null;
+        // The item's footprint, so its shape is known before it is picked up. While it is in
+        // hand it turns with the held rotation.
+        const shape = ui.box(button.entity, [SHAPE_X, 6, SHAPE_BOX, SHAPE_BOX]);
         const stock = ui.label(button.entity, [320, 0, 60, ROW - 6], '', { size: 13, color: p.amber, center: true });
         ui.on(button.entity, 'press', () => pick(item.id, false));
-        return { item, button, stock, need, tag, tagText };
+        return { item, button, stock, need, tag, tagText, shape, shapeLayer: null as Entity | null, shapeRotation: -1 };
     });
+
+    /** Draws an item's cells, centred in its inventory row's shape box. */
+    function drawShape(row: typeof items[number], rotation: Rotation): void {
+        if (row.shapeRotation === rotation) return;
+        if (row.shapeLayer !== null) ui.world.despawn(row.shapeLayer);
+        row.shapeRotation = rotation;
+        const layer = ui.box(row.shape, [0, 0, SHAPE_BOX, SHAPE_BOX]);
+        row.shapeLayer = layer;
+        const footprint = rotatedCells(row.item.id, rotation);
+        const w = Math.max(...footprint.map(([x]) => x)) + 1;
+        const h = Math.max(...footprint.map(([, y]) => y)) + 1;
+        const ox = Math.round((SHAPE_BOX - (w * SHAPE_STEP - SHAPE_GAP)) / 2);
+        const oy = Math.round((SHAPE_BOX - (h * SHAPE_STEP - SHAPE_GAP)) / 2);
+        const fill = cargoColor(row.item.id, 0.6);
+        const edge = cargoColor(row.item.id, 0.95);
+        for (const [x, y] of footprint) {
+            ui.box(layer, [ox + x * SHAPE_STEP, oy + y * SHAPE_STEP, SHAPE_CELL, SHAPE_CELL], edge);
+            ui.box(layer, [ox + x * SHAPE_STEP + 2, oy + y * SHAPE_STEP + 2, SHAPE_CELL - 4, SHAPE_CELL - 4], fill);
+        }
+    }
 
     // ---- Supply meters: how long each supply lasts with what is packed ----
     const meterTop = 388;
@@ -204,17 +234,23 @@ export function showCargoPacker(
     }));
 
     // Pieces are drawn across the 8-px gaps between cells, but the gaps themselves are not
-    // buttons. These invisible strips make the whole piece clickable: a press on a gap
-    // acts on the piece that covers it (and does nothing over an empty gap).
+    // buttons. These invisible strips cover them. With an item in hand, a press on a gap
+    // places it where the outline shows. Otherwise it acts on the packed piece that covers
+    // the gap (and does nothing over an empty gap).
     const pieceAt = (x: number, y: number) => placements.find(piece => occupiedCells(piece).some(([px, py]) => px === x && py === y));
     const gapHit = (bounds: readonly [number, number, number, number], a: readonly [number, number], b: readonly [number, number]) => {
         const hit = makeAbsBox(ui.world, grid, ...bounds, undefined, false);
         ui.world.insert(hit, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
         ui.on(hit, 'press', () => {
+            if (held) { pressCell(hover?.x ?? a[0], hover?.y ?? a[1], false); return; }
             const piece = pieceAt(a[0], a[1]);
             if (piece && piece === pieceAt(b[0], b[1])) pressCell(a[0], a[1], false);
         });
         ui.on(hit, 'hover_enter', () => { hover = { x: a[0], y: a[1] }; preview(); });
+        // Leaving a gap for the bay's edge clears the outline, so no outline shows where a click would miss.
+        ui.on(hit, 'hover_exit', () => {
+            if (hover && hover.x === a[0] && hover.y === a[1]) { hover = null; preview(); }
+        });
     };
     for (let y = 0; y < CARGO_ROWS; y++) {
         for (let x = 0; x < CARGO_COLUMNS; x++) {
@@ -394,8 +430,11 @@ export function showCargoPacker(
             const [labelX, labelY] = [...footprint].sort(([ax, ay], [bx, by]) => ay - by || ax - bx)[0]!;
             let labelWidth = PIECE;
             while (contains(labelX + Math.round(labelWidth / STEP), labelY)) labelWidth += STEP;
-            ui.label(layer, [16 + labelX * STEP, 28 + labelY * STEP, labelWidth - 8, 36], CARGO_BY_ID[piece.item].shortName,
-                { display: true, size: 16, fit: 12, center: true, color: p.white });
+            // The item's icon sits above its short name, so packed pieces read the same as the inventory.
+            const labelLeft = 12 + labelX * STEP;
+            ui.icon(layer, Math.round(labelLeft + labelWidth / 2 - 16), 8 + labelY * STEP + 8, 32, piece.item, p.white);
+            ui.label(layer, [labelLeft + 4, 8 + labelY * STEP + 42, labelWidth - 8, 26], CARGO_BY_ID[piece.item].shortName,
+                { display: true, size: 15, fit: 11, center: true, color: p.white });
             if (landed) {
                 // It lands with a thud and a little puff of dust at its feet.
                 landed = false;
@@ -408,7 +447,9 @@ export function showCargoPacker(
         }
 
         const counts = packedInventory(placements);
-        for (const { item, button, stock, need, tag, tagText } of items) {
+        for (const row of items) {
+            const { item, button, stock, need, tag, tagText } = row;
+            drawShape(row, held?.item === item.id ? held.rotation : 0);
             const left = item.stock - counts[item.id];
             ui.setText(stock, `${left} left`);
             ui.textColor(stock, left === 0 ? p.muted : p.amber);
@@ -418,7 +459,7 @@ export function showCargoPacker(
                 const done = counts[item.id] >= need;
                 ui.fill(tag, done ? p.good : p.amber);
                 ui.setText(tagText, done ? 'PACKED' : 'NEEDED');
-                if (done && wasPacked.get(item.id) === false) { motion.hop(tag, 254, 8, 6); play('chime'); }
+                if (done && wasPacked.get(item.id) === false) { motion.hop(tag, TAG_X, 8, 6); play('chime'); }
                 wasPacked.set(item.id, done);
             }
         }
