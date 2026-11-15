@@ -19,6 +19,9 @@ import { makeAbsBox, setNodeDisplayed } from '../ui/theme';
 import { setFeedbackPrefs } from '../ui/feedback';
 import { bindAudio, playMusic, setSoundEnabled, setVolumes, unlockAudio } from '../audio/soundManager';
 import { mountTharsisFlight } from '../ui/tharsisFlight';
+import { showCoach, type Coach } from '../ui/coach';
+import { tutorial } from '../ui/tutorial';
+import { menuStep } from '../ui/tutorialSteps';
 import type { VolumeField } from '../ui/audioSettings';
 
 const controllers = new WeakMap<World, { root: Entity; update: () => void }>();
@@ -46,6 +49,8 @@ export const flightSystem = defineSystem(
         const legacySkills = Storage.getJSON<unknown>(STORAGE_KEYS.ACTIVE_SKILLS);
         const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
         let profile = loadProfile(Storage.getJSON<unknown>(STORAGE_KEYS.PROFILE), legacySkills, reducedMotion);
+        // The tutorial is for new players: a save that has already finished a mission skips it.
+        if (profile.awardedRuns.length > 0) tutorial.skipForReturningPlayer();
         bindAudio(audio);
         setVolumes(profile.masterVolume, profile.musicVolume, profile.sfxVolume);
         setSoundEnabled(profile.soundEnabled);
@@ -113,6 +118,7 @@ export const flightSystem = defineSystem(
             const root = makeAbsBox(world, sceneRoot, 0, 0, 1280, 720);
             pageRoot = root;
             tickPage = null;
+            tutorial.targets.clear();
             // The expedition draws its own station and site; the scene's old outpost backdrop stays hidden.
             setNodeDisplayed(world, backdrop, false);
             playMusic(page === 'run' ? 'game' : 'menu');
@@ -127,7 +133,7 @@ export const flightSystem = defineSystem(
                 const setup: MissionSetupInput = { ...runSetup, rules: 'tharsis-expedition' };
                 tickPage = mountTharsisFlight({
                     world, events, input, focus, root, art, setup, profile, onFinish: finish,
-                    onExit: target => navigate(target), onRetry: () => navigate('run'),
+                    onExit: target => { tutorial.leaveRun(); navigate(target); }, onRetry: () => navigate('run'),
                     onVolume: changeVolume, onSound: soundEnabled => {
                         saveProfile({ ...profile, soundEnabled });
                         setSoundEnabled(soundEnabled);
@@ -221,8 +227,20 @@ export const flightSystem = defineSystem(
                     showExit(ui, navigate);
                     break;
                 default:
-                    surfaceTick = showMenu(ui, navigate, profile.reducedMotion);
+                    surfaceTick = showMenu(ui, navigate, profile.reducedMotion, () => { tutorial.begin(); navigate('menu'); });
             }
+            // The first-time tutorial: ARIES points at the next button on this page.
+            let coach: Coach | null = null;
+            let coachStale = true;
+            const refreshCoach = () => {
+                coachStale = false;
+                coach?.dispose();
+                const step = tutorial.active ? menuStep(page, { welcomed: tutorial.welcomed, trainingReady: offer?.prepared === 'training' }) : null;
+                coach = step && showCoach(ui, root, step, key => tutorial.targets.get(key), {
+                    next: () => { tutorial.welcomed = true; coachStale = true; },
+                    skip: () => { tutorial.finish(); coachStale = true; },
+                });
+            };
             tickPage = () => {
                 // The page sees input first, so Escape can put back a held cargo item instead of leaving.
                 const usedEscape = surfaceTick?.(input) === true;
@@ -231,6 +249,8 @@ export const flightSystem = defineSystem(
                     else if (page === 'review') navigate('cargo');
                     else if (page !== 'menu') navigate('menu');
                 }
+                if (coachStale) refreshCoach();
+                coach?.tick();
                 ui.updateFocus(input);
             };
         }

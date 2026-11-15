@@ -33,9 +33,15 @@ export function showRoverChecklist({ state, ui, content, button, change, draft, 
     const trip = tripPlan(state);
     const issues = dispatchIssues(state, draft);
     button('rover-issues', content, [774, 12, 232, 42], () => showIssues(issuePage === null ? 0 : null), {
-        label: issuePage === null ? `Dispatch requirements (${issues.length})` : 'Back to rover load', labelSize: 14, tone: 'hero',
+        label: issuePage === null
+            ? (issues.length ? `What's left? (${issues.length})` : 'Checklist (Ready!)')
+            : 'Back to rover load',
+        labelSize: 14, tone: 'hero',
     });
-    ui.label(content, [22, 61, 1116, 27], `${trip.hasPilot ? 'Pilot' : 'Backup driver'} · ${trip.leg} Sol per leg · ${trip.sols} Sol round trip · Latest departure Sol ${trip.latest} · Clean-trip return Sol ${trip.returnSol}`, { size: 15, color: p.cyan });
+    const dayWord = trip.leg === 1 ? 'day' : 'days';
+    ui.label(content, [22, 61, 1116, 27],
+        `${trip.hasPilot ? 'Fast Pilot' : 'Standard driver'} · ${trip.leg} ${dayWord} out, ${trip.leg} ${dayWord} back · ${issues.length === 0 ? 'Ready to drive!' : `${issues.length} thing${issues.length === 1 ? '' : 's'} left to fix`}`,
+        { size: 16, color: issues.length === 0 ? p.good : p.cyan });
     if (issuePage !== null) {
         const perPage = 5;
         const last = Math.max(0, Math.ceil(issues.length / perPage) - 1);
@@ -126,12 +132,12 @@ export function showRoverChecklist({ state, ui, content, button, change, draft, 
     ui.label(content, [24, 561, 700, 42], loadNote || warning || 'Ready to dispatch. Delays can move the return past the deadline.', {
         size: 15, color: loadNote ? p.secondary : warning ? p.amber : p.good, wrap: true,
     });
-    button('reset-load', content, [738, 540, 190, 50], reset, { label: 'Clean-trip load' });
+    button('reset-load', content, [738, 540, 190, 50], reset, { label: 'Auto-pack supplies' });
     button('dispatch', content, [940, 540, 216, 50], () => change(() => {
         const result = dispatchRover(state, draft);
         if (!result) dispatch();
         return result;
-    }), { label: problem ? 'Dispatch locked' : `Dispatch to ${expeditionFor(state).site.replace(/^the /, '')}`, tone: problem ? 'plain' : 'primary', disabled: Boolean(problem), labelSize: 16 });
+    }), { label: problem ? 'Not ready yet' : `Launch to ${expeditionFor(state).site.replace(/^the /, '')}`, tone: problem ? 'plain' : 'primary', disabled: Boolean(problem), labelSize: 16 });
 }
 
 /** The cargo this expedition can carry: everything except the other missions' instruments. */

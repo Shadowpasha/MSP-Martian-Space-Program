@@ -1,52 +1,65 @@
 # Mars Station Program
 
-A pixel-art survival game built in Estella for NASA Space Apps. Prepare the station, ride out a regional storm, and bring the Site A field crew and their weather data home by the end of Sol 16.
+A pixel-art Mars survival and mission-planning game built in Estella for NASA Space Apps. Manage your station crew, pack the rover, ride out dust and solar storms, and bring your field team and science data home before the deadline.
 
-## Windows playtest
+![Mars Station Main Menu](assets/textures/menu_station.png)
+
+## Playable Missions
+
+- **Tharsis Training Run (Tutorial)**: A guided 9-Sol mission with **ARIES**, our robot coach, who highlights each button step by step for younger players.
+- **Tharsis Ridge Weather Survey (Easy)**: Record 48 hours of weather data at Site A by Sol 20 while riding out regional dust storms.
+- **Radiation Detective (Medium)**: Drive the RAD detector to Hawksbill Gap, record 72 hours of readings by Sol 20, and protect your crew through a solar particle storm.
+- **Ice Hunter (Hard)**: Travel to Jezero Crater Rim in `-70°C` to `-90°C` cold and drill 48 hours of ice cores by Sol 22.
+
+| Station Operations | Rover Survey Site |
+| :---: | :---: |
+| ![Station Operations](assets/textures/tharsis_station.png) | ![Rover Survey Site](assets/textures/tharsis_site.png) |
+
+## Key Features
+
+- **Kid-Friendly Controls**: Clear resource icons, `Lock lead` two-step task assignment, an End Sol safety check that warns before leaving tasks empty or running low on supplies, and a clickable **Next step** helper.
+- **Animated End-of-Sol Report**: Visual crew cards showing each astronaut's portrait, health, morale, and animated progress bars for completed, partial, resting, or rover work.
+- **First-Time ARIES Coach**: Highlights the exact next button to press from the main menu through the full training run (`How to Play` restarts it anytime).
+- **Dynamic Events & Live A.R.I.E.S.**: 10 unique landing events, 36 randomized station and rover events, and optional live Gemini A.R.I.E.S. briefings and procedure brainstorming.
+
+## Windows Playtest
 
 1. Install [Estella Editor 0.104.1](https://github.com/esengine/estella/releases/tag/v0.104.1) and [Node.js 24 LTS with npm](https://nodejs.org/en/download).
-2. Open PowerShell in the folder that contains `project.esproject`.
+2. Open PowerShell in the folder that contains `project.esproject`:
 
    ```powershell
    npm.cmd ci
    npm.cmd run verify
    ```
 
-3. In Estella, use **Open Project** to select that folder, open `assets/scenes/main.esscene`, and press **F5**.
-4. To play the Web export, choose **Build → Package Project → Web** and set the output directory to `dist/web`. After packaging, run `npm.cmd run playtest` and visit [the local game](http://127.0.0.1:4173/). Keep that address for a consistent browser save. The package dialog also has **Preview over HTTP**.
+3. In Estella, use **Open Project** to select this folder, open `assets/scenes/main.esscene`, and press **F5**.
+4. To play the Web export, choose **Build -> Package Project -> Web** and set the output directory to `dist/web`. After packaging, run `npm.cmd run playtest` and visit [http://127.0.0.1:4173/](http://127.0.0.1:4173/).
 
-### Live Gemini playtest
+### Live Gemini A.R.I.E.S. (Web Export & Estella Editor)
 
-Set `GEMINI_API_KEY` in an untracked `.env` beside `package.json`, or in the terminal environment. Run `npm.cmd run playtest` and open [the local game](http://127.0.0.1:4173/). The local Node server holds the key and makes the requests. Restart it after changing `.env`. Set `GEMINI_MODEL` to override the server’s default model. The website runs the same server; see [docs/DEPLOY.md](docs/DEPLOY.md) for its settings.
+Set `GEMINI_API_KEY` in an untracked `.env` beside `package.json`, then run:
 
-- Open **A.R.I.E.S.** from the station for an open discussion, or select **Discuss procedure** on a work order. Ask for options or describe a tradeoff. For example, ask what equipment can be sacrificed when Materials are low, then decide whether to give up some solar output or preserve it. Review any new or revised task beside the conversation and confirm it before assigning a lead in **Tasks**.
-- **End Sol** starts the next briefing while the report is open. Leave the report open until the drafting indicator clears to receive it, or open the next briefing immediately. Editor Play and static previews use authored briefings. You can select procedures from the work-order screen when the terminal is unavailable.
-- The A.R.I.E.S. badge shows **API configured** when the server reports a model, **API online** after a valid response, and **Local fallback** when live requests fail or are unavailable. The briefing header shows the source of that briefing.
-- **Tharsis Training Run** uses scripted briefings. Its A.R.I.E.S. terminal offers live mission guidance when the API is available.
+```powershell
+npm.cmd run playtest
+```
 
-## First mission
+The local Node server holds the key and exposes `/api/gemini-plan` on `http://127.0.0.1:4173`. Even if you have not exported `dist/web` yet, `playtest.mjs` runs in API bridge mode so your Estella Editor **F5** preview connects to live Gemini automatically. Restart `npm.cmd run playtest` after editing `.env`. Set `GEMINI_MODEL` to override the default model; see [docs/DEPLOY.md](docs/DEPLOY.md) for production deployment settings.
 
-- Choose **Play → Tharsis Training Run** for a guided six-Sol flight with a prepared crew and manifest. The first successful return earns three research points.
-- Open **Objectives** in either mission view to check the deadline, rover readiness, data, and station reserves. Select a blocker to see the relevant work orders, supply controls, or other recovery options.
-- Open **Audio** during operations to adjust All Audio, Music, or Sound Effects and skip to the next shuffled track. Volume settings carry across runs.
-- Start in **Crew** to swap specialists. Remove one to free a seat, then add a replacement. Exactly four crew must launch.
-- Open **Upgrade** to spend the three starting research points on a Tier 1 node. Completed missions award research based on their results.
-- Choose **Play → Tharsis Ridge Weather Survey**. In cargo preparation, place the Wind Sampler and any supplies you want. Select an inventory item and then a cell to place it. Select an existing piece to rotate, move, or remove it. Use **Tab**, **arrows**, and **Enter** to navigate. **R**, **M**, and **Delete** are cargo shortcuts.
-- Resolve the briefing and read the revealed outcome. The dispatch checklist links to each department’s work orders. Schedule work, then select a lead with the keyboard or drag a crew card onto the lead slot. Assign different crew to work in parallel.
-- Hover or focus a resource to preview its Sols remaining. Open it for passive recovery, heating and filtration, and scheduled task costs and yields. Rotate crew through rest Sols to restore 12 Morale and reset their duty streak. Work pace drops below 60% Morale and drops again below 35%.
-- Open **Conditions** to check solar generation, heating and filter draw, and the projected radiation dose. Dust reduces solar generation and cold costs Power at both locations. Shelter and shielding cut incoming radiation. Sustained exposure injures crew and can halt outside work and sampling.
-- Select the two travelers in **Rover Checklist** before certifying their suits. At Tharsis, a Pilot makes a clean trip four Sols and a backup driver needs six. The checklist shows clear-weather and peak-storm supply costs. Harden the rover and pack the storm reserve for trips that overlap the storm.
-- Once the checklist is complete, confirm a load within 20 slots and dispatch. Use **Station / Expedition** to manage both locations. Field events and upkeep use rover stock. You can order a rest Sol from **Expedition supplies**. It uses supplies, pauses travel, and resets a partial sample. Complete two consecutive survey Sols at Site A, then dock by the deadline with at least 10 Food, 10 Water, and 25% station O₂.
+- Open **A.R.I.E.S.** from the station for live advice, or click **Discuss procedure** on a work order to brainstorm custom solutions.
+- The A.R.I.E.S. badge shows **API configured**, **API online** after a valid response, or **Local fallback** when running offline with the built-in event library.
 
-## Team integration
+## Gameplay Flow
 
-See [Gameplay rules and UML](docs/GAMEPLAY-UML.md) for mission states, Sol resolution, and the station and rover rules.
+- **Crew & Upgrades**: Pick four crew members before launch (or via **Edit Crew** on the Launch Summary) and spend Research points on station upgrades.
+- **Cargo Preparation**: Pack your mission instrument and supplies onto the 20-slot rover grid using **Auto Fill** or manual placement (`R` to rotate).
+- **Daily Operations**: Resolve the morning briefing, schedule station tasks, lock a crew lead, manage Power, Food, Water, and Oxygen, and dispatch the rover with 2 astronauts when ready.
 
-`MissionSetupInput` defines the mission, roster, starting conditions and packed quantities. Playable profiles in `src/data/expeditions.ts` are `training`, `tharsis`, `radiation`, and `ice`. A team-provided setup without a profile runs as the Tharsis survey. Optional `upgradeIds` grant gameplay unlocks and apply numerical node effects to the manifest's base modifiers at run initialization. The optional goal fields `minimumReserves` and `requiredEquipment` control docking and launch requirements respectively. Older manifests can omit water-canister and oxygen-tank counts.
+## Team Integration & Docs
 
-- `mars-outpost:pending-setup` accepts a team-provided `MissionSetupInput`. Play offers that mission and its prepared cargo and crew. The launch consumes the pending setup.
-- `mars-outpost:skill-upgrades` retains the legacy unlocked-ID list. The current profile lives under `mars-outpost:profile-v1`.
-- `mars-outpost:last-result` holds the latest `MainLoopResult`, including the expedition outcome and earned research.
+See [Gameplay rules and UML](docs/GAMEPLAY-UML.md) for mission states, Sol resolution, and station/rover rules.
 
-See [the art sources](art/README.md) for the station, portraits, icons, and bundled font licenses.
-See [CREDITS.md](CREDITS.md) for every asset, font, fact source and contributor.
+- `mars-outpost:pending-setup` accepts a team-provided `MissionSetupInput`.
+- `mars-outpost:profile-v1` stores the player profile and research upgrades.
+- `mars-outpost:last-result` holds the latest `MainLoopResult`.
+
+See [art/README.md](art/README.md) and [CREDITS.md](CREDITS.md) for asset, font, audio, and NASA fact sources.

@@ -1,8 +1,9 @@
 import type { Entity } from 'esengine';
 import { CARGO_BY_ID } from '../data/cargo';
-import { formatResource, resourceEntries } from '../data/missions';
+import { formatResource, RESOURCE_LABELS, resourceEntries } from '../data/missions';
 import { expeditionChecklist } from '../data/tharsisOrders';
 import type { assessMission, MissionAction } from '../simulation/missionStatus';
+import { previewEndSol } from '../simulation/solEngine';
 import { expeditionFor, travelerReadiness, type RoverLoad, type TharsisState } from '../simulation/tharsis';
 import { hasUpgrade } from '../simulation/tharsisUpgrades';
 import type { FlightUi } from './flightUi';
@@ -77,11 +78,39 @@ export function showMissionObjectives(ui: FlightUi, content: Entity, button: Run
     }
 }
 
-export function showSolReview(ui: FlightUi, content: Entity, button: RunButton, status: MissionAssessment, openAction: OpenAction,
+export function solSafetyWarning(state: TharsisState, status: MissionAssessment): string | null {
+    if (status.review) return status.review;
+    const run = state.tharsis;
+    if (!run.rover && !run.returnedWithData) {
+        if (status.launchReady) return 'Your rover is ready to launch! Want to launch it before ending the day?';
+        if (!run.work.length && state.crew.some(member => member.health > 0)) {
+            return 'No station tasks are planned for today. Want to pick a task first?';
+        }
+    }
+    const next = previewEndSol(state);
+    const lowKeys = (['food', 'water', 'oxygen', 'energy'] as const).filter(key => next.resources[key] <= 2 && next.resources[key] < state.resources[key]);
+    if (lowKeys.length) {
+        return `Station ${lowKeys.map(key => RESOURCE_LABELS[key]).join(' and ')} will be very low after tonight! Check supplies or end Sol anyway.`;
+    }
+    if (next.tharsis.rover) {
+        const roverLow = (['food', 'water', 'oxygen', 'energy'] as const).filter(key => next.tharsis.rover!.resources[key] <= 1);
+        if (roverLow.length) {
+            return `Rover ${roverLow.map(key => RESOURCE_LABELS[key]).join(' and ')} will be very low after tonight!`;
+        }
+    }
+    return null;
+}
+
+export function showSolReview(ui: FlightUi, content: Entity, button: RunButton, state: TharsisState, status: MissionAssessment, openAction: OpenAction,
     back: () => void, advance: () => void): void {
     const p = ui.palette;
-    ui.label(content, [22, 68, 865, 78], status.review ?? '', { size: 19, color: p.amber, wrap: true, top: true });
+    const warning = solSafetyWarning(state, status) ?? '';
+    ui.label(content, [22, 68, 865, 78], warning, { size: 19, color: p.amber, wrap: true, top: true });
     const choices = new Map<string, MissionAction>();
+    if (status.launchReady) choices.set('Launch Rover', { label: 'Open Rover Checklist', panel: 'roverChecklist' });
+    if (!state.tharsis.rover && !state.tharsis.returnedWithData && !state.tharsis.work.length) {
+        choices.set('Pick a Task', { label: 'Pick a Mission Task', panel: 'workOrders' });
+    }
     for (const notice of status.notices) for (const action of notice.actions) choices.set(action.label, action);
     const actions = [...choices.values()].slice(0, 6);
     actions.forEach((action, index) => button(`review-action-${index}`, content, [22 + index % 3 * 288, 151 + Math.floor(index / 3) * 51, 270, 42],

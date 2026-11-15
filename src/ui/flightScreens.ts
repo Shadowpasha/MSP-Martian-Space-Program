@@ -16,6 +16,7 @@ import { play, vibrate } from './feedback';
 import { burst } from './fx';
 import { easeOutBack, makeMotion, type Motion } from './motion';
 import { makeAbsBox } from './theme';
+import { tutorial } from './tutorial';
 import { showVolumeControls, type VolumeField } from './audioSettings';
 
 export type Page = 'menu' | 'crew' | 'upgrade' | 'settings' | 'mission' | 'cargo' | 'review' | 'quit' | 'exit' | 'run';
@@ -52,6 +53,7 @@ function sidebar(ui: FlightUi, page: Page, navigate: Navigate, hero: boolean, mo
         // On the title screen the menu slides in from the left, one button after another.
         motion?.enter(button.entity, x, y, { dx: -56, delay: 120 + i * 70, duration: 340, reveal: true });
         if (hero && i === 0) playButton = button.entity;
+        if (i === 0) tutorial.targets.set('play', button.entity);
         const ink = active ? p.ink : hero && i === 0 ? p.cyan : p.text;
         ui.label(button.entity, [8, 0, width - 16, 52], label, { display: true, size: 26, color: ink, center: true });
     });
@@ -64,7 +66,7 @@ function sidebar(ui: FlightUi, page: Page, navigate: Navigate, hero: boolean, mo
     return playButton;
 }
 
-export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolean): (input: InputState) => void {
+export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolean, onHowToPlay?: () => void): (input: InputState) => void {
     const { root, palette: p } = ui;
     const motion = makeMotion(ui.world, reducedMotion);
     ui.box(root, [0, 0, 1280, 720], p.ink);
@@ -177,6 +179,11 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
     hotspot([965, 430, 60, 90], () => greet(1));
 
     const play_ = sidebar(ui, 'menu', navigate, true, motion);
+    // Under the menu: starts the first-time tutorial again.
+    if (onHowToPlay) {
+        const howTo = ui.button(root, [36, 236 + NAV.length * 64, 228, 44], onHowToPlay, { label: 'How to Play', labelSize: 20 });
+        motion.enter(howTo.entity, 36, 236 + NAV.length * 64, { dx: -56, delay: 120 + NAV.length * 70, duration: 340, reveal: true });
+    }
     // Hovering Play runs a chase of launch lights along its bottom edge.
     const lights = play_ ? Array.from({ length: 9 }, (_, i) => ui.box(play_, [14 + i * 22, 44, 12, 3], { ...p.cyan, a: 0.25 })) : [];
     let playHovered = false;
@@ -733,6 +740,7 @@ export function showMissions(
             label: offer.prepared === 'training' ? 'Open Training' : active ? 'Select Mission' : 'Coming soon', disabled: !active, tone: active ? 'primary' : 'plain',
         });
         if (active) selectButtons.push(button);
+        if (offer.prepared === 'training') tutorial.targets.set('open-training', button.entity);
     });
 
     let popup: Entity | null = null;
@@ -802,7 +810,8 @@ export function showPreparedManifest(ui: FlightUi, offer: MissionOffer, problem:
     ui.label(summary, [20, 322, 368, 90], victoryCriteria(offer.setup), { size: 15, wrap: true, top: true, color: p.cyan });
     if (offer.prepared === 'training') ui.label(summary, [20, 411, 368, 30], 'Emergency Electrolysis installed', { size: 14, color: p.amber });
     ui.label(summary, [20, 444, 368, 64], problem ?? 'Ready for launch.', { wrap: true, color: problem ? p.bad : p.good });
-    ui.button(summary, [20, 524, 368, 48], onLaunch, { label: 'Launch Mission', tone: 'primary', disabled: Boolean(problem) });
+    const launch = ui.button(summary, [20, 524, 368, 48], onLaunch, { label: 'Launch Mission', tone: 'primary', disabled: Boolean(problem) });
+    tutorial.targets.set('launch', launch.entity);
 }
 
 export type SettingField = 'soundEnabled' | 'vibration' | 'reducedMotion' | 'highContrast';

@@ -384,14 +384,14 @@ export const DEFAULT_CREW: CrewMember[] = [
 
 export const DEFAULT_MARS_SETUP: MissionSetupInput = {
     planet: 'mars',
-    targetSol: 15,
+    targetSol: 20,
     missionGoal: {
         id: 'goal_wind_sample',
         title: 'Gather Weather Data (48h)',
-        description: 'Gather Weather Data for 48 hours before Sol 15 at coords: 18.65N, 226.20E (Tharsis Ridge).',
+        description: 'Gather Weather Data for 48 hours before Sol 20 at coords: 18.65N, 226.20E (Tharsis Ridge).',
         coords: '18.65N, 226.20E',
         durationHours: 48,
-        deadlineSol: 15,
+        deadlineSol: 20,
         requiredFlag: 'wind_sample_collected',
         requirements: [
             { id: 'req_sensor', label: 'Prep Weather Sensor', kind: 'prep_sensor', current: 0, target: 1 },
@@ -402,11 +402,11 @@ export const DEFAULT_MARS_SETUP: MissionSetupInput = {
         completed: false,
     },
     startingResources: {
-        energy: 82,
-        food: 44,
-        water: 48,
-        oxygen: 88,
-        res: 14,
+        energy: 92,
+        food: 50,
+        water: 54,
+        oxygen: 92,
+        res: 18,
     },
     startingConditions: {
         radiation: 14,

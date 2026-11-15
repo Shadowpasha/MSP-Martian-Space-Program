@@ -229,6 +229,15 @@ export function chooseFieldCrew(state: TharsisState, id: string): string | null 
     return null;
 }
 
+export interface CrewReportEntry {
+    memberId: string;
+    taskTitle: string;
+    status: 'done' | 'progress' | 'held' | 'rover' | 'rest';
+    progress: number;
+    target: number;
+    detail: string;
+}
+
 export interface WorkFlow {
     orderId: string;
     title: string;
@@ -250,12 +259,28 @@ export function advanceWork(state: TharsisState, conditions: ShiftConditions, re
     const done = new Set<string>();
     const worked = new Set<string>();
     const shiftsByLead = new Map<string, number>();
+    const crewActivity = new Map<string, CrewReportEntry>();
     for (const job of state.tharsis.work) {
         const order = scheduledOrder(job, state.tharsis.expedition);
-        const lead = state.crew.find(member => member.id === job.leadId);
-        const used = lead ? shiftsByLead.get(lead.id) ?? 0 : 0;
-        const leadBlock = lead ? workLeadProblem(state, order, job.method, lead) ??
-            (used >= stationShiftCapacity(state, lead) ? 'lead has worked all available shifts' : null) : 'assign a station lead';
+        let lead = state.crew.find(member => member.id === job.leadId);
+        let used = lead ? shiftsByLead.get(lead.id) ?? 0 : 0;
+        let leadBlock = lead ? workLeadProblem(state, order, job.method, lead) ??
+            (used >= stationShiftCapacity(state, lead) ? 'crew member already worked today' : null) : null;
+        if (!lead || leadBlock) {
+            const available = stationCrew(state).filter(member => {
+                const memberUsed = shiftsByLead.get(member.id) ?? 0;
+                return !workLeadProblem(state, order, job.method, member) && memberUsed < stationShiftCapacity(state, member);
+            });
+            const autoLead = preferredLead(available, order, state);
+            if (autoLead) {
+                if (!lead) report.push(`${autoLead.name.split(' ')[0]} stepped in to lead ${order.title}.`);
+                lead = autoLead;
+                used = shiftsByLead.get(lead.id) ?? 0;
+                leadBlock = null;
+            } else if (!lead) {
+                leadBlock = 'no free crew member left today';
+            }
+        }
         const quote = lead && !leadBlock ? quoteForLead(state, order, job.method, lead) : null;
         const hold = leadBlock ?? shiftHold(state, order, conditions);
         const shortages = quote && !hold ? shortfalls(state.resources, quote.cost) : [];
@@ -264,6 +289,12 @@ export function advanceWork(state: TharsisState, conditions: ShiftConditions, re
             const message = (reason ?? 'no eligible lead').replace(/\.$/, '');
             report.push(`${order.title} held · ${message}.`);
             flows?.push({ orderId: order.id, title: order.title, hold: message, shortages, yield: order.yield, decommission: order.decommission });
+            if (lead && !crewActivity.has(lead.id)) {
+                crewActivity.set(lead.id, {
+                    memberId: lead.id, taskTitle: order.title, status: 'held',
+                    progress: job.progress, target: order.shifts, detail: 'Paused today',
+                });
+            }
             continue;
         }
         const remaining = shiftsRemaining(quote.shifts, quote.rate, job.progress);
@@ -275,9 +306,18 @@ export function advanceWork(state: TharsisState, conditions: ShiftConditions, re
         if (quote.specialist) state.perkMatchesCount++;
         flows?.push({ orderId: order.id, title: order.title, cost: quote.cost, yield: quote.output, remaining, decommission: order.decommission });
         if (job.progress < quote.shifts) {
+            const pct = Math.min(99, Math.round((job.progress / quote.shifts) * 100));
+            crewActivity.set(lead.id, {
+                memberId: lead.id, taskTitle: order.title, status: 'progress',
+                progress: job.progress, target: quote.shifts, detail: `${pct}% done`,
+            });
             report.push(`${order.title} · ${job.progress}/${quote.shifts} work complete.`);
             continue;
         }
+        crewActivity.set(lead.id, {
+            memberId: lead.id, taskTitle: order.title, status: 'done',
+            progress: quote.shifts, target: quote.shifts, detail: 'Completed!',
+        });
         applyResourceDelta(state.resources, quote.output);
         const decommission = job.custom?.decommission;
         if (decommission) {
@@ -301,7 +341,7 @@ export function advanceWork(state: TharsisState, conditions: ShiftConditions, re
     for (const member of stationCrew(state)) if (!worked.has(member.id) && member.health > 0) member.stamina = clamp(member.stamina + 12, 0, 100);
     state.tharsis.work = state.tharsis.work.filter(job => !done.has(job.orderId));
     updateChecklist(state);
-    return { completed: finished, worked };
+    return { completed: finished, worked, crewActivity };
 }
 
 function shiftHold(state: TharsisState, order: WorkOrder, { storm, unheated }: ShiftConditions) {

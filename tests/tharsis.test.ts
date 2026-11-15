@@ -47,7 +47,7 @@ test('authored dependencies, assignment, explicit acceptance, and cargo determin
     assert.match(acceptWork(state, service, [])!, /planning/);
     assert.equal(advanceSol(state).advanced, false);
     plan(state);
-    assert.match(acceptWork(state, service, [])!, /Inspect drivetrain/);
+    assert.match(acceptWork(state, service, [])!, /Check rover wheels/);
     const drive = ORDER_BY_ID.get('drive-check')!;
     assert.match(acceptWork(state, drive, ['parallel', 'specialist'])!, /one way/);
     assert.equal(acceptWork(state, drive, ['specialist']), null);
@@ -64,13 +64,13 @@ test('authored dependencies, assignment, explicit acceptance, and cargo determin
     assert.match(acceptWork(state, service, [])!, /planning/);
     plan(state);
     assert.equal(acceptWork(state, service, []), null);
-    assert.match(orderBlock(state, ORDER_BY_ID.get('calibrate')!)!, /Service drive and power and Assemble the field instrument/);
+    assert.match(orderBlock(state, ORDER_BY_ID.get('calibrate')!)!, /Charge rover battery and Attach science tool/);
 });
 
 test('manifest validation is atomic and changes to the travelers invalidate their suits', () => {
     const state = survey();
-    setDeparture(state, 13);
-    assert.equal(tripPlan(state).latest, 13);
+    setDeparture(state, 17);
+    assert.equal(tripPlan(state).latest, 17);
     const load = defaultLoad(state);
     assert.equal(dispatchProblem(state, load), null);
     assert.equal(loadSlots(load), 13);
@@ -84,9 +84,9 @@ test('manifest validation is atomic and changes to the travelers invalidate thei
     assert.deepEqual({ resources: state.resources, cargo: state.cargo }, current);
     assert.equal(chooseFieldCrew(state, 'crew_pilot'), null);
     assert.equal(chooseFieldCrew(state, 'crew_engineer'), null);
-    assert.equal(tripPlan(state).latest, 11);
+    assert.equal(tripPlan(state).latest, 15);
     assert.equal(state.tharsis.completed.suits, undefined);
-    assert.match(dispatchRover(state, defaultLoad(state))!, /Certify field suits/);
+    assert.match(dispatchRover(state, defaultLoad(state))!, /Check space suits/);
 });
 
 test('queued hardening waits until the rover is docked again', () => {
@@ -147,17 +147,17 @@ test('a Sol 13 departure can dock on Sol 16 and award one debrief', () => {
 test('docking evaluates reserves after station shifts and after unloading rover stock', () => {
     for (const waterDelivered of [0, 3]) {
         const state = survey();
-        setDeparture(state, 13);
+        setDeparture(state, 17);
         const load = defaultLoad(state);
         load.resources.water += waterDelivered;
         assert.equal(dispatchRover(state, load), null);
         for (let i = 0; i < 3; i++) step(state);
         assert.equal(state.tharsis.rover?.phase, 'returning');
-        state.resources.water = 10;
+        state.resources.water = 8;
         step(state);
         assert.equal(state.tharsis.rover, null);
         assert.equal(state.tharsis.returnedWithData, true);
-        assert.equal(state.resources.water, 8.2 + waterDelivered);
+        assert.equal(state.resources.water, 6.2 + waterDelivered);
         assert.equal(state.result?.outcome, waterDelivered ? 'victory' : 'defeat');
         if (!waterDelivered) assert.match(state.result!.reason, /below the required station reserves/);
     }
@@ -165,7 +165,7 @@ test('docking evaluates reserves after station shifts and after unloading rover 
 
 test('a field interruption resets 24 hours and the deadline counts the return leg', () => {
     const state = survey();
-    setDeparture(state, 13);
+    setDeparture(state, 17);
     const load = defaultLoad(state);
     load.resources.food += 2;
     load.resources.water += 2;
@@ -182,7 +182,7 @@ test('a field interruption resets 24 hours and the deadline counts the return le
     assert.match(state.result!.reason, /still in the field/);
 
     const delayed = survey();
-    setDeparture(delayed, 13);
+    setDeparture(delayed, 17);
     const late = defaultLoad(delayed);
     late.resources.energy += 4;
     late.resources.oxygen += 3;
@@ -277,8 +277,8 @@ test('dust haze and the storm peak draw down solar, heating and filter reserves'
     const health = state.crew[0]!.health;
     assert.equal(advanceSol(state).advanced, true);
     assert.equal(state.resources.energy, 0);
-    assert.equal(state.crew[0]!.health, health - 14);
-    assert.ok(state.lastSolReport.some(line => line.includes('insufficient heating power')));
+    assert.equal(state.crew[0]!.health, health - 7);
+    assert.ok(state.lastSolReport.some(line => line.includes('not enough heat')));
     assert.equal(state.tharsis.completed.spares, undefined);
 });
 
@@ -300,15 +300,15 @@ test('loading advice uses a worst-case reserve until the first visible warning',
 test('high radiation persists after the storm and stops exposed work at dangerous levels', () => {
     const state = survey();
     setDeparture(state, 12);
-    state.conditions.radiation = 80;
+    state.conditions.radiation = 84;
     const solar = findOrder(state, 'solar')!;
     assert.equal(acceptWork(state, solar, ['specialist']), null);
     assert.equal(assignWork(state, solar.id, 'crew_engineer'), null);
     assert.equal(resourceForecast(state, 'station').tasks[0]?.hold, 'radiation above exterior work limit');
     const health = state.crew[0]!.health;
     step(state);
-    assert.equal(state.conditions.radiation, 77);
-    assert.equal(state.crew[0]!.health, health - 12);
+    assert.equal(state.conditions.radiation, 81);
+    assert.equal(state.crew[0]!.health, health - 8);
     assert.equal(state.tharsis.completed.solar, undefined);
     assert.equal(useLocalCargo(state, 'station', 'medkits'), null);
     assert.equal(resourceForecast(state, 'station').tasks[0]?.hold, undefined);
@@ -321,11 +321,11 @@ test('the docking forecast includes radiation holds and the lost survey window',
     step(state);
     step(state);
     const rover = state.tharsis.rover!;
-    rover.conditions.radiation = 78;
+    rover.conditions.radiation = 83;
     assert.equal(state.tharsis.hours, 24);
     assert.equal(fieldReturnEstimate(state), 17);
     assert.equal(state.tharsis.hours, 24);
-    assert.equal(rover.conditions.radiation, 78);
+    assert.equal(rover.conditions.radiation, 83);
     step(state);
     assert.equal(state.tharsis.hours, 0);
     assert.match(state.lastSolReport.join(' '), /radiation above field work limit/);
@@ -484,7 +484,7 @@ test('consecutive shifts lower individual Morale and a rest Sol restores it', ()
     const state = survey();
     plan(state);
     const member = state.crew.find(crew => crew.role === 'engineer')!;
-    member.morale = 65;
+    member.morale = 52;
     const air = findOrder(state, 'air')!;
     const work = () => { assert.equal(acceptWork(state, air, ['specialist']), null); assert.equal(assignWork(state, air.id, member.id), null); step(state); };
     const pace = () => workQuote(air, [], member, state.skillModifiers).rate;
@@ -493,34 +493,34 @@ test('consecutive shifts lower individual Morale and a rest Sol restores it', ()
     assert.equal(state.tharsis.dutyStreak[member.id], 1);
     work();
     assert.equal(state.tharsis.dutyStreak[member.id], 2);
-    assert.equal(member.morale, 60.5);
+    assert.equal(member.morale, 49.8);
     work();
-    assert.equal(member.morale, 54.5);
+    assert.equal(member.morale, 46.9);
     const low = pace();
     assert.ok(low < normal, 'fatigue reduces specialist work pace');
     assert.equal(advanceSol(state).advanced, true);
     assert.equal(state.tharsis.dutyStreak[member.id], 0);
-    assert.equal(member.morale, 66.5);
+    assert.equal(member.morale, 58.9);
     assert.equal(pace(), normal);
     assert.match(state.lastSolReport.join(' '), /Kalpana \+12 \(rest\)/);
-    member.morale = 30;
+    member.morale = 20;
     assert.ok(pace() < low, 'severe Morale loss slows the same shift further');
 });
 
 test('the resource forecast counts the final fractional shift as finishing this Sol', () => {
-    const crew = DEFAULT_CREW.map(member => member.role === 'engineer' ? { ...member, morale: 57 } : member);
+    const crew = DEFAULT_CREW.map(member => member.role === 'engineer' ? { ...member, morale: 47 } : member);
     const state = survey(0, crew);
     plan(state);
     const water = ORDER_BY_ID.get('water')!;
     assert.equal(acceptWork(state, water, ['conserve']), null);
     assert.equal(assignWork(state, water.id, 'crew_engineer'), null);
     for (let i = 0; i < 4; i++) step(state);
-    assert.equal(state.tharsis.work[0]?.progress, 2.4);
+    assert.equal(state.tharsis.work[0]?.progress, 2.8);
     const flow = resourceForecast(state, 'station').tasks[0];
     assert.equal(flow?.remaining, 1);
     assert.equal(flow?.yield?.water, 19);
     step(state);
-    assert.ok(state.lastSolReport.includes('Recover potable water complete · Kalpana · +19 Water.'));
+    assert.ok(state.lastSolReport.includes('Clean recycled water complete · Kalpana · +19 Water.'));
 });
 
 test('a live briefing can accompany authored storm warnings without replacing the storm', async t => {

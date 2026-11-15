@@ -23,7 +23,7 @@ test('the picker offers optional training, three expeditions, and three upcoming
     const training = offers[0]!;
     const trainingSetup = buildLaunchSetup(training, [], [])!;
     assert.equal(training.prepared, 'training');
-    assert.equal(trainingSetup.targetSol, 6);
+    assert.equal(trainingSetup.targetSol, 9);
     assert.equal(launchProblem(trainingSetup), null);
     assert.deepEqual(trainingSetup.upgradeIds, [GAMEPLAY_UPGRADES.electrolysis]);
     const playable = offers.slice(1).filter(offer => offer.setup);
@@ -31,7 +31,7 @@ test('the picker offers optional training, three expeditions, and three upcoming
     assert.deepEqual(playable.map(offer => offer.difficulty), [1, 2, 3]);
     assert.deepEqual(playable.map(offer => offer.setup!.expedition), ['tharsis', 'radiation', 'ice']);
     assert.ok(playable.every(offer => offer.setup!.rules === 'tharsis-expedition'));
-    assert.equal(playableOffer.setup?.missionGoal.deadlineSol, 16);
+    assert.equal(playableOffer.setup?.missionGoal.deadlineSol, 20);
     assert.ok(offers.slice(1).every(offer => offer.briefing));
     const iceOffer = playable.find(offer => offer.setup?.expedition === 'ice')!;
     const ice = buildLaunchSetup(iceOffer, starterCrew, [drill])!;

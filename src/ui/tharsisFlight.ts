@@ -19,18 +19,35 @@ import { showRoverChecklist, showStorage } from './tharsisManifest';
 import { RESOURCE_KEYS, resourceRate, runway, showConditions, showResources, signed } from './tharsisResources';
 import { showAriesBadge, showTerminal, type TerminalStatus } from './tharsisTerminal';
 import { showWorkConsole, type WorkPanel } from './tharsisWorkConsole';
-import { makeAbsBox } from './theme';
+import { makeAbsBox, setVisualColor } from './theme';
 import { makeMotion } from './motion';
 import { mountSceneAmbience, SITE_AMBIENCE, STATION_AMBIENCE } from './sceneAmbience';
 import { showCrewAbilities } from './tharsisCrew';
-import { showMissionObjectives, showSolReview, type MissionAssessment } from './tharsisObjectives';
+import { showMissionObjectives, showSolReview, solSafetyWarning, type MissionAssessment } from './tharsisObjectives';
 import { showTrainingGuide } from './trainingGuide';
+import { showCoach, type Coach } from './coach';
+import { tutorial } from './tutorial';
+import { runStep } from './tutorialSteps';
 import { currentMissionMusic, nextMissionMusic } from '../audio/soundManager';
 import { showVolumeControls, type AudioSettings, type VolumeField } from './audioSettings';
 
 const STATION = 'assets/textures/tharsis_station.png';
 const SITE = 'assets/textures/tharsis_site.png';
 const ROOM_NAMES = ['Rover Bay', 'Instrument Lab', 'Life Support', 'Storage'] as const;
+const RESOURCE_ICONS: Record<keyof ResourcePool, string> = {
+    energy: 'assets/textures/outpost/hud/hud_energy_32.png',
+    food: 'assets/textures/outpost/hud/hud_food_32.png',
+    water: 'assets/textures/outpost/hud/hud_water_32.png',
+    oxygen: 'assets/textures/outpost/hud/hud_oxygen_32.png',
+    res: 'assets/textures/outpost/hud/hud_res_32.png',
+};
+const WEATHER_ICONS: Record<string, string> = {
+    Clear: 'assets/textures/outpost/hud/hud_weather_clear_32.png',
+    'Cold Snap': 'assets/textures/outpost/hud/hud_weather_cold_snap_32.png',
+    'Dust Haze': 'assets/textures/outpost/hud/hud_weather_dust_haze_32.png',
+    'Dust Storm': 'assets/textures/outpost/hud/hud_weather_dust_storm_32.png',
+    'Solar Flare': 'assets/textures/outpost/hud/hud_weather_solar_flare_32.png',
+};
 type Panel = WorkPanel | 'roverChecklist' | 'cargo' | 'roverCargo' | 'log' | 'aries' | 'resources' | 'conditions' | 'objectives' | 'abilities' | 'solReview' | 'audio';
 
 interface Options {
@@ -90,6 +107,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     let topic: string | null = null;
     const conversations = new Map<string | null, { messages: DiscussionMessage[]; draft: TaskDraft | null }>();
     const methods = new Map<string, Technique>();
+    const pendingLeads = new Map<string, string>();
     let chatPage = 0;
     let terminalStatus: TerminalStatus = 'checking';
     let apiProbe: AbortController | null = null;
@@ -102,11 +120,16 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     let objectivePage = 0;
     let issuePage: number | null = null;
     let guideVisible = true;
+    let coach: Coach | null = null;
     const levels: AudioSettings = { masterVolume: profile.masterVolume, musicVolume: profile.musicVolume,
         sfxVolume: profile.sfxVolume, soundEnabled: profile.soundEnabled };
     let trackLabel: Entity | null = null;
     let shownTrack: string | null = null;
     let textInput: Entity | null = null;
+    let objectiveGlow: Entity | null = null;
+    let warningGlow: Entity | null = null;
+    let reportAnimStart = 0;
+    let reportBars: Array<{ entity: Entity; targetWidth: number; delayMs: number }> = [];
     let controls = new Map<string, Entity>();
     let dragCards: { entity: Entity; crewId: string; home: Bounds }[] = [];
     let dropTarget: { entity: Entity; orderId: string } | null = null;
@@ -240,7 +263,8 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     }
 
     function requestEndSol() {
-        if (assessMission(state, draft ?? defaultLoad(state)).review) open('solReview');
+        const status = assessMission(state, draft ?? defaultLoad(state));
+        if (solSafetyWarning(state, status)) open('solReview');
         else endSol();
     }
 
@@ -272,6 +296,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         ask = null;
         open(null);
         reportPage = 0;
+        reportAnimStart = performance.now();
         if (state.result) onFinish(state.result);
         else if (!run.briefingCommitted) {
             const operation = new AbortController();
@@ -319,7 +344,8 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             const color = drain > 0 && value / drain <= 2 ? p.bad : p.cyan;
             const cell = interactive ? button(`resource-${key}`, monitor, [x - 4, 4, 112, 67], () => pickResource(key),
                 { tone: 'tile' }).entity : ui.group(monitor, [x - 4, 4, 112, 67]);
-            ui.label(cell, [7, 2, 100, 17], RESOURCE_LABELS[key], { size: 12, color: p.secondary });
+            ui.image(cell, [6, 3, 16, 16], RESOURCE_ICONS[key]);
+            ui.label(cell, [25, 2, 82, 17], RESOURCE_LABELS[key], { size: 12, color: p.secondary });
             ui.label(cell, [7, 20, 100, 25], `${value}${suffix}`, { display: true, size: 23, color });
             if (rate) ui.label(cell, [7, 47, 100, 17], `${signed(rate.daily)} / Sol`, { size: 12, color: rate.daily < 0 ? p.amber : p.good });
             if (forecast && rate) {
@@ -333,7 +359,8 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             const x = 617 + index * 121;
             const morale = index === 1;
             ui.box(monitor, [x - 10, 12, 2, 52], p.teal);
-            ui.label(monitor, [x, 4, 105, 22], morale ? 'Morale' : 'Radiation', { size: 14, color: p.secondary });
+            ui.image(monitor, [x, 5, 16, 16], morale ? 'assets/textures/outpost/hud/hud_morale_32.png' : 'assets/textures/outpost/hud/hud_radiation_32.png');
+            ui.label(monitor, [x + 20, 4, 88, 22], morale ? 'Morale' : 'Radiation', { size: 14, color: p.secondary });
             const caution = morale ? value < LOW_MORALE : radiationEffects(value).health > 0;
             ui.label(monitor, [x, 25, 108, 26], `${value}${morale ? '%' : ' mSv'}`, { display: true, size: 23, color: caution ? p.bad : p.cyan });
             if (forecast) ui.label(monitor, [x, 56, 108, 16],
@@ -344,14 +371,17 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         const telemetry = ui.frame(root, [12, 108, 504, 46], p.ink, day ? p.rust : p.edge);
         const weather = `${weatherAtSol}${day ? ` ${day}/3` : ''}${run.phase !== 'report' ? ` · ${local.conditions.temperatureC} °C` : ''}`;
         ui.label(telemetry, [12, 0, 326, 38], weather, { size: 16, color: day || weatherAtSol === 'Dust Haze' ? p.amber : p.text });
-        if (interactive) button('conditions', telemetry, [342, 3, 152, 34], () => open('conditions'), { label: 'Conditions', labelSize: 14 });
+        if (interactive) button('conditions', telemetry, [342, 3, 152, 34], () => open('conditions'), { label: 'Weather', labelSize: 14 });
         if (interactive) {
             button('station', root, [928, 108, 152, 44], () => { view = 'station'; dirty = true; }, { label: 'Station', tone: !atSite ? 'hero' : 'plain' });
             button('expedition', root, [1088, 108, 180, 44], () => { view = 'expedition'; dirty = true; }, { label: 'Expedition', tone: atSite ? 'hero' : 'plain' });
             const caution = status?.review ?? status?.notices[0]?.message;
             if (caution) {
+                warningGlow = ui.box(root, [520, 104, 402, 54], { r: 0.93, g: 0.69, b: 0.4, a: 0.35 });
                 const risk = button('objective-warning', root, [524, 108, 394, 46], () => open('objectives'), { tone: 'tile' });
                 ui.label(risk.entity, [9, 4, 376, 38], caution, { size: 13, fit: 12, color: p.amber, wrap: true });
+            } else {
+                warningGlow = null;
             }
         }
 
@@ -386,17 +416,29 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         }
 
         const checklist = ui.frame(root, [12, 572, 324, 136], p.ink);
-        ui.label(checklist, [12, 1, 154, 22], 'Dispatch prep', { display: true, size: 18, color: p.amber });
-        if (interactive) button('objectives', checklist, [172, 2, 136, 23], () => open('objectives'), { label: 'Objectives', labelSize: 13, tone: 'hero' });
+        ui.label(checklist, [12, 1, 154, 22], 'Mission steps', { display: true, size: 18, color: p.amber });
+        if (interactive) {
+            objectiveGlow = ui.box(checklist, [169, -1, 142, 27], { r: 0.4, g: 0.85, b: 0.9, a: 0.35 });
+            button('objectives', checklist, [172, 2, 136, 23], () => open('objectives'), { label: 'Goals', labelSize: 13, tone: 'plain' });
+        } else {
+            objectiveGlow = null;
+        }
         expeditionChecklist(run.expedition).forEach((item, index) => {
             const count = item.orders.filter(id => run.completed[id]).length;
             const text = `${item.label}  ${count}/${item.orders.length}`;
-            if (interactive) button(`check-${item.bay}`, checklist, [12 + index % 2 * 152, 28 + Math.floor(index / 2) * 44, 144, 36], () => open(item.bay), { label: text, labelSize: 15 });
-            else ui.label(checklist, [12 + index % 2 * 152, 28 + Math.floor(index / 2) * 44, 144, 36], text, { size: 14 });
+            const bx = 12 + (index % 2) * 152;
+            const by = 28 + Math.floor(index / 2) * 44;
+            if (interactive) {
+                if (count < item.orders.length) ui.box(checklist, [bx - 2, by - 2, 148, 40], p.amber);
+                button(`check-${item.bay}`, checklist, [bx, by, 144, 36], () => open(item.bay), {
+                    label: text, labelSize: 15, tone: 'plain',
+                });
+            }
+            else ui.label(checklist, [bx, by, 144, 36], text, { size: 14 });
         });
         const crew = ui.frame(root, [348, 572, 532, 136], p.ink);
         const capacity = stationCrew(state).reduce((sum, member) => sum + stationShiftCapacity(state, member), 0);
-        ui.label(crew, [12, 0, 420, 24], `Crew specialties · ${run.work.filter(job => job.leadId).length}/${capacity} station shifts`,
+        ui.label(crew, [12, 0, 420, 24], `Your crew · ${run.work.filter(job => job.leadId).length}/${capacity} station shifts`,
             { display: true, size: 19, fit: 16 });
         if (interactive) button('morale-info', crew, [442, 1, 74, 23], () => { moraleInfo = !moraleInfo; dirty = true; }, { label: 'Morale', labelSize: 14, tone: moraleInfo ? 'hero' : 'plain' });
         state.crew.forEach((member, index) => {
@@ -416,12 +458,12 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         if (interactive) {
             button('aries', ops, [8, 6, 145, 31], () => open('aries'), { label: 'A.R.I.E.S.', labelSize: 15, tone: 'hero' });
             showAriesBadge(ui, ops, [8, 38, 145, 22], terminalStatus);
-            button('roverChecklist', ops, [163, 8, 133, 44], () => open(rover ? 'roverCargo' : 'roverChecklist'), { label: rover ? 'Field supplies' : 'Rover checklist', labelSize: 13 });
+            button('roverChecklist', ops, [163, 8, 133, 44], () => open(rover ? 'roverCargo' : 'roverChecklist'), { label: rover ? 'Rover supplies' : 'Rover trip', labelSize: 13 });
             button('tasks', ops, [305, 8, 55, 44], () => open('assignments'), { label: 'Tasks', labelSize: 13 });
             button('log', ops, [8, 64, 58, 52], () => open('log'), { label: 'Log', labelSize: 14 });
             button('audio', ops, [73, 64, 63, 52], () => open('audio'), { label: 'Audio', labelSize: 14 });
             button('endSol', ops, [144, 64, 216, 52], requestEndSol, { label: status?.review ? 'Review & End Sol' : 'End Sol', tone: 'primary' });
-        } else ui.label(ops, [12, 17, 344, 92], 'Operations control', { display: true, size: 26, center: true, color: p.cyan });
+        } else ui.label(ops, [12, 17, 344, 92], 'Controls', { display: true, size: 26, center: true, color: p.cyan });
         if (interactive && moraleInfo) {
             const morale = ui.frame(root, [371, 334, 504, 224], p.ink, p.teal);
             ui.label(morale, [14, 8, 454, 31], 'Crew Morale', { display: true, size: 23 });
@@ -499,20 +541,54 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             ui.label(box, [22, 184, 846, 46], run.outcome[1] ?? '', { size: 17, color: p.amber, wrap: true });
             button('planning', box, [570, 252, 302, 56], () => { continueAfterOutcome(state); dirty = true; }, { label: 'Open operations', tone: 'primary' });
         } else if (run.phase === 'report') {
-            const box = console([120, 60, 1040, 596], `Sol ${run.reportSol} report`, 'STATION & EXPEDITION');
-            const max = 7;
+            const box = console([98, 48, 1084, 624], `Sol ${run.reportSol} report`, 'WHAT YOUR CREW DID TODAY');
+            const weatherName = state.timeline[state.timeline.length - 1]?.weather ?? state.conditions.weather;
+            const weatherIcon = WEATHER_ICONS[weatherName];
+            if (weatherIcon) ui.image(box, [998, 18, 36, 36], weatherIcon);
+            const entries = run.lastReportCrew;
+            state.crew.forEach((member, i) => {
+                const entry = entries.find(item => item.memberId === member.id) ?? {
+                    memberId: member.id, taskTitle: 'Station duty', status: 'rest' as const, progress: 1, target: 1, detail: 'Active',
+                };
+                const accent = entry.status === 'done' || entry.status === 'rest' ? p.good : entry.status === 'held' ? p.amber : p.cyan;
+                const card = ui.frame(box, [22 + i * 256, 86, 244, 174], p.raised, accent);
+                ui.image(card, [10, 10, 52, 64], member.portraitPath);
+                ui.label(card, [68, 10, 160, 24], member.name.split(' ')[0]!, { display: true, size: 19 });
+                ui.label(card, [68, 34, 160, 18], `${member.health} HP · ${member.morale}% Morale`, { size: 11, color: member.morale < LOW_MORALE ? p.bad : p.secondary });
+                ui.label(card, [68, 54, 160, 20], entry.detail, { size: 13, color: accent });
+                ui.label(card, [10, 82, 216, 48], entry.taskTitle, { size: 14, wrap: true, top: true, color: p.text });
+                const ratio = entry.target > 0 ? Math.min(1, Math.max(0.08, entry.progress / entry.target)) : 1;
+                const fullWidth = Math.round(216 * ratio);
+                ui.box(card, [10, 140, 216, 12], p.well);
+                const startWidth = profile.reducedMotion ? fullWidth : 0;
+                const fill = ui.box(card, [10, 140, startWidth, 12], accent);
+                reportBars.push({ entity: fill, targetWidth: fullWidth, delayMs: i * 90 });
+            });
+            const max = 4;
             const history = state.lastSolReport;
             history.slice(reportPage * max, reportPage * max + max).forEach((line, i) => {
-                ui.label(box, [22, 88 + i * 44, 968, 42], line, { size: 16, wrap: true, color: /held|reset|Storm/.test(line) ? p.amber : p.text });
+                ui.label(box, [22, 276 + i * 38, 1020, 36], line, { size: 15, wrap: true, color: /held|reset|Storm|not enough/.test(line) ? p.amber : p.text });
             });
-            ui.label(box, [22, 408, 970, 28], `Station   ${resourceLine(state.resources)}`, { size: 15, color: p.cyan });
-            if (run.rover) ui.label(box, [22, 441, 970, 28], `Rover     ${resourceLine(run.rover.resources, true)}`, { size: 15, color: p.amber });
-            if (history.length > max) {
-                button('reportPrev', box, [22, 512, 100, 44], () => { reportPage--; dirty = true; }, { label: 'Previous', disabled: !reportPage });
-                button('reportNext', box, [132, 512, 100, 44], () => { reportPage++; dirty = true; }, { label: 'More', disabled: (reportPage + 1) * max >= history.length });
+            ui.label(box, [22, 444, 90, 26], 'Station', { size: 14, color: p.cyan });
+            RESOURCE_KEYS.forEach((key, idx) => {
+                const rx = 114 + idx * 184;
+                ui.image(box, [rx, 446, 20, 20], RESOURCE_ICONS[key]);
+                ui.label(box, [rx + 26, 444, 150, 26], `${state.resources[key]}${key === 'oxygen' ? '%' : ''} ${RESOURCE_LABELS[key]}`, { size: 14, color: p.text });
+            });
+            if (run.rover) {
+                ui.label(box, [22, 478, 90, 26], 'Rover', { size: 14, color: p.amber });
+                RESOURCE_KEYS.forEach((key, idx) => {
+                    const rx = 114 + idx * 184;
+                    ui.image(box, [rx, 480, 20, 20], RESOURCE_ICONS[key]);
+                    ui.label(box, [rx + 26, 478, 150, 26], `${run.rover!.resources[key]} ${RESOURCE_LABELS[key]}`, { size: 14, color: p.amber });
+                });
             }
-            if (pendingBriefing) ui.label(box, [300, 514, 390, 44], 'A.R.I.E.S. is drafting the next briefing…', { size: 14, color: p.cyan });
-            button('nextBrief', box, [736, 504, 268, 56], closeReport, { label: state.result ? 'View debrief' : 'Open next briefing', tone: 'primary' });
+            if (history.length > max) {
+                button('reportPrev', box, [22, 534, 100, 44], () => { reportPage--; dirty = true; }, { label: 'Previous', disabled: !reportPage });
+                button('reportNext', box, [132, 534, 100, 44], () => { reportPage++; dirty = true; }, { label: 'More', disabled: (reportPage + 1) * max >= history.length });
+            }
+            if (pendingBriefing) ui.label(box, [300, 536, 390, 44], 'A.R.I.E.S. is drafting the next briefing…', { size: 14, color: p.cyan });
+            button('nextBrief', box, [776, 530, 268, 52], closeReport, { label: state.result ? 'View debrief' : 'Open next briefing', tone: 'primary' });
         } else if (state.result) {
             const result = state.result;
             const box = console([148, 88, 984, 544], result.outcome === 'victory' ? 'Survey complete' : 'Mission ended', `SOL ${result.solReached} · ${result.researchPointsEarned} RESEARCH EARNED`);
@@ -532,6 +608,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         dropTarget = null;
         textInput = null;
         trackLabel = null;
+        reportBars = [];
         dragged.clear();
         if (surface !== null) world.despawn(surface);
         // A new backdrop must exist before the UI surface, so the UI is drawn on top of it.
@@ -549,7 +626,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         if (!planning) phaseOverlay();
         else if (panel === 'solReview') {
             const content = console([181, 166, 918, 372], 'Review End Sol');
-            showSolReview(ui, content, button, status!, openAction, () => open(null), endSol);
+            showSolReview(ui, content, button, state, status!, openAction, () => open(null), endSol);
         }
         else if (panel) {
             const titles: Partial<Record<Panel, string>> = { roverChecklist: 'Rover Checklist', cargo: 'Station storage', roverCargo: 'Expedition supplies',
@@ -611,13 +688,25 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             } else {
                 showWorkConsole({ state, ui, content, button, panel, selected,
                     methods, selectMethod: (id, technique) => { if (technique) methods.set(id, technique); else methods.delete(id); dirty = true; },
+                    pendingLead: selected ? (pendingLeads.get(selected) ?? null) : null,
+                    selectLead: (orderId, leadId) => { pendingLeads.set(orderId, leadId); dirty = true; },
+                    clearPendingLead: orderId => { pendingLeads.delete(orderId); },
                     chooseDefault: id => { selected = id; }, change, open, leadDrag,
                     setDrop: (entity, orderId) => { dropTarget = { entity, orderId }; }, dragging: entity => dragged.has(entity),
                 });
             }
         }
-        if (training) showTrainingGuide(ui, surface, button, state, status, guideVisible, planning && !panel,
+        // A new player gets the tutorial coach: it points at one button at a time. It takes the place
+        // of the training guide, except where it sends the player to the guide for an unusual fix.
+        const step = training && tutorial.active
+            ? runStep(state, status, { panel, selected, resource: selectedResource, technique: id => methods.get(id) }, tutorial.tourStep) : null;
+        if (step?.done) tutorial.markDone();
+        if (!training || !step || step.showGuide) showTrainingGuide(ui, surface, button, state, status, guideVisible || Boolean(step), planning && !panel,
             () => { guideVisible = !guideVisible; dirty = true; }, openAction);
+        coach = step && showCoach(ui, surface, step, key => controls.get(key), {
+            next: () => { tutorial.tourStep++; dirty = true; },
+            skip: () => { tutorial.finish(); dirty = true; },
+        }, button);
         if (lastKey) {
             const next = controls.get(lastKey) ?? controls.values().next().value;
             if (next !== undefined) focus.focus(next, true);
@@ -632,6 +721,25 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         backdropMotion.tick();
         ambience();
         if (dirty && !dragged.size) render();
+        coach?.tick();
+        if (!profile.reducedMotion) {
+            const pulse = 0.18 + 0.32 * (0.5 + 0.5 * Math.sin(performance.now() * 0.005));
+            if (objectiveGlow !== null && world.valid(objectiveGlow)) {
+                setVisualColor(world, objectiveGlow, { r: 0.4, g: 0.85, b: 0.9, a: pulse });
+            }
+            if (warningGlow !== null && world.valid(warningGlow)) {
+                setVisualColor(world, warningGlow, { r: 0.93, g: 0.69, b: 0.4, a: pulse });
+            }
+            if (reportBars.length && run.phase === 'report') {
+                const elapsed = performance.now() - reportAnimStart;
+                for (const bar of reportBars) {
+                    if (!world.valid(bar.entity)) continue;
+                    const t = Math.min(1, Math.max(0, (elapsed - bar.delayMs) / 600));
+                    const eased = 1 - Math.pow(1 - t, 3);
+                    world.update(bar.entity, UINode, node => { node.width = px(Math.round(bar.targetWidth * eased)); });
+                }
+            }
+        }
         if (trackLabel !== null && shownTrack !== currentMissionMusic()) {
             shownTrack = currentMissionMusic();
             ui.setText(trackLabel, musicStatus());
@@ -648,7 +756,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             const target = dropTarget && uiNodeWorldBox(world, dropTarget.entity);
             if (current && target && dropTarget && Math.abs(current.cx - target.cx) <= target.hw + current.hw * 0.4 &&
                 Math.abs(current.cy - target.cy) <= target.hh + current.hh * 0.4) {
-                change(() => assignWork(state, dropTarget!.orderId, card.crewId));
+                pendingLeads.set(dropTarget!.orderId, card.crewId);
             }
             world.update(card.entity, UINode, node => {
                 node.position = UIPositionType.Absolute;

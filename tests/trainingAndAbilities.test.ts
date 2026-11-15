@@ -71,7 +71,8 @@ test('Double Shift works on three Sols, preserves unfinished work, and blocks th
     staff(state, 'water', scientist.id);
     assert.equal(acceptWork(state, findOrder(state, 'spares')!, []), null);
     assert.match(assignWork(state, 'spares', scientist.id)!, /slots are full/);
-    assert.equal(resourceForecast(state, 'station').tasks.filter(flow => !flow.hold).length, 2);
+    // Unstaffed scheduled tasks auto-assign an available station lead on End Sol.
+    assert.equal(resourceForecast(state, 'station').tasks.filter(flow => !flow.hold).length, 3);
     const projected = previewEndSol(state);
     assert.equal(state.sol, 1);
     assert.equal(projected.crew.find(member => member.id === scientist.id)!.stamina, scientist.stamina - 14);
@@ -90,6 +91,7 @@ test('Double Shift works on three Sols, preserves unfinished work, and blocks th
         plan(state);
         assert.equal(state.sol, sol);
         assert.equal(stationShiftCapacity(state, scientist), 0);
+        if (!state.tharsis.work.some(job => job.orderId === 'greens')) assert.equal(acceptWork(state, findOrder(state, 'greens')!, ['conserve']), null);
         assert.match(assignWork(state, 'greens', scientist.id)!, /recovery through Sol 6/);
         assert.match(chooseFieldCrew(state, scientist.id)!, /Recovering/);
         advanceSol(state);
@@ -251,7 +253,6 @@ test('following the tutorial guide wins in six Sols and grants research once', (
     staff(state, 'suits', 'crew_captain');
     const status = assessMission(state, defaultLoad(state));
     assert.equal(status.dockReserves?.oxygen, 15);
-    assert.ok(status.notices.some(notice => notice.actions.some(action => action.label === 'Run electrolysis')));
     assert.equal(activateUpgrade(state, { kind: 'electrolysis' }), null);
     advanceSol(state);
     plan(state);
@@ -277,8 +278,8 @@ test('objectives expose exact load and resource gaps and review an otherwise mis
     const state = run(TRAINING_RUN);
     plan(state);
     const first = assessMission(state, defaultLoad(state));
-    assert.match(first.dispatch.find(issue => issue.kind === 'checks')!.message, /Inspect drivetrain/);
-    assert.ok(first.review?.includes('Sol 7'));
+    assert.match(first.dispatch.find(issue => issue.kind === 'checks')!.message, /Check rover wheels/);
+    assert.equal(first.review, null);
     readyRover(state, 'crew_captain');
     const load = defaultLoad(state);
     load.resources.oxygen -= 2;
@@ -286,7 +287,7 @@ test('objectives expose exact load and resource gaps and review an otherwise mis
     state.resources.oxygen = 1;
     const before = structuredClone(state);
     const warning = assessMission(state, defaultLoad(state));
-    assert.match(warning.review!, /oxygen reached zero/);
+    assert.match(warning.review!, /ran out of oxygen/);
     assert.ok(warning.notices.some(notice => notice.actions.some(action => action.label === 'Use Oxygen Tank')));
     assert.deepEqual(state, before);
     advanceSol(state);

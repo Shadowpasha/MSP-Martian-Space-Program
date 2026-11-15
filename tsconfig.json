@@ -12,6 +12,7 @@
     "rootDir": ".",
     "paths": {
       "esengine": ["./.esengine/sdk/index.d.ts"],
+      "esengine/sound": ["./.esengine/sdk/sound/index.d.ts"],
       "esengine/spine": ["./.esengine/sdk/spine/index.d.ts"],
       "esengine/tilemap": ["./.esengine/sdk/tilemap/index.d.ts"],
       "esengine/terrain": ["./.esengine/sdk/terrain/index.d.ts"],

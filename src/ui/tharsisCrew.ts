@@ -26,23 +26,32 @@ export function showCrewAbilities(ui: FlightUi, content: Entity, button: RunButt
     ui.label(details, [122, 46, 403, 26], `${area === 'rover' ? 'Rover' : 'Station'} · ${member.health} HP · ${member.morale}% Morale`, { size: 15, color: p.secondary });
     ui.label(details, [122, 79, 403, 25], crewAbilityStatus(state, member), { size: 15, color: p.amber });
     ui.label(details, [18, 141, 506, 29], ability.name, { size: 24, display: true, color: p.cyan });
-    ui.label(details, [18, 179, 506, 55], ability.description, { size: 16, wrap: true, top: true });
+    ui.label(details, [18, 175, 506, 52], ability.description, { size: 15, wrap: true, top: true });
+    const bestTime: Record<typeof member.role, string> = {
+        captain: 'Best time: Before picking a news choice to see what happens first.',
+        scientist: 'Best time: Early on when you have lots of station tasks to finish.',
+        engineer: 'Best time: When you need an extra Repair Kit and have 4 Materials.',
+        botanist: 'Best time: When you have a Seed Pod and want extra Food in 2 days.',
+        pilot: 'Best time: When the rover is stuck in a dust storm.',
+        medic: 'Best time: When a crew member gets hurt and you have a Medkit.',
+    };
+    ui.label(details, [18, 228, 506, 36], bestTime[member.role], { size: 14, color: p.cyan, wrap: true, top: true });
     if (member.role === 'scientist' && !doubleShift(state, member)) {
-        ui.label(details, [18, 236, 506, 28], `Work Sols ${state.sol}–${state.sol + 2} · Recover Sols ${state.sol + 3}–${state.sol + 5}`,
-            { size: 15, color: p.amber });
+        ui.label(details, [18, 266, 506, 26], 'Works twice as fast for 3 days, then rests for 3 days.',
+            { size: 14, color: p.amber });
     }
     const abilityProblem = crewAbilityProblem(state, area, member.id, member.role === 'medic' ? member.id : undefined);
-    if (abilityProblem) ui.label(details, [18, 280, 506, 50], abilityProblem, { size: 15, color: p.secondary, wrap: true, top: true });
+    if (abilityProblem) ui.label(details, [18, 294, 506, 44], abilityProblem, { size: 14, color: p.secondary, wrap: true, top: true });
     if (member.role === 'medic' && !abilityProblem) {
         const targets = local.crew.filter(target => target.health > 0);
-        targets.forEach((target, index) => button(`triage-${target.id}`, details, [18 + index % 2 * 253, 280 + Math.floor(index / 2) * 55, 242, 45],
+        targets.forEach((target, index) => button(`triage-${target.id}`, details, [18 + index % 2 * 253, 294 + Math.floor(index / 2) * 52, 242, 44],
             () => change(() => activateCrewAbility(state, area, member.id, target.id)), {
                 label: `Treat ${target.name.split(' ')[0]}`, tone: 'hero',
             }));
     } else if (member.role !== 'captain') {
-        const label = member.role === 'scientist' ? 'Activate Double Shift' :
-            member.role === 'engineer' ? 'Fabricate Repair Kit' : member.role === 'botanist' ? 'Plant Seed Pod' : 'Arm Storm Override';
-        button('activate-specialty', details, [18, 342, 398, 48], () => change(() => activateCrewAbility(state, area, member.id)), {
+        const label = member.role === 'scientist' ? 'Work Double Speed' :
+            member.role === 'engineer' ? 'Make a Repair Kit' : member.role === 'botanist' ? 'Plant Seed Pod' : 'Drive Through Storm';
+        button('activate-specialty', details, [18, 346, 398, 48], () => change(() => activateCrewAbility(state, area, member.id)), {
             label, disabled: Boolean(abilityProblem), tone: 'primary',
         });
     }

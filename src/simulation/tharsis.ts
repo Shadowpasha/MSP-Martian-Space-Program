@@ -7,7 +7,7 @@ import { expeditionOf, hazardWeather, INSTRUMENTS, type Expedition, type Expedit
 import type { OutpostGameState, WeatherForecast } from './solEngine';
 import { appendLog, applyResourceDelta, canAffordCost, clamp, resourceChanges, round1, shortfalls, spend } from './stateOps';
 import { dutyMoraleLoss, FIELD_REST_MORALE, heatingPower, radiationAfterDose, radiationEffects, REST_MORALE } from './tharsisConditions';
-import { advanceWork, stationCrew, type WorkAssignment, type WorkFlow } from './tharsisWork';
+import { advanceWork, stationCrew, type CrewReportEntry, type WorkAssignment, type WorkFlow } from './tharsisWork';
 import { authoredBriefing, type SurveyBriefing } from './tharsisEvents';
 import { fieldDutyProblem, harvestTray, startRecovery, type CrewAbilityState } from './crewAbilities';
 import { hasUpgrade, releaseEmergencyStores, type UpgradeState } from './tharsisUpgrades';
@@ -56,6 +56,7 @@ export interface TharsisRun {
     stormBriefing: SurveyBriefing | null;
     outcome: string[];
     reportSol: number;
+    lastReportCrew: CrewReportEntry[];
     briefingCommitted: boolean;
     recentSystems: string[];
 }
@@ -83,7 +84,7 @@ export function createTharsis(state: OutpostGameState, seed: number, id: Expedit
             recorderUsed: false, crossTraining: null, rotation: null },
         fieldPair: [], rover: null, hours: 0, returnedWithData: false, shelter: 'off',
         briefing: authoredBriefing(1, 'station', seed, null, expedition, missionDeadline(state)), previewedChoice: null,
-        stormBriefing: null, outcome: [], reportSol: 0,
+        stormBriefing: null, outcome: [], reportSol: 0, lastReportCrew: [],
         briefingCommitted: true, recentSystems: [],
     };
     state.lastEventTitle = run.briefing.title;
@@ -355,14 +356,14 @@ function applyDutyMorale(state: TharsisState, crew: readonly CrewMember[], condi
 
 function degradeArea(state: TharsisState, crew: CrewMember[], conditions: ConditionState, shortOnSupplies: boolean, unheated: boolean, area: string, report: string[]) {
     const radiation = radiationEffects(conditions.radiation);
-    const health = radiation.health + (unheated ? 14 : shortOnSupplies ? 10 : 0);
-    const morale = radiation.morale + (unheated ? 10 : shortOnSupplies ? 6 : 0);
+    const health = radiation.health + (unheated ? 7 : shortOnSupplies ? 5 : 0);
+    const morale = radiation.morale + (unheated ? 5 : shortOnSupplies ? 3 : 0);
     if (!health) return;
     for (const member of crew) if (member.health > 0) member.health = clamp(member.health - health, 0, 100);
     const loss = round1(morale * state.skillModifiers.moraleDecayMult);
     changeAreaMorale(crew, conditions, -loss);
-    const reasons = [radiation.health && `${radiation.level.toLowerCase()} radiation`, unheated && 'insufficient heating power',
-        shortOnSupplies && !unheated && 'life-support shortage'].filter(Boolean).join(' and ');
+    const reasons = [radiation.health && `${radiation.level.toLowerCase()} radiation`, unheated && 'not enough heat',
+        shortOnSupplies && !unheated && 'low food, water, or air'].filter(Boolean).join(' and ');
     report.push(`${area} crew · ${reasons} · −${health} HP and −${loss} Morale per living crew member.`);
 }
 
@@ -394,7 +395,7 @@ function stationBudget(state: TharsisState): DailyBudget {
     const heating = round1(heatingPower(conditions.temperatureC) * mods.energyConsumptionMult);
     const filterPower = round1((dust ? day === 2 ? 5 : 3 : haze ? 1 : 0) * mods.energyConsumptionMult);
     const filterOxygen = round1((dust ? day === 2 ? 3 : 2 : haze ? 1 : 0) * mods.oxygenConsumptionMult);
-    const stormPower = dust ? shelter === 'off' ? 7 : shelter === 'essential' ? 2 : 0 : 0;
+    const stormPower = dust ? shelter === 'off' ? 4 : shelter === 'essential' ? 1 : 0 : 0;
     const energy = round1((4 + stormPower) * mods.energyConsumptionMult + filterPower + heating);
     const oxygen = round1((2 + count * 0.5) * mods.oxygenConsumptionMult + filterOxygen);
     const food = count * (state.rationPolicy === 'full' ? 1 : 0.5) * mods.foodConsumptionMult;
@@ -603,21 +604,48 @@ export function completionShortfalls(state: TharsisState): string[] {
 export function resolveTharsisSol(state: TharsisState, report: string[]) {
     const day = stormDay(state);
     const unheated = stationUpkeep(state, stationBudget(state), report);
-    const { completed, worked } = advanceWork(state, { storm: day > 0, unheated }, report);
+    const { completed, worked, crewActivity } = advanceWork(state, { storm: day > 0, unheated }, report);
     startRecovery(state, report);
     const crew = stationCrew(state);
     applyDutyMorale(state, crew, state.conditions, worked, 'Station', report);
     const shortOnSupplies = state.resources.food <= 0 || state.resources.water <= 0 || state.resources.oxygen <= 0;
     degradeArea(state, crew, state.conditions, shortOnSupplies, unheated, 'Station', report);
+    const roverBefore = state.tharsis.rover ? { phase: state.tharsis.rover.phase, crewIds: [...state.tharsis.rover.crewIds] } : null;
     const fieldFailure = advanceRover(state, day, report);
+    const { site, surveyHours } = expeditionFor(state);
+    state.tharsis.lastReportCrew = state.crew.map(member => {
+        const stationEntry = crewActivity.get(member.id);
+        if (stationEntry) return stationEntry;
+        if (roverBefore?.crewIds.includes(member.id)) {
+            const detail = roverBefore.phase === 'site'
+                ? `${state.tharsis.hours}/${surveyHours}h data`
+                : roverBefore.phase === 'returning' ? 'Driving home' : `Driving to ${site}`;
+            return {
+                memberId: member.id,
+                taskTitle: 'Rover expedition',
+                status: 'rover',
+                progress: state.tharsis.rover ? 1 : 2,
+                target: 2,
+                detail,
+            };
+        }
+        return {
+            memberId: member.id,
+            taskTitle: 'Rested at station',
+            status: 'rest',
+            progress: 1,
+            target: 1,
+            detail: `+${REST_MORALE} Morale`,
+        };
+    });
     const missing = completionShortfalls(state);
     if (day && !state.resources.energy) {
         changeAreaMorale(stationCrew(state), state.conditions, -8);
         report.push('Station batteries depleted. Life-support circuits are running on emergency power.');
     }
-    const collapse = fieldFailure ?? (state.conditions.radiation >= 100 ? 'Station radiation reached the emergency abort threshold.' :
-        state.resources.oxygen <= 0 ? 'Station oxygen reached zero.' : state.conditions.morale <= 0 ? 'Station morale collapsed.' :
-        stationCrew(state).every(member => member.health <= 0) ? 'The station crew was incapacitated.' : null);
+    const collapse = fieldFailure ?? (state.conditions.radiation >= 100 ? 'Radiation got too high at the station.' :
+        state.resources.oxygen <= 0 ? 'The station ran out of oxygen.' : state.conditions.morale <= 0 ? 'The crew got too stressed to keep going.' :
+        stationCrew(state).every(member => member.health <= 0) ? 'The station crew got too hurt to continue.' : null);
     if (!collapse && state.tharsis.returnedWithData && !missing.length) state.goal.completed = true;
     if (!state.goal.completed && state.tharsis.returnedWithData && missing.length) report.push(`Docked · restore reserves: ${missing.join(', ')}.`);
     return { completed, collapse };

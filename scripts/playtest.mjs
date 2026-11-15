@@ -88,19 +88,37 @@ const schemas = {
     }), 2, 3) }),
 };
 
+let hasWebExport = true;
 try {
     await stat(resolve(buildDir, 'index.html'));
 } catch {
-    console.error(`No web export in ${buildDir}. Export the project as Web into dist/web in Estella Editor first.`);
-    process.exit(1);
+    hasWebExport = false;
+    console.log(`No web export in ${buildDir} (running A.R.I.E.S. API bridge only for Estella Editor).`);
 }
 
 const apiKey = env('GEMINI_API_KEY') || env('VITE_GEMINI_API_KEY');
 const model = env('GEMINI_MODEL') || modelName;
 const gemini = apiKey ? new GoogleGenAI({ apiKey, apiVersion: 'v1beta' }) : null;
 
-function sendJson(response, status, data) {
-    response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+function isAllowedOrigin(origin) {
+    if (allowedOrigins.has(origin)) return true;
+    const isLocalHost = host === '127.0.0.1' || host === 'localhost';
+    return isLocalHost && (origin === 'null' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin));
+}
+
+function corsHeaders(origin) {
+    return isAllowedOrigin(origin ?? '')
+        ? {
+            'Access-Control-Allow-Origin': origin || '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            Vary: 'Origin',
+        }
+        : {};
+}
+
+function sendJson(response, status, data, origin = '') {
+    response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...corsHeaders(origin) });
     response.end(JSON.stringify(data));
 }
 
@@ -130,26 +148,32 @@ function rateLimit(request) {
 }
 
 async function handlePlanner(request, response) {
-    if (request.method === 'GET') {
-        sendJson(response, 200, { model: gemini && perDay > 0 ? model : null });
+    const origin = request.headers.origin ?? '';
+    if (request.method === 'OPTIONS') {
+        response.writeHead(204, { 'Cache-Control': 'no-store', ...corsHeaders(origin) });
+        response.end();
         return;
     }
-    // Only pages of this game may use the key: browsers always send Origin with a POST.
-    if (!allowedOrigins.has(request.headers.origin ?? '')) {
-        sendJson(response, 403, { error: 'Open A.R.I.E.S. from the game. (Is MSP_PUBLIC_URL set to this site?)' });
+    if (request.method === 'GET') {
+        sendJson(response, 200, { model: gemini && perDay > 0 ? model : null }, origin);
+        return;
+    }
+    // Only pages of this game (or local dev previews) may use the key.
+    if (!isAllowedOrigin(origin)) {
+        sendJson(response, 403, { error: 'Open A.R.I.E.S. from the game. (Is MSP_PUBLIC_URL set to this site?)' }, origin);
         return;
     }
     if (request.method !== 'POST' || request.headers['content-type']?.split(';')[0]?.trim() !== 'application/json') {
-        sendJson(response, 400, { error: 'Expected a JSON task request.' });
+        sendJson(response, 400, { error: 'Expected a JSON task request.' }, origin);
         return;
     }
     if (!gemini) {
-        sendJson(response, 503, { error: 'No Gemini API key is set on this server.' });
+        sendJson(response, 503, { error: 'No Gemini API key is set on this server.' }, origin);
         return;
     }
     const limited = rateLimit(request);
     if (limited) {
-        sendJson(response, 429, { error: limited });
+        sendJson(response, 429, { error: limited }, origin);
         return;
     }
 
@@ -159,7 +183,7 @@ async function handlePlanner(request, response) {
         bytes += chunk.length;
         if (bytes > maxPlannerRequestBytes) {
             request.resume();
-            sendJson(response, 413, { error: 'Task request is too large.' });
+            sendJson(response, 413, { error: 'Task request is too large.' }, origin);
             return;
         }
         chunks.push(chunk);
@@ -168,16 +192,16 @@ async function handlePlanner(request, response) {
     try {
         plan = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     } catch {
-        sendJson(response, 400, { error: 'Invalid task request JSON.' });
+        sendJson(response, 400, { error: 'Invalid task request JSON.' }, origin);
         return;
     }
     const { systemInstruction, input, kind } = plan ?? {};
     if (typeof systemInstruction !== 'string' || !systemInstruction.trim() || typeof input !== 'string' || !input.trim()) {
-        sendJson(response, 400, { error: 'The task request needs an instruction and a prompt.' });
+        sendJson(response, 400, { error: 'The task request needs an instruction and a prompt.' }, origin);
         return;
     }
     if (kind !== undefined && kind !== 'discussion' && kind !== 'briefing') {
-        sendJson(response, 400, { error: 'Unknown gameplay request type.' });
+        sendJson(response, 400, { error: 'Unknown gameplay request type.' }, origin);
         return;
     }
 
@@ -197,15 +221,15 @@ async function handlePlanner(request, response) {
         const output = result.output_text?.trim() || result.outputs?.map(part => part.text ?? '').join('').trim();
         if (!output) {
             console.warn(`A.R.I.E.S. ${kind ?? 'plan'} · Gemini returned an empty response (${result.status ?? 'no status'})`);
-            sendJson(response, upstreamFailed, { error: 'Gemini returned an empty response.' });
+            sendJson(response, upstreamFailed, { error: 'Gemini returned an empty response.' }, origin);
             return;
         }
         if (kind && !isJsonObject(output)) {
             console.warn(`A.R.I.E.S. ${kind} · Gemini returned incomplete JSON (${output.length} chars)`);
-            sendJson(response, upstreamFailed, { error: 'Gemini returned an incomplete gameplay response.' });
+            sendJson(response, upstreamFailed, { error: 'Gemini returned an incomplete gameplay response.' }, origin);
             return;
         }
-        sendJson(response, 200, { text: output });
+        sendJson(response, 200, { text: output }, origin);
     } catch (error) {
         const status = error instanceof ApiError || typeof error?.status === 'number' ? error.status : null;
         const reason = status === 429 ? 'Gemini quota or rate limit reached.'
@@ -213,7 +237,7 @@ async function handlePlanner(request, response) {
             : status === 503 ? 'Gemini is overloaded. Try again shortly.'
             : status ? `Gemini request failed (HTTP ${status}).` : 'Could not reach Gemini.';
         console.warn(`A.R.I.E.S. ${kind ?? 'plan'} · ${reason} ${String(error?.message ?? error).slice(0, 300)}`);
-        sendJson(response, upstreamFailed, { error: reason });
+        sendJson(response, upstreamFailed, { error: reason }, origin);
     }
 }
 
@@ -249,6 +273,10 @@ createServer(async (request, response) => {
             return;
         }
         const siteFile = siteFiles.get(url.pathname);
+        if (!siteFile && !hasWebExport) {
+            response.writeHead(404).end();
+            return;
+        }
         const file = siteFile ?? resolve(buildDir, '.' + url.pathname, url.pathname.endsWith('/') ? 'index.html' : '');
         if (!siteFile && !file.startsWith(resolve(buildDir) + sep)) {
             response.writeHead(404).end();

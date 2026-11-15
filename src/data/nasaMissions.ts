@@ -92,7 +92,7 @@ export const NASA_MISSIONS: NasaMission[] = [
                         goalFlag: 'radiation_measured',
         requiredEquipment: { radDetector: 1 },
         image: 'assets/textures/outpost/events/event_solar_flare_alert_256x144.png',
-        expedition: { id: 'radiation', deadline: 16 },
+        expedition: { id: 'radiation', deadline: 20 },
     },
     {
         id: 'ice_hunter',
@@ -103,7 +103,7 @@ export const NASA_MISSIONS: NasaMission[] = [
         objective: 'Drill 48 hours of ice cores at the crater rim',
         realBasis: {
             mission: 'Phoenix lander (2008) and the RIMFAX ground radar on Perseverance',
-            fact: 'In 2008 the Phoenix lander dug a trench and found bright, dice-sized chunks. Four days later they were gone: they were water ice turning straight into vapour.',
+            fact: 'In 2008 the Phoenix lander dug a trench near Mars\'s north pole and found bright, dice-sized chunks of water ice that turned straight into vapour four days later. At Jezero Crater, Perseverance\'s RIMFAX radar scans underground rock layers.',
             sources: [SRC.phoenixIce, SRC.perseverance],
         },
         cardBasis: 'the Phoenix lander',
@@ -112,7 +112,7 @@ export const NASA_MISSIONS: NasaMission[] = [
                         goalFlag: 'ice_core_collected',
         requiredEquipment: { iceDrill: 1 },
         image: 'assets/textures/mission_2.png',
-        expedition: { id: 'ice', deadline: 18 },
+        expedition: { id: 'ice', deadline: 22 },
     },
     {
         id: 'moon_shadow_ice',
@@ -131,7 +131,7 @@ export const NASA_MISSIONS: NasaMission[] = [
         // LCROSS hit Cabeus, so the fact shown is only true at this site.
         site: { name: 'Cabeus Crater', coords: '84.9S, 35.5W', distanceMP: 35 },
                         goalFlag: 'ice_core_collected',
-        requiredEquipment: { windSampler: 1 },
+        requiredEquipment: { iceDrill: 1 },
         image: 'assets/textures/missions/map_lunar_south_pole_320x180.png',
     },
     {

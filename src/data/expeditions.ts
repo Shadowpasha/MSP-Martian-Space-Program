@@ -47,7 +47,7 @@ export const EXPEDITIONS: Record<ExpeditionId, Expedition> = {
         legs: { pilot: 1, backup: 2 },
         hazard: { kind: 'dust', firstSol: 8, spread: 3, exposure: 1 },
         temperature: { clear: -58, warning: -64, hazard: -76 },
-        intro: 'Site A lies beyond the ridge. Prepare the rover, instruments, supplies, and field crew. Return the crew and 48 consecutive hours of data by Sol {deadline}. Seasonal dust risk is elevated. The launch checklist tracks your work orders.',
+        intro: 'Site A is just past the ridge. Get the rover, weather tool, supplies, and 2 crew ready. Bring the crew back with 48 hours of weather data by Sol {deadline}. Watch out for dust storms!',
         aries: 'the Tharsis Ridge weather survey',
         ariesExamples: 'MEDA wind and pressure checks, scheduled relay contacts, power load isolation, water-recovery conductivity checks and oxygen-generator inlet faults',
     },
@@ -56,7 +56,7 @@ export const EXPEDITIONS: Record<ExpeditionId, Expedition> = {
         legs: { pilot: 1, backup: 2 },
         hazard: { kind: 'solar', firstSol: 7, spread: 3, exposure: 1.35 },
         temperature: { clear: -55, warning: -55, hazard: -57 },
-        intro: 'Hawksbill Gap is an open slope with no cover. Prepare the rover, the RAD detector, supplies, and field crew. Return the crew and 72 consecutive hours of radiation readings by Sol {deadline}. The Sun is active: a solar particle storm is expected. The launch checklist tracks your work orders.',
+        intro: 'Hawksbill Gap is an open hill with no cover. Get the rover, radiation sensor, supplies, and 2 crew ready. Bring back 72 hours of readings by Sol {deadline}. A solar storm is coming!',
         aries: 'the Hawksbill Gap radiation survey (a RAD-style detector measuring surface radiation)',
         ariesExamples: 'RAD-style detector calibration and dose checks, solar particle alerts, scheduled relay contacts, power load isolation and oxygen-generator inlet faults',
     },
@@ -65,7 +65,7 @@ export const EXPEDITIONS: Record<ExpeditionId, Expedition> = {
         legs: { pilot: 2, backup: 3 },
         hazard: { kind: 'dust', firstSol: 9, spread: 3, exposure: 1 },
         temperature: { clear: -70, warning: -78, hazard: -90 },
-        intro: 'The ice lies under the crater rim, a long drive away. Prepare the rover, the ice drill, supplies, and field crew. Return the crew and 48 hours of drilled ice cores by Sol {deadline}. Nights are bitterly cold and seasonal dust risk is elevated. The launch checklist tracks your work orders.',
+        intro: 'The ice is buried under the crater rim, a long drive away. Get the rover, ice drill, supplies, and 2 crew ready. Bring back 48 hours of ice samples by Sol {deadline}. It is freezing cold and dusty!',
         aries: 'the crater-rim ice drilling expedition (shallow subsurface water ice)',
         ariesExamples: 'drill torque and bit temperature checks, core-tube seals, heater and battery faults in the cold, scheduled relay contacts and oxygen-generator inlet faults',
     },
@@ -74,7 +74,7 @@ export const EXPEDITIONS: Record<ExpeditionId, Expedition> = {
         legs: { pilot: 1, backup: 2 },
         hazard: { kind: 'dust', firstSol: 8, spread: 1, exposure: 1 },
         temperature: { clear: -58, warning: -58, hazard: -58 },
-        intro: 'Prepare the rover, record 24 hours of weather at Training Marker, and dock with the data by Sol {deadline}. The guide tracks each step from briefing to return.',
+        intro: 'Get the rover ready, record 24 hours of weather at Training Marker, and bring the data home by Sol {deadline}. Follow the guide step by step!',
         aries: 'the Tharsis training run',
         ariesExamples: 'weather instrument checks and relay contacts',
     },
@@ -108,4 +108,4 @@ export function expeditionRequirements(id: ExpeditionId = 'tharsis'): MissionReq
 }
 
 /** Every expedition keeps the same reserves on return. */
-export const EXPEDITION_RESERVES = { food: 10, water: 10, oxygen: 25 } as const;
+export const EXPEDITION_RESERVES = { food: 8, water: 8, oxygen: 20 } as const;

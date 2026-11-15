@@ -17,7 +17,7 @@ const TABS = [
 export type WorkPanel = typeof TABS[number][0] | 'assignments';
 
 const METHOD_LABELS: Record<Technique, string> = {
-    specialist: 'Specialist', parallel: 'Parallel', recycle: 'Reuse spares', conserve: 'Pulse test', dry: 'Closed cycle',
+    specialist: 'Best Match', parallel: 'Team Up', recycle: 'Reuse parts', conserve: 'Go slow', dry: 'Reuse water',
 };
 
 interface ConsoleOptions {
@@ -29,6 +29,9 @@ interface ConsoleOptions {
     selected: string | null;
     methods: ReadonlyMap<string, Technique>;
     selectMethod: (id: string, technique: Technique | null) => void;
+    pendingLead: string | null;
+    selectLead: (orderId: string, leadId: string) => void;
+    clearPendingLead: (orderId: string) => void;
     change: (action: () => string | null) => void;
     open: (tab: WorkPanel | 'roverChecklist' | 'aries', id?: string) => void;
     chooseDefault: (id: string) => void;
@@ -44,8 +47,8 @@ export function showWorkConsole(options: ConsoleOptions): void {
         TABS.forEach(([key, title], index) => button(`tab-${key}`, content, [20 + index * 176, 64, 166, 36], () => open(key), {
             label: title, tone: panel === key ? 'hero' : 'plain',
         }));
-        button('view-scheduled', content, [920, 64, 232, 36], () => open('assignments'), { label: 'Scheduled tasks' });
-    } else button('view-required', content, [20, 64, 232, 36], () => open('rover'), { label: 'Browse work orders' });
+        button('view-scheduled', content, [920, 64, 232, 36], () => open('assignments'), { label: 'Planned tasks' });
+    } else button('view-required', content, [20, 64, 232, 36], () => open('rover'), { label: 'Back to tasks' });
     const list = ui.frame(content, [20, 116, 376, 480], p.ink);
     const inspector = ui.frame(content, [412, 116, 740, 480], p.ink, p.teal);
     const run = state.tharsis;
@@ -62,22 +65,27 @@ export function showWorkConsole(options: ConsoleOptions): void {
     const held = new Map(resourceForecast(state, 'station').tasks.filter(flow => flow.hold).map(flow => [flow.orderId, flow.hold]));
     const selected = orders.find(order => order.id === options.selected) ?? orders[0];
     if (selected && options.selected !== selected.id) options.chooseDefault(selected.id);
-    ui.label(list, [12, 4, 340, 32], panel === 'assignments' ? 'Scheduled shifts' : 'Station work orders', { display: true, size: 22, color: p.amber });
+    ui.label(list, [12, 4, 340, 32], panel === 'assignments' ? 'Planned tasks' : 'Station tasks', { display: true, size: 22, color: p.amber });
     const assignmentPage = panel === 'assignments' ? Math.max(0, Math.floor(orders.findIndex(order => order.id === selected?.id) / 7)) : 0;
     const visible = orders.slice(assignmentPage * 7, assignmentPage * 7 + 7);
     visible.forEach((order, index) => {
         const active = run.work.find(job => job.orderId === order.id);
+        const assignedLead = active?.leadId ? state.crew.find(member => member.id === active.leadId) : undefined;
         const disabled = equipmentBlock(state, order);
         const blocker = orderBlock(state, order);
         const row = button(`order-${order.id}`, list, [12, 44 + index * 54, 344, 48], () => open(panel, order.id), {
             tone: selected?.id === order.id ? 'hero' : 'tile',
         });
-        ui.label(row.entity, [10, 3, 320, 24], order.title, { display: true, size: 19 });
+        const labelWidth = assignedLead ? 284 : 320;
+        ui.label(row.entity, [10, 3, labelWidth, 24], order.title, { display: true, size: 19 });
         const hold = held.get(order.id);
-        ui.label(row.entity, [10, 27, 320, 16], disabled ? 'Equipment unavailable' : hold ? `Held · ${hold}` :
-            active ? 'Staffed' : blocker ?? 'Ready', {
+        const statusText = disabled ? 'Gear turned off' : hold ? `Paused · ${hold}` :
+            assignedLead ? `Locked · ${assignedLead.name.split(' ')[0]}` :
+            active ? 'Auto-pick on End Sol' : blocker ?? 'Ready';
+        ui.label(row.entity, [10, 27, labelWidth, 16], statusText, {
             size: 12, fit: 11, color: disabled ? p.bad : hold ? p.amber : active ? p.cyan : blocker === 'Complete' ? p.good : blocker ? p.muted : p.amber,
         });
+        if (assignedLead) ui.image(row.entity, [300, 6, 36, 36], assignedLead.portraitPath);
     });
     if (orders.length > 7) {
         button('assignment-prev', list, [12, 432, 150, 34], () => open(panel, orders[(assignmentPage - 1) * 7]?.id), { label: 'Previous', disabled: !assignmentPage });
@@ -94,7 +102,8 @@ export function showWorkConsole(options: ConsoleOptions): void {
     const technique = options.methods.get(selected.id);
     const method = job?.method ?? (technique ? [technique] : []);
     const crew = stationCrew(state).filter(member => !workLeadProblem(state, selected, method, member));
-    const lead = crew.find(member => member.id === job?.leadId) ?? preferredLead(crew, selected, state);
+    const chosenId = options.pendingLead ?? job?.leadId ?? null;
+    const lead = crew.find(member => member.id === chosenId) ?? preferredLead(crew, selected, state);
     const quote = lead && quoteForLead(state, selected, method, lead);
     const perShift = (cost: Parameters<typeof resourceEntries>[0]) => resourceEntries(cost).map(([key, val]) => formatResource(key, val)).join(' · ') || 'No resource draw';
     ui.label(inspector, [16, 6, 692, 38], selected.title, { display: true, size: 26, color: p.cyan });
@@ -107,11 +116,11 @@ export function showWorkConsole(options: ConsoleOptions): void {
         if (salvage) ui.label(inspector, [16, 151, 692, 38], STATION_EQUIPMENT[salvage].loss, { wrap: true, size: 14, color: p.amber });
         const label = job ? `Remaining ${(Math.max(0, quote.shifts - job.progress)).toFixed(1)} work · ${quote.rate}/Sol · ${perShift(quote.cost)}/Sol` : `${technique ? METHOD_LABELS[technique] : 'Standard'} with ${lead.name.split(' ')[0]}   ${quote.sols} Sol · ${perShift(quote.cost)} / Sol`;
         ui.label(inspector, [16, 189, 692, 28], label, { size: 14, color: p.amber });
-        if (selected.yield) ui.label(inspector, [16, 218, 690, 26], `Completion yield  ${perShift(quote.output)}`, { size: 14, color: p.good });
+        if (selected.yield && !job) ui.label(inspector, [16, 218, 690, 26], `Reward  ${perShift(quote.output)}`, { size: 14, color: p.good });
     }
     if (job) {
         const hold = held.get(selected.id);
-        if (hold) ui.label(inspector, [16, 144, 692, 42], `Held this Sol · ${hold}`, { size: 14, color: p.amber, wrap: true });
+        if (hold) ui.label(inspector, [16, 144, 692, 42], `Paused today · ${hold}`, { size: 14, color: p.amber, wrap: true });
         drawAssignments(options, inspector, selected, job.leadId);
         return;
     }
@@ -153,38 +162,89 @@ export function showWorkConsole(options: ConsoleOptions): void {
         tone: scheduleBlock ? 'plain' : 'primary', disabled: Boolean(scheduleBlock) });
 }
 
-function drawAssignments(options: ConsoleOptions, inspector: Entity, order: WorkOrder, leadId: string | null) {
+function drawAssignments(options: ConsoleOptions, inspector: Entity, order: WorkOrder, lockedLeadId: string | null) {
     const { ui, state, button, change, open } = options;
     const p = ui.palette;
-    const target = ui.frame(inspector, [16, 248, 692, 48], p.raised, p.teal);
-    options.setDrop(target, order.id);
-    const lead = state.crew.find(member => member.id === leadId);
-    ui.label(target, [10, 0, 664, 40], lead ? `Shift lead  ${lead.name} · ${lead.role}` : 'Select or drag an eligible crew card here', { size: 16, color: p.cyan, center: true });
     const candidate = state.tharsis.work.find(job => job.orderId === order.id)!;
     const disabled = equipmentBlock(state, order);
+    if (!candidate.progress && order.methods?.length) {
+        const currentMethod = candidate.method[0] ?? null;
+        const choices: Array<Technique | null> = [null, ...order.methods];
+        const width = Math.min(136, Math.floor(692 / choices.length) - 6);
+        choices.forEach((id, index) => {
+            const eligible = id !== 'specialist' || stationCrew(state).some(member => !workLeadProblem(state, order, ['specialist'], member));
+            button(`assign-method-${id ?? 'standard'}`, inspector, [16 + index * (width + 6), 220, width, 30], () => change(() => {
+                const reason = acceptWork(state, order, id ? [id] : [], true);
+                if (!reason && options.pendingLead) {
+                    const pendingMember = state.crew.find(member => member.id === options.pendingLead);
+                    if (!pendingMember || workLeadProblem(state, order, id ? [id] : [], pendingMember)) {
+                        options.clearPendingLead(order.id);
+                    }
+                }
+                return reason;
+            }), {
+                label: id ? METHOD_LABELS[id] : 'Standard', labelSize: 13, disabled: !eligible, tone: id === currentMethod ? 'hero' : 'plain',
+            });
+        });
+    }
+    const activeChoiceId = options.pendingLead ?? lockedLeadId;
+    const target = ui.frame(inspector, [16, 256, 692, 44], p.raised, p.teal);
+    options.setDrop(target, order.id);
+    const chosen = state.crew.find(member => member.id === activeChoiceId);
+    const isLocked = Boolean(lockedLeadId && activeChoiceId === lockedLeadId);
+    if (chosen) ui.image(target, [10, 4, 30, 36], chosen.portraitPath);
+    const bannerText = !chosen
+        ? 'Pick or drag a crew member below, then press Lock lead'
+        : isLocked
+            ? `Locked lead  ${chosen.name} · ${chosen.role}`
+            : `Selected  ${chosen.name} · Press Lock lead to confirm`;
+    ui.label(target, [chosen ? 46 : 10, 0, chosen ? 634 : 664, 36], bannerText, { size: 15, color: isLocked ? p.good : p.cyan, center: true });
     stationCrew(state).forEach((member, index) => {
         const blocker = assignmentProblem(state, order.id, member.id);
         const eligible = !blocker;
         const quote = quoteForLead(state, order, candidate.method, member);
         const bounds = [16 + index * 176, 312, 164, 92] as const;
+        const isSelected = activeChoiceId === member.id;
+        const isMemberLocked = lockedLeadId === member.id && isSelected;
         const control = button(`lead-${member.id}`, inspector, bounds, () => {
-            if (!options.dragging(control.entity)) change(() => assignWork(state, order.id, member.id));
-        }, { disabled: !eligible, tone: leadId === member.id ? 'hero' : 'tile' });
+            if (!options.dragging(control.entity)) options.selectLead(order.id, member.id);
+        }, { disabled: !eligible, tone: isSelected ? 'hero' : 'tile' });
         if (eligible) options.leadDrag(control.entity, member.id, bounds);
         ui.image(control.entity, [8, 8, 44, 56], member.portraitPath);
         ui.label(control.entity, [57, 8, 102, 24], member.name.split(' ')[0]!, { display: true, size: 19 });
-        ui.label(control.entity, [57, 32, 102, 21], `Morale ${member.morale}%`, { size: 12, color: member.morale < LOW_MORALE ? p.bad : p.secondary });
+        ui.label(control.entity, [57, 32, 102, 21], isMemberLocked ? 'LOCKED' : isSelected ? 'SELECTED' : `Morale ${member.morale}%`, {
+            size: 12, color: isMemberLocked ? p.good : isSelected ? p.cyan : member.morale < LOW_MORALE ? p.bad : p.secondary,
+        });
         const penalty = Math.round((1 - moralePace(member.morale)) * 100);
         const occupied = state.tharsis.work.filter(job => job.leadId === member.id).length;
         const slots = stationShiftCapacity(state, member);
-        const status = slots === 2 ? `${occupied}/2 shifts` : occupied && leadId !== member.id ? 'Reassign' : quote.specialist ? 'Specialist' : 'Backup';
+        const status = slots === 2 ? `${occupied}/2 shifts` : occupied && lockedLeadId !== member.id ? 'Reassign' : quote.specialist ? 'Best Match' : 'Backup';
         const unavailable = member.role === 'scientist' && (!slots || slots === 2) ? crewAbilityStatus(state, member) : blocker;
         ui.label(control.entity, [6, 60, 152, 30], eligible ? `${quote.sols} Sol · ${penalty ? `−${penalty}% pace` : status}` :
             (slots === 2 ? '2/2 shifts assigned' : unavailable ?? 'Unavailable'), {
             size: 12, fit: 11, color: eligible ? p.amber : p.muted, center: true, wrap: true,
         });
     });
-    button('unassign', inspector, [16, 420, 220, 40], () => change(() => assignWork(state, order.id, null)), { label: 'Unassign lead', disabled: !leadId });
-    if (!candidate.progress && !disabled) button('discuss-scheduled', inspector, [246, 420, 232, 40], () => open('aries', order.id), { label: 'Discuss revision' });
-    button('cancel', inspector, [488, 420, 220, 40], () => change(() => { cancelWork(state, order.id); open('assignments'); return null; }), { label: 'Cancel order' });
+    const canLock = Boolean(chosen && (!isLocked));
+    button('lock-lead', inspector, [16, 420, 164, 40], () => change(() => {
+        if (!chosen) return 'Pick a crew member first.';
+        const err = assignWork(state, order.id, chosen.id);
+        if (err) return err;
+        options.clearPendingLead(order.id);
+        const nextUnstaffed = state.tharsis.work.find(job => job.orderId !== order.id && !job.leadId);
+        if (nextUnstaffed) open('assignments', nextUnstaffed.orderId);
+        else open(order.bay === 'custom' ? 'rover' : order.bay);
+        return `Locked ${chosen.name.split(' ')[0]} to ${order.title}.`;
+    }), { label: isLocked ? 'Locked' : 'Lock lead', disabled: !canLock, tone: canLock ? 'primary' : 'plain' });
+    button('unassign', inspector, [190, 420, 148, 40], () => change(() => {
+        options.clearPendingLead(order.id);
+        return assignWork(state, order.id, null);
+    }), { label: 'Unlock', disabled: !lockedLeadId });
+    if (!candidate.progress && !disabled) button('discuss-scheduled', inspector, [348, 420, 170, 40], () => open('aries', order.id), { label: 'Discuss' });
+    button('cancel', inspector, [528, 420, 180, 40], () => change(() => {
+        options.clearPendingLead(order.id);
+        cancelWork(state, order.id);
+        open('assignments');
+        return null;
+    }), { label: 'Cancel task' });
 }
