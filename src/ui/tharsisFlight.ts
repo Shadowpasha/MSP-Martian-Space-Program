@@ -22,6 +22,7 @@ import { makeAbsBox, setTextColor, setVisualColor } from './theme';
 import { makeMotion } from './motion';
 import { play } from './feedback';
 import { startAirlock, type Airlock } from './airlock';
+import { mountEva, type Eva } from './evaWalker';
 import { mountSceneAmbience, SITE_AMBIENCE, STATION_AMBIENCE } from './sceneAmbience';
 import { HEAD_TOP, mountStationCrew, SPRITE_H, SPRITE_W, type StationCrew, type StationCrewMember } from './stationCrew';
 
@@ -115,6 +116,12 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     let backdropView: 'station' | 'expedition' | null = null;
     let ambience: () => void = () => {};
     let crewWalkers: StationCrew | null = null;
+    /** The astronaut outside at the survey site, while the rover is there (expedition view). */
+    let eva: Eva | null = null;
+    /** He is hopping back into the rover; the Sol ends when he is in. */
+    let boarding = false;
+    /** He has come out at the site already (so a later visit to the expedition view finds him outside). */
+    let evaOut = false;
     /** The airlock doors, while switching between the station and the expedition. */
     let airlock: Airlock | null = null;
     /** Switch views through the airlock (straight away with Reduced Motion). */
@@ -155,7 +162,8 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         const atSite = view === 'expedition';
         const scene = mountSceneAmbience(backUi, backdrop, backdropMotion, atSite ? SITE : STATION, atSite ? SITE_AMBIENCE : STATION_AMBIENCE);
         crewWalkers = atSite ? null : mountStationCrew(backUi, backdrop, backdropMotion, crewOnStation());
-        ambience = () => { scene(); crewWalkers?.tick(); };
+        eva = atSite ? mountEva(backUi, backdrop, backdropMotion) : null;
+        ambience = () => { scene(); crewWalkers?.tick(); eva?.tick(); };
     }
     let ask: AbortController | null = null;
     let sentMessage: DiscussionMessage | null = null;
@@ -320,9 +328,25 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     }
 
     function requestEndSol() {
+        if (boarding) return;
         const status = assessMission(state, draft ?? defaultLoad(state));
         if (solSafetyWarning(state, status)) open('solReview');
-        else endSol();
+        else if (!boardRover()) endSol();
+    }
+
+    /**
+     * On the expedition screen, when this Sol finishes the survey the rover sets off home: the
+     * astronaut outside hops back in first, then the Sol ends. False if there is nothing to show.
+     */
+    function boardRover(): boolean {
+        const rover = run.rover;
+        if (view !== 'expedition' || !eva || rover?.phase !== 'site' || run.hours + 24 < expeditionFor(state).surveyHours) return false;
+        boarding = eva.board(() => {
+            boarding = false;
+            evaOut = false;
+            endSol();
+        });
+        return boarding;
     }
 
     function acceptDraft() {
@@ -878,6 +902,13 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         }
         drawBackdrop();
         crewWalkers?.sync(crewOnStation());
+        // While he is hopping back in, leave him be: the Sol ends once he is inside.
+        const atSiteNow = run.rover?.phase === 'site';
+        if (!atSiteNow) evaOut = false;
+        if (eva && !boarding) {
+            eva.setPresent(atSiteNow, !evaOut);
+            if (atSiteNow) evaOut = true;
+        }
         surface = makeAbsBox(world, uiLayer, 0, 0, 1280, 720);
         ui = makeFlightUi(world, events, surface, art, focus, profile);
         const planning = run.phase === 'planning';
