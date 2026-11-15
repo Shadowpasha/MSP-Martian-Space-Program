@@ -71,18 +71,6 @@ for (let i = 0; i < sidebar.data.length; i += 4) {
 }
 exportPng('menu_landscape.png', sidebar);
 
-const crops = [[420, 117, 900, 437], [1120, 190, 500, 244], [551, 173, 540, 262]];
-for (const [index, crop] of crops.entries()) {
-    const thumb = resize(station, 152, 74, crop);
-    if (index) {
-        for (let i = 0; i < thumb.data.length; i += 4) {
-            const gray = (thumb.data[i] * 0.3 + thumb.data[i + 1] * 0.5 + thumb.data[i + 2] * 0.2) * 0.6;
-            thumb.data.set([Math.round(gray + 10), Math.round(gray + 8), Math.round(gray + 19)], i);
-        }
-    }
-    exportPng('mission_' + (index + 1) + '.png', thumb);
-}
-
 const sheet = read(path.join(art, 'crew_portraits_source.png'));
 const roles = ['engineer', 'botanist', 'pilot', 'medic', 'scientist', 'captain'];
 const cuts = [];

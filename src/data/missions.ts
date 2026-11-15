@@ -52,8 +52,8 @@ export interface MissionOffer {
     description: string;
     setup?: MissionSetupInput;
     prepared?: 'team' | 'training';
-    /** Card picture; defaults to assets/textures/mission_<slot>.png. */
-    image?: string;
+    /** Mission art shared by the card, briefing and launch sequence. */
+    image: string;
     /** Difficulty bar on the card (1 Easy, 2 Medium, 3 Hard); a team manifest has none. */
     difficulty?: MissionDifficulty;
     /** Shown in the mission popup: the real NASA mission it is based on and why it matters. */
@@ -93,17 +93,19 @@ export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
         description: 'Practice assigning crew, driving the rover, and surviving with a step-by-step guide.',
         setup: TRAINING_RUN,
         prepared: 'training',
-        image: 'assets/textures/mission_1.png',
+        image: 'assets/textures/missions/previews/tharsis_training.png',
     };
     const survey: MissionOffer = {
         title: WEATHER_SURVEY.missionGoal.title, site: 'MARS · SITE A',
         description: 'Record 48 hours of weather data at Site A.',
-        setup: WEATHER_SURVEY, difficulty: 1, briefing: THARSIS_BRIEFING, image: 'assets/textures/mission_1.png',
+        setup: WEATHER_SURVEY, difficulty: 1, briefing: THARSIS_BRIEFING,
+        image: 'assets/textures/missions/previews/tharsis_weather_survey.png',
     };
     return [
         ...(pending ? [{
             title: pending.missionGoal.title, site: pending.planet.toUpperCase() + ' · TEAM SETUP',
             description: pending.missionGoal.description, setup: pending, prepared: 'team' as const,
+            image: 'assets/textures/missions/previews/team_manifest.png',
         }] : []),
         training,
         ...(!pending ? [survey] : []),

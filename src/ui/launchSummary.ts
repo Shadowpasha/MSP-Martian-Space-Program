@@ -24,7 +24,7 @@ export function showLaunchSummary(
     ui: FlightUi, setup: MissionSetupInput, placements: readonly CargoPlacement[], problem: string | null,
     onLaunch: () => void, onBack: () => void,
     /** The mission's picture, shown on the mission side of the launch intro. */
-    missionImage?: string,
+    missionImage: string,
     /** Edit Crew: the current picks, and where a confirmed new four goes. Without it the crew is fixed. */
     crewEdit?: { crewIds: readonly string[]; onCrew: (ids: string[]) => void },
 ): (input: InputState) => boolean {

@@ -34,7 +34,7 @@ export interface LaunchIntro {
 }
 
 export function playLaunchIntro(
-    ui: FlightUi, motion: Motion, setup: MissionSetupInput, missionImage: string | undefined, onDone: () => void,
+    ui: FlightUi, motion: Motion, setup: MissionSetupInput, missionImage: string, onDone: () => void,
 ): LaunchIntro {
     const p = ui.palette;
     const world = ui.world;
@@ -124,7 +124,7 @@ export function playLaunchIntro(
         return { row, y };
     });
     const missionPanel = panel(948, 150, 300, 300, 'DESTINATION');
-    ui.image(missionPanel, [12, 42, 276, 150], missionImage ?? 'assets/textures/mission_1.png');
+    ui.coverImage(missionPanel, [12, 42, 276, 150], missionImage);
     ui.label(missionPanel, [12, 200, 276, 52], goal.title, { display: true, size: 20, fit: 13, wrap: true, center: true });
     ui.label(missionPanel, [12, 258, 276, 24], `${destinationName} · DEADLINE SOL ${goal.deadlineSol}`, { size: 13, color: p.amber, center: true });
 

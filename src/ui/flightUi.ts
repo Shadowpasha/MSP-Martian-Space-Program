@@ -199,7 +199,8 @@ export function makeFlightUi(
     };
     const gridOf = (entity: Entity) => grids.get(entity) ?? [8, 4] as const;
 
-    function image(parent: Entity, bounds: Bounds, ref: string, tint = palette.white, slot?: number, grid?: readonly [number, number]) {
+    function image(parent: Entity, bounds: Bounds, ref: string, tint = palette.white, slot?: number,
+        grid?: readonly [number, number], fit = UIVisualFit.Fill) {
         const el = box(parent, bounds);
         world.insert(el, UIVisual, { visualType: UIVisualType.Image, enabled: false });
         // Entity ids are reused after a despawn, so a plain image clears any old cell for its id.
@@ -213,12 +214,16 @@ export function makeFlightUi(
                 data.texture = texture;
                 data.color = tint;
                 data.enabled = true;
-                data.fit = UIVisualFit.Fill;
+                data.fit = fit;
                 const current = slots.get(el);
                 if (current !== undefined) applySlot(data, current, gridOf(el));
             });
         }).catch(() => {});
         return el;
+    }
+
+    function coverImage(parent: Entity, bounds: Bounds, ref: string): Entity {
+        return image(parent, bounds, ref, palette.white, undefined, undefined, UIVisualFit.Cover);
     }
 
     /** Show another cell of an atlas image: sprite animation frames. */
@@ -433,7 +438,7 @@ export function makeFlightUi(
     }
 
     return {
-        world, root, palette, box, group, frame, label, image, setSlot, icon, button, slider, updateFocus,
+        world, root, palette, box, group, frame, label, image, coverImage, setSlot, icon, button, slider, updateFocus,
         /** The player's Reduced Motion setting; screens with motion read it. */
         reducedMotion: options.reducedMotion,
         setText: (entity: Entity | null, content: string) => setText(world, entity, content),

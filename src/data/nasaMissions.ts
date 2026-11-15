@@ -91,7 +91,7 @@ export const NASA_MISSIONS: NasaMission[] = [
         site: { name: 'Hawksbill Gap', coords: '18.46N, 77.41E', distanceMP: 20 },
                         goalFlag: 'radiation_measured',
         requiredEquipment: { radDetector: 1 },
-        image: 'assets/textures/outpost/events/event_solar_flare_alert_256x144.png',
+        image: 'assets/textures/missions/previews/radiation_detective.png',
         expedition: { id: 'radiation', deadline: 20 },
     },
     {
@@ -111,7 +111,7 @@ export const NASA_MISSIONS: NasaMission[] = [
         site: { name: 'Jezero Crater Rim', coords: '18.50N, 77.33E', distanceMP: 45 },
                         goalFlag: 'ice_core_collected',
         requiredEquipment: { iceDrill: 1 },
-        image: 'assets/textures/mission_2.png',
+        image: 'assets/textures/missions/previews/ice_hunter.png',
         expedition: { id: 'ice', deadline: 22 },
     },
     {
@@ -132,7 +132,7 @@ export const NASA_MISSIONS: NasaMission[] = [
         site: { name: 'Cabeus Crater', coords: '84.9S, 35.5W', distanceMP: 35 },
                         goalFlag: 'ice_core_collected',
         requiredEquipment: { iceDrill: 1 },
-        image: 'assets/textures/missions/map_lunar_south_pole_320x180.png',
+        image: 'assets/textures/missions/previews/moon_shadow_ice.png',
     },
     {
         id: 'oxygen_maker',
@@ -151,7 +151,7 @@ export const NASA_MISSIONS: NasaMission[] = [
         site: { name: 'Three Forks', coords: '18.45N, 77.42E', distanceMP: 15 },
                         goalFlag: 'oxygen_produced',
         requiredEquipment: { batteryPacks: 2 },
-        image: 'assets/textures/mission_3.png',
+        image: 'assets/textures/missions/previews/oxygen_maker.png',
     },
     {
         id: 'space_garden',
@@ -170,7 +170,7 @@ export const NASA_MISSIONS: NasaMission[] = [
         site: { name: 'Octavia E. Butler Landing', coords: '18.44N, 77.45E', distanceMP: 5 },
                         goalFlag: 'crop_harvested',
         requiredEquipment: { seedPods: 2, waterCanisters: 1 },
-        image: 'assets/textures/outpost/events/event_cloudy_plant_tanks_256x144.png',
+        image: 'assets/textures/missions/previews/space_garden.png',
     },
 ];
 

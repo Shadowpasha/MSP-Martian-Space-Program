@@ -711,7 +711,7 @@ export function showMissions(
         const card = ui.frame(slot, [0, 0, 336, 596], offer.setup ? p.panel : p.well);
         const active = Boolean(offer.setup);
         ui.box(card, [12, 12, 304, 120], p.ink);
-        ui.image(card, [12, 12, 304, 120], offer.image ?? `assets/textures/mission_${Math.min(3, index + 1)}.png`);
+        ui.coverImage(card, [12, 12, 304, 120], offer.image);
         ui.label(card, [16, 140, 296, 24], offer.site, { color: active ? p.amber : p.muted, size: 14 });
         ui.label(card, [16, 166, 296, 62], offer.title, { display: true, size: 28, fit: 18, wrap: true, color: active ? p.text : p.muted });
         ui.label(card, [16, 230, 296, 42], offer.description, { size: 16, color: active ? p.text : p.muted, wrap: true, top: true });
@@ -776,7 +776,7 @@ export function showMissions(
         motion.enter(holder, 280, 95, { dy: 30, duration: 300, ease: easeOutBack });
         const panel = ui.frame(holder, [0, 0, 720, 530], p.raised);
         ui.box(panel, [12, 12, 240, 136], p.ink);
-        ui.image(panel, [12, 12, 240, 136], offer.image ?? 'assets/textures/mission_1.png');
+        ui.coverImage(panel, [12, 12, 240, 136], offer.image);
         // The card already showed the site and the deadline; the popup adds the job, the real
         // NASA mission and the lesson. Title on top, then three short blocks.
         ui.label(panel, [272, 10, 420, 44], offer.title, { display: true, size: 32, fit: 18 });
