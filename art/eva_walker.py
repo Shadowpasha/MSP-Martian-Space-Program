@@ -33,8 +33,8 @@ HEAD_ROWS = 11      # rows of a frame from the top of the head down to the chin
 # (screen px) they float at, and how far one hop carries him.
 HOP_MS = [160, 140, 140, 300, 360, 360, 300, 220]
 HOP_AIR = (3, 4, 5, 6)
-HOP_LIFT = {3: 6, 4: 10, 5: 10, 6: 6}
-HOP_DRIFT = 70
+HOP_LIFT = {3: 4, 4: 7, 5: 7, 6: 4}
+HOP_DRIFT = 45
 
 # The helmet, facing right: O outline, W white, L light shade, S shadow, V visor, v visor shade,
 # h visor glint, G neck ring.

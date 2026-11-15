@@ -27,8 +27,8 @@ const DOOR_RISE = 56;
  * frames, how high he floats at the top, and how far one hop carries him. */
 const HOP_MS = [160, 140, 140, 300, 360, 360, 300, 220] as const;
 const AIR = [3, 4, 5, 6] as const;
-const LIFT = 10;
-const DRIFT = 70;
+const LIFT = 7;
+const DRIFT = 45;
 /** Boarding is the same hop, quicker and longer, so it fits before the Sol ends. */
 const BOARD_SPEED = 1.6;
 const BOARD_DRIFT = 90;
