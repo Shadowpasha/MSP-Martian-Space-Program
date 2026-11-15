@@ -19,19 +19,17 @@
 | **Radiation Detective** | Medium | Record 72h of radiation during a solar storm |
 | **Ice Hunter** | Hard | Drill ice cores at Jezero Crater in deep cold |
 
-<table>
-<tr><th width="50%">Mission Selection</th><th width="50%">Launch to Mars</th></tr>
-<tr><td width="50%"><img src="docs/screenshots/mission-select.jpg" alt="Mission Selection" width="100%"></td><td width="50%"><img src="docs/gifs/launch.gif" alt="Launch, cruise and landing" width="100%"></td></tr>
-</table>
+![Mission Selection](docs/screenshots/mission-select.jpg)
+
+![Launch, cruise and landing](docs/gifs/launch.gif)
 
 ## How It Plays
 
 **1. Pick your crew.** Choose 4 of 6 real NASA astronauts, each with their own skill.
 
-<table>
-<tr><th width="50%">Edit Crew</th><th width="50%">Launch Summary</th></tr>
-<tr><td width="50%"><img src="docs/screenshots/crew-select.jpg" alt="Crew Selection" width="100%"></td><td width="50%"><img src="docs/screenshots/launch-summary.jpg" alt="Launch Summary" width="100%"></td></tr>
-</table>
+![Crew Selection](docs/screenshots/crew-select.jpg)
+
+![Launch Summary](docs/screenshots/launch-summary.jpg)
 
 **2. Pack the rover.** Fit the instrument, food, water and oxygen into a 6×4 cargo grid.
 
@@ -41,10 +39,9 @@
 
 ![Station crew at work, then the airlock to the expedition site](docs/gifs/station.gif)
 
-<table>
-<tr><th width="50%">Morning Briefing</th><th width="50%">End of Sol Report</th></tr>
-<tr><td width="50%"><img src="docs/screenshots/morning-briefing.jpg" alt="Morning Briefing" width="100%"></td><td width="50%"><img src="docs/gifs/endsol.gif" alt="End of Sol crew report" width="100%"></td></tr>
-</table>
+![Morning Briefing](docs/screenshots/morning-briefing.jpg)
+
+![End of Sol crew report](docs/gifs/endsol.gif)
 
 **4. Upgrade.** Spend research points on power, survival, operations and crew upgrades.
 
