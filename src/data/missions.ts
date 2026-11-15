@@ -137,6 +137,11 @@ export function launchProblem(setup: MissionSetupInput): string | null {
     if (setup.crew.length !== LAUNCH_CREW_SIZE || new Set(setup.crew.map(member => member.id)).size !== LAUNCH_CREW_SIZE) {
         return 'Select exactly four crew members to launch.';
     }
+    return cargoProblem(setup);
+}
+
+/** The cargo half of the launch check. Cargo Preparation uses it alone: the crew is picked afterwards, on the Launch Summary. */
+export function cargoProblem(setup: MissionSetupInput): string | null {
     const missing = Object.entries(setup.missionGoal.requiredEquipment ?? {})
         .filter(([id, count]) => (setup.cargo[id as keyof typeof setup.cargo] ?? 0) < count)
         .map(([id, count]) => `${count} × ${CARGO_BY_ID[id as keyof typeof CARGO_BY_ID].name}`);
@@ -160,4 +165,10 @@ export function buildLaunchSetup(
     }
     setup.cargo = offer.prepared ? normalizeCargo(setup.cargo) : packedInventory(placements);
     return setup;
+}
+
+/** Edit Crew: tap a crew member to add or remove them. A fifth pick is ignored until a seat opens. */
+export function toggleCrewPick(ids: readonly string[], id: string): string[] {
+    if (ids.includes(id)) return ids.filter(other => other !== id);
+    return ids.length >= LAUNCH_CREW_SIZE ? [...ids] : [...ids, id];
 }

@@ -7,7 +7,7 @@ import {
     type MainLoopResult, type MissionSetupInput,
 } from '../contracts/gameContract';
 import type { CargoPlacement } from '../data/cargo';
-import { buildLaunchSetup, LAUNCH_CREW_SIZE, launchProblem, missionOffers, type MissionOffer } from '../data/missions';
+import { buildLaunchSetup, cargoProblem, LAUNCH_CREW_SIZE, launchProblem, missionOffers, type MissionOffer } from '../data/missions';
 import { loadProfile, purchaseUpgrade, recordResearch, resetUpgrades, type PlaytestProfile } from '../data/profile';
 import { showCargoPacker } from '../ui/cargoPacker';
 import { showLaunchSummary } from '../ui/launchSummary';
@@ -175,9 +175,12 @@ export const flightSystem = defineSystem(
                     if (!chosen?.setup) { navigate('mission'); break; }
                     showShell(ui, page, chosen.prepared ? 'Launch Briefing' : 'Cargo Preparation', chosen.prepared ? chosen.title : `${chosen.title} · pack what the mission needs`,
                         (Object.keys(chosen.setup.missionGoal.requiredEquipment ?? {})[0] ?? 'windSampler') as IconName, navigate);
+                    // Prepared missions launch from here, so they check everything. Packed missions only
+                    // check the cargo: the crew is picked next, on the Launch Summary.
                     const problem = (placements: CargoPlacement[]) => {
                         const setup = buildLaunchSetup(chosen, profile.crewIds, placements);
-                        return setup ? launchProblem(setup) : 'Choose a mission to launch.';
+                        if (!setup) return 'Choose a mission to launch.';
+                        return chosen.prepared ? launchProblem(setup) : cargoProblem(setup);
                     };
                     const start = () => launch(chosen, Boolean(chosen.prepared));
                     if (chosen.prepared) showPreparedManifest(ui, chosen, problem(draft), start);
@@ -190,7 +193,11 @@ export const flightSystem = defineSystem(
                     const preview = chosen?.setup ? buildLaunchSetup(chosen, profile.crewIds, draft) : null;
                     if (!chosen || !preview) { navigate('mission'); break; }
                     showShell(ui, page, 'Launch Summary', `${chosen.title} · last check before launch`, 'check', navigate);
-                    surfaceTick = showLaunchSummary(ui, preview, draft, launchProblem(preview), () => launch(chosen, false), () => navigate('cargo'), chosen.image);
+                    surfaceTick = showLaunchSummary(ui, preview, draft, launchProblem(preview), () => launch(chosen, false), () => navigate('cargo'), chosen.image, {
+                        crewIds: profile.crewIds,
+                        // Edit Crew saves the new four to the profile (the Crew page shows the same picks) and redraws the summary.
+                        onCrew: crewIds => { saveProfile({ ...profile, crewIds }); navigate('review'); },
+                    });
                     break;
                 }
                 case 'settings':
