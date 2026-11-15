@@ -23,7 +23,7 @@ test('the picker offers optional training, three expeditions, and three upcoming
     const training = offers[0]!;
     const trainingSetup = buildLaunchSetup(training, [], [])!;
     assert.equal(training.prepared, 'training');
-    assert.equal(trainingSetup.targetSol, 9);
+    assert.equal(trainingSetup.targetSol, 5);
     assert.equal(launchProblem(trainingSetup), null);
     assert.deepEqual(trainingSetup.upgradeIds, [GAMEPLAY_UPGRADES.electrolysis]);
     const playable = offers.slice(1).filter(offer => offer.setup);

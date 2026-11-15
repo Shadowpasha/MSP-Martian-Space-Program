@@ -84,11 +84,12 @@ export const CHECKLIST = [
     { kind: 'assign_crew', label: 'Field crew', bay: 'crew', orders: ['route', 'suits'] },
 ] as const satisfies readonly ChecklistGroup[];
 
+// Training is short on purpose: one job per group, all done on the first Sol, so the whole
+// mission (get ready, drive out, record, drive home) fits in a few Sols.
 const TRAINING_CHECKLIST: readonly ChecklistGroup[] = [
     { ...CHECKLIST[0], orders: ['drive-check'] },
-    { ...CHECKLIST[1], orders: ['sampler', 'calibrate'] },
+    { ...CHECKLIST[1], orders: ['sampler'] },
     { ...CHECKLIST[2], orders: ['audit'] },
-    { ...CHECKLIST[3], orders: ['suits'] },
 ];
 
 export function expeditionChecklist(id: ExpeditionId): readonly ChecklistGroup[] {
