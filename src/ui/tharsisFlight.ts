@@ -1,7 +1,6 @@
-import { Draggable, Interactable, UINode, UIPositionType, px, uiNodeWorldBox, type Entity, type FocusManagerState,
+import { Draggable, Interactable, UINode, UIPositionType, px, uiNodeWorldBox, type Color, type Entity, type FocusManagerState,
     type InputState, type UIEventQueue, type World } from 'esengine';
 import type { CargoItemId, CrewMember, MainLoopResult, MissionSetupInput, ResourcePool } from '../contracts/gameContract';
-import { CREW_ABILITIES } from '../data/crewAbilities';
 import { formatResource, missionDeadline, resourceEntries, RESOURCE_LABELS } from '../data/missions';
 import { expeditionChecklist, type Technique } from '../data/tharsisOrders';
 import { checkGeminiConnection } from '../services/geminiPlanner';
@@ -9,24 +8,34 @@ import { discussWork, draftSurveyBriefing, type DiscussionMessage, type TaskDraf
 import { advanceSol, commitBriefing, continueAfterOutcome, continueAfterReport, createInitialGameState, isTharsis } from '../simulation/solEngine';
 import { defaultLoad, expeditionFor, fieldCrew, fieldReturnEstimate, resourceForecast, roverPosition, stormDay, type RoverLoad } from '../simulation/tharsis';
 import { briefingPreview, captainCanPreview, resolveBriefing, selectBriefingPreview, choiceBlock, commitmentLabel } from '../simulation/tharsisEvents';
-import { dutyMoraleLoss, FIELD_REST_MORALE, LOW_MORALE, radiationEffects, REST_MORALE, SEVERE_MORALE } from '../simulation/tharsisConditions';
+import { LOW_MORALE, radiationEffects, SEVERE_MORALE } from '../simulation/tharsisConditions';
 import { acceptCustomWork, acceptWork, assignWork, findOrder, stationCrew } from '../simulation/tharsisWork';
 import { assessMission, type MissionAction } from '../simulation/missionStatus';
-import { crewAbilityStatus, stationShiftCapacity } from '../simulation/crewAbilities';
 import { hasUpgrade } from '../simulation/tharsisUpgrades';
+import { stationShiftCapacity } from '../simulation/crewAbilities';
 import { makeFlightUi, type Bounds, type FlightArt, type FlightUi } from './flightUi';
 import { showRoverChecklist, showStorage } from './tharsisManifest';
 import { RESOURCE_KEYS, resourceRate, runway, showConditions, showResources, signed } from './tharsisResources';
-import { showAriesBadge, showTerminal, type TerminalStatus } from './tharsisTerminal';
+import { ariesStatus, showTerminal, type TerminalStatus } from './tharsisTerminal';
 import { showWorkConsole, type WorkPanel } from './tharsisWorkConsole';
-import { makeAbsBox, setVisualColor } from './theme';
+import { makeAbsBox, setTextColor, setVisualColor } from './theme';
 import { makeMotion } from './motion';
 import { play } from './feedback';
+import { startAirlock, type Airlock } from './airlock';
 import { mountSceneAmbience, SITE_AMBIENCE, STATION_AMBIENCE } from './sceneAmbience';
 import { HEAD_TOP, mountStationCrew, SPRITE_H, SPRITE_W, type StationCrew, type StationCrewMember } from './stationCrew';
 
 /** The name tag over a walking crew member (screen px). */
 const CREW_TAG = { w: 88, h: 44 } as const;
+/** The room titles on the beam between the windows and the rooms (screen px). */
+const ROOM_TITLE = { w: 220, h: 30, y: 264, size: 17 } as const;
+/** Each room title's light: Rover Bay, Instrument Lab, Life Support, Storage. */
+const ROOM_COLOR: readonly Color[] = [
+    { r: 0.96, g: 0.72, b: 0.31, a: 1 },
+    { r: 0.31, g: 0.78, b: 0.97, a: 1 },
+    { r: 0.36, g: 0.7, b: 0.3, a: 1 },
+    { r: 0.94, g: 0.47, b: 0.16, a: 1 },
+];
 /** The stripe along the top of a crew member's tag: their suit or patch colour. */
 const ROLE_COLOR: Record<CrewMember['role'], { r: number; g: number; b: number; a: number }> = {
     engineer: { r: 0.94, g: 0.47, b: 0.16, a: 1 },
@@ -106,18 +115,41 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     let backdropView: 'station' | 'expedition' | null = null;
     let ambience: () => void = () => {};
     let crewWalkers: StationCrew | null = null;
+    /** The airlock doors, while switching between the station and the expedition. */
+    let airlock: Airlock | null = null;
+    /** Switch views through the airlock (straight away with Reduced Motion). */
+    function goTo(next: 'station' | 'expedition'): void {
+        if (next === view && !airlock) return;
+        if (profile.reducedMotion || airlock) {
+            view = next;
+            dirty = true;
+            return;
+        }
+        const doorsUi = makeFlightUi(world, events, doorLayer, art, focus, profile);
+        const site = expeditionFor(state).site.replace(/^the /, '');
+        const subtitle = next === 'expedition' ? `Rover bay doors opening · ${site}` : 'Airlock cycling · habitat pressurised';
+        airlock = startAirlock(world, doorsUi, doorLayer, next === 'expedition' ? 'EXPEDITION' : 'STATION', subtitle, () => {
+            view = next;
+            dirty = true;
+        });
+    }
     /** The name tags over the walking crew, redrawn with the UI and moved every frame. */
     let crewTags: { id: string; entity: Entity; x: number; y: number; dy: number }[] = [];
     const backdropMotion = makeMotion(world, profile.reducedMotion);
-    /** Who walks about the station: everyone not with the rover and not incapacitated. */
+    // Three fixed layers, made once, bottom to top: the scene, the UI, the airlock doors. Each is
+    // rebuilt inside its own layer, so a rebuild never changes which is drawn on top.
+    const sceneLayer = makeAbsBox(world, root, 0, 0, 1280, 720, undefined, true);
+    const uiLayer = makeAbsBox(world, root, 0, 0, 1280, 720);
+    const doorLayer = makeAbsBox(world, root, 0, 0, 1280, 720, undefined, true);
+    /** Who is about the station: everyone not with the rover (the incapacitated stand still). */
     function crewOnStation(): StationCrewMember[] {
-        const here = new Set(stationCrew(state).filter(member => member.health > 0).map(member => member.id));
-        return state.crew.map(member => ({ id: member.id, role: member.role, present: here.has(member.id) }));
+        const here = new Set(stationCrew(state).map(member => member.id));
+        return state.crew.map(member => ({ id: member.id, role: member.role, present: here.has(member.id), still: member.health <= 0 }));
     }
     function drawBackdrop(): void {
         if (backdrop !== null && backdropView === view) return;
         if (backdrop !== null) world.despawn(backdrop);
-        backdrop = makeAbsBox(world, root, 0, 0, 1280, 720);
+        backdrop = makeAbsBox(world, sceneLayer, 0, 0, 1280, 720);
         backdropView = view;
         const backUi = makeFlightUi(world, events, backdrop, art, focus, profile);
         const atSite = view === 'expedition';
@@ -139,11 +171,12 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     let prompt = '';
     let selectedResource: keyof ResourcePool = 'energy';
     let resourcePage = 0;
-    let moraleInfo = false;
     let reportPage = 0;
     let objectivePage = 0;
     let issuePage: number | null = null;
     let guideVisible = true;
+    /** The game menu (retry, new mission, main menu) under the Menu button. */
+    let gameMenu = false;
     let coach: Coach | null = null;
     const levels: AudioSettings = { masterVolume: profile.masterVolume, musicVolume: profile.musicVolume,
         sfxVolume: profile.sfxVolume, soundEnabled: profile.soundEnabled };
@@ -193,7 +226,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         panel = next;
         selected = orderId ?? null;
         message = '';
-        moraleInfo = false;
+        gameMenu = false;
         if (next === 'aries') {
             const nextTopic = orderId ?? null;
             if (topic !== nextTopic) {
@@ -342,6 +375,43 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     }
 
     /**
+     * The slim nameplate look shared by the crew tags and the room titles: a dark see-through plate
+     * with a coloured stripe along the top and a soft shadow. With `onPress` the whole `group` is
+     * one click area (it must not be click-through: in this engine that turns off everything
+     * inside it), outlined in amber on hover and registered under `key` for the tutorial.
+     */
+    function plate(group: Entity, w: number, h: number, stripe: Color, onPress?: () => void, key?: string): void {
+        const p = ui.palette;
+        const fill = { r: 0.06, g: 0.06, b: 0.12, a: 0.86 };
+        const shadow = ui.box(group, [2, 2, w, h], { r: 0, g: 0, b: 0, a: 0.35 });
+        const back = ui.box(group, [0, 0, w, h], fill);
+        ui.box(group, [0, 0, w, 2], stripe);
+        if (!onPress) return;
+        world.insert(group, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
+        const edges = [[-2, -2, w + 4, 2], [-2, h, w + 4, 2], [-2, 0, 2, h], [w, 0, 2, h]] as const;
+        const outline = edges.map(bounds => ui.box(group, [...bounds], p.amber));
+        outline.forEach(edge => ui.show(edge, false));
+        let hovered = false;
+        const hover = (on: boolean) => {
+            // Hover events bubble up from the plate's parts: react once per real enter or exit.
+            if (!world.valid(group) || hovered === on) return;
+            hovered = on;
+            if (on) play('tick');
+            outline.forEach(edge => ui.show(edge, on));
+            setVisualColor(world, back, on ? { r: 0.14, g: 0.14, b: 0.24, a: 0.94 } : fill);
+            ui.show(shadow, !on);
+        };
+        ui.on(group, 'hover_enter', () => hover(true));
+        ui.on(group, 'hover_exit', () => hover(false));
+        ui.on(group, 'press', () => {
+            if (!world.valid(group)) return;
+            play('blip');
+            onPress();
+        });
+        if (key) controls.set(key, group);
+    }
+
+    /**
      * A name tag over a walking crew member, with health and morale bars, plus a click area over
      * their body; both open their crew panel. tick() keeps it over them as they walk.
      */
@@ -351,16 +421,14 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         if (!at) return;
         const { w, h } = CREW_TAG;
         const tagY = HEAD_TOP - h - 8;
-        // One click area from the top of the tag down to the room button that hides the boots. It
-        // must not be click-through: in this engine that also turns off everything inside it.
-        const group = makeAbsBox(world, parent, at.x - w / 2, at.top + tagY, w, h + 8 + SPRITE_H - HEAD_TOP - 20);
-        const plate = { r: 0.06, g: 0.06, b: 0.12, a: 0.86 };
-        const shadow = ui.box(group, [2, 2, w, h], { r: 0, g: 0, b: 0, a: 0.35 });
-        const back = ui.box(group, [0, 0, w, h], plate);
-        ui.box(group, [0, 0, w, 2], ROLE_COLOR[member.role]);
+        // The click area runs from the top of the tag down to their feet.
+        const group = makeAbsBox(world, parent, at.x - w / 2, at.top + tagY, w, h + 8 + SPRITE_H - HEAD_TOP - 4);
+        // The tutorial points at crew-<id> (it follows the tag as the crew member walks).
+        plate(group, w, h, ROLE_COLOR[member.role], interactive ? () => open('abilities', member.id) : undefined, `crew-${member.id}`);
         // A little pointer down to the head.
-        ui.box(group, [w / 2 - 4, h, 8, 2], plate);
-        ui.box(group, [w / 2 - 2, h + 2, 4, 2], plate);
+        const fill = { r: 0.06, g: 0.06, b: 0.12, a: 0.86 };
+        ui.box(group, [w / 2 - 4, h, 8, 2], fill);
+        ui.box(group, [w / 2 - 2, h + 2, 4, 2], fill);
         ui.label(group, [4, 2, w - 8, 16], member.name.split(' ')[0]!, { display: true, size: 14, center: true, color: p.white });
         const bar = (y: number, value: number, color: typeof p.good) => {
             ui.box(group, [8, y, w - 16, 3], { r: 1, g: 1, b: 1, a: 0.12 });
@@ -371,33 +439,83 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         // Busy or ready this Sol (the crew panel says what with).
         const duty = crewDuty(state, member);
         ui.label(group, [4, 30, w - 8, 13], duty.word.toUpperCase(), { display: true, size: 11, center: true, color: p[duty.tone] });
-        if (interactive) {
-            world.insert(group, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
-            // Hover: an amber outline round the tag, a lighter plate.
-            const edges = [[-2, -2, w + 4, 2], [-2, h, w + 4, 2], [-2, 0, 2, h], [w, 0, 2, h]] as const;
-            const outline = edges.map(bounds => ui.box(group, [...bounds], p.amber));
-            let hovered: boolean | null = null;
+        crewTags.push({ id: member.id, entity: group, x: -1, y: -1, dy: tagY });
+    }
+
+    /** A room's title on the beam above it, in the crew tags' style; it opens the room's work orders. */
+    function roomTitle(parent: Entity, key: Panel, title: string, centre: number, light: Color, interactive: boolean): void {
+        // Stencilled on the beam: no box, a small coloured light, the name with a dark drop shadow;
+        // on hover the name turns amber and is underlined.
+        const { w, h, size } = ROOM_TITLE;
+        const p = ui.palette;
+        const group = makeAbsBox(world, parent, centre - w / 2, ROOM_TITLE.y, w, h);
+        const textW = Math.round(title.length * size * 0.56);
+        const x0 = Math.round((w - textW - 16) / 2);
+        ui.box(group, [x0, 11, 8, 8], light);
+        ui.box(group, [x0 + 2, 13, 4, 4], { r: 1, g: 1, b: 1, a: 0.45 });
+        ui.label(group, [x0 + 18, 4, textW + 12, 24], title, { display: true, size, color: { r: 0, g: 0, b: 0, a: 0.75 } });
+        const name = ui.label(group, [x0 + 16, 2, textW + 12, 24], title, { display: true, size, color: p.white });
+        if (!interactive) return;
+        const underline = ui.box(group, [x0 + 16, 26, textW, 2], p.amber);
+        ui.show(underline, false);
+        world.insert(group, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
+        let hovered = false;
+        const hover = (on: boolean) => {
+            if (!world.valid(group) || hovered === on) return;
+            hovered = on;
+            if (on) play('tick');
+            ui.show(underline, on);
+            setTextColor(world, name, on ? p.amber : p.white);
+        };
+        ui.on(group, 'hover_enter', () => hover(true));
+        ui.on(group, 'hover_exit', () => hover(false));
+        ui.on(group, 'press', () => { if (world.valid(group)) { play('blip'); open(key); } });
+        controls.set(key, group);
+    }
+
+    /**
+     * The Station | Expedition switch: one dark track with a bright pill under the view that is
+     * showing; the other side is plain text that lights up on hover.
+     */
+    function viewSwitch(parent: Entity, atSite: boolean): void {
+        const p = ui.palette;
+        const track = makeAbsBox(world, parent, 892, 12, 376, 42, { r: 0.04, g: 0.05, b: 0.1, a: 0.94 });
+        for (const [x, y, w, h] of [[0, 0, 376, 2], [0, 40, 376, 2], [0, 0, 2, 42], [374, 0, 2, 42]] as const) ui.box(track, [x, y, w, h], p.edge);
+        const sides = [['station', 'Station', false], ['expedition', 'Expedition', true]] as const;
+        sides.forEach(([key, label, site], index) => {
+            const active = site === atSite;
+            const side = makeAbsBox(world, track, 4 + index * 184, 4, 184, 34);
+            const fill = ui.box(side, [0, 0, 184, 34], active ? p.cyan : { r: 1, g: 1, b: 1, a: 0 });
+            const text = ui.label(side, [4, 2, 176, 30], label, { display: true, size: 17, center: true, color: active ? p.ink : p.secondary });
+            controls.set(key, side);
+            if (active) return;
+            world.insert(side, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
+            let hovered = false;
             const hover = (on: boolean) => {
-                // Hover events bubble up from the tag's parts: react once per real enter or exit.
-                if (hovered === on) return;
+                if (!world.valid(side) || hovered === on) return;
                 hovered = on;
                 if (on) play('tick');
-                outline.forEach(edge => ui.show(edge, on));
-                setVisualColor(world, back, on ? { ...plate, r: 0.14, g: 0.14, b: 0.24, a: 0.94 } : plate);
-                ui.show(shadow, !on);
+                setVisualColor(world, fill, { r: 1, g: 1, b: 1, a: on ? 0.1 : 0 });
+                setTextColor(world, text, on ? p.white : p.secondary);
             };
-            outline.forEach(edge => ui.show(edge, false));
-            ui.on(group, 'hover_enter', () => { if (world.valid(group)) hover(true); });
-            ui.on(group, 'hover_exit', () => { if (world.valid(group)) hover(false); });
-            ui.on(group, 'press', () => {
-                if (!world.valid(group)) return;
+            ui.on(side, 'hover_enter', () => hover(true));
+            ui.on(side, 'hover_exit', () => hover(false));
+            ui.on(side, 'press', () => {
+                if (!world.valid(side)) return;
                 play('blip');
-                open('abilities', member.id);
+                goTo(site ? 'expedition' : 'station');
             });
-            // The tutorial points at crew-<id> (it follows the tag as the crew member walks).
-            controls.set(`crew-${member.id}`, group);
-        }
-        crewTags.push({ id: member.id, entity: group, x: -1, y: -1, dy: tagY });
+        });
+    }
+
+    function crewChip(parent: Entity, member: CrewMember, bounds: Bounds, interactive: boolean): void {
+        const p = ui.palette;
+        const chip = interactive ? button(`crew-${member.id}`, parent, bounds, () => open('abilities', member.id), { tone: 'tile', quiet: true }).entity
+            : ui.group(parent, bounds);
+        ui.image(chip, [5, 4, 26, 32], member.portraitPath);
+        ui.label(chip, [36, 3, bounds[2] - 40, 17], member.name.split(' ')[0]!, { display: true, size: 14, fit: 10 });
+        const duty = crewDuty(state, member);
+        ui.label(chip, [36, 21, bounds[2] - 40, 15], duty.word.toUpperCase(), { display: true, size: 10, fit: 8, color: p[duty.tone] });
     }
 
     /** Keep each name tag over its crew member. */
@@ -415,6 +533,47 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         }
     }
 
+    /** A speaker with two sound waves (a red cross when sound is off). */
+    function speakerIcon(parent: Entity, color: Color): void {
+        ui.box(parent, [1, 6, 4, 4], color);
+        ui.box(parent, [5, 4, 2, 8], color);
+        ui.box(parent, [7, 2, 2, 12], color);
+        if (!levels.soundEnabled) {
+            for (const [x, y] of [[10, 5], [12, 7], [14, 9], [14, 5], [10, 9]] as const) ui.box(parent, [x, y, 2, 2], ui.palette.bad);
+            return;
+        }
+        ui.box(parent, [11, 5, 2, 6], color);
+        ui.box(parent, [14, 3, 2, 10], color);
+    }
+
+    /** A question mark. */
+    function helpIcon(parent: Entity, color: Color): void {
+        ui.box(parent, [4, 1, 8, 2], color);
+        ui.box(parent, [2, 3, 2, 3], color);
+        ui.box(parent, [12, 3, 2, 4], color);
+        ui.box(parent, [9, 7, 3, 2], color);
+        ui.box(parent, [7, 9, 2, 3], color);
+        ui.box(parent, [7, 13, 2, 2], color);
+    }
+
+    /** Three bars. */
+    function menuIcon(parent: Entity, color: Color): void {
+        for (const y of [2, 7, 12]) ui.box(parent, [1, y, 14, 2], color);
+    }
+
+    /** The game menu, dropped down under its button (drawn last, over the help strip). */
+    function drawGameMenu(): void {
+        if (!gameMenu || surface === null) return;
+        const p = ui.palette;
+        const menu = ui.frame(surface, [1028, 102, 240, 158], p.ink, p.teal);
+        const items: ReadonlyArray<readonly [string, string, () => void, 'plain' | 'primary']> = [
+            ['menu-retry', training ? 'Retry training' : 'Retry mission', onRetry, 'plain'],
+            ['menu-new', 'New mission', () => onExit('mission'), 'plain'],
+            ['menu-main', 'Main menu', () => onExit('menu'), 'primary'],
+        ];
+        items.forEach(([key, label, action, tone], index) => button(key, menu, [12, 12 + index * 46, 216, 40], action, { label, labelSize: 15, tone }));
+    }
+
     function board(root: Entity, interactive: boolean, status?: MissionAssessment) {
         const p = ui.palette;
         const atSite = view === 'expedition';
@@ -424,11 +583,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         const day = stormDay(state, sol);
         const weatherAtSol = run.phase === 'report' ? state.timeline[state.timeline.length - 1]?.weather ?? state.conditions.weather : state.conditions.weather;
         if (day) ui.box(root, [0, 98, 1280, 476], { r: 0.41, g: 0.15, b: 0.08, a: 0.26 });
-        const clock = ui.frame(root, [12, 12, 376, 84], p.ink, day ? p.rust : p.edge);
-        ui.label(clock, [14, 4, 352, 34], expeditionFor(state).region, { display: true, size: 33, fit: 20 });
-        ui.label(clock, [16, 44, 342, 22], `SOL ${sol} / ${missionDeadline(state)}   ·   ${atSite ? 'EXPEDITION' : 'STATION'}`, { color: p.amber, size: 15 });
-
-        const monitor = ui.frame(root, [400, 12, 868, 84], p.ink, p.teal);
+        const monitor = ui.frame(root, [12, 12, 868, 84], p.ink, p.teal);
         const forecast = interactive ? resourceForecast(state, atSite && rover ? 'rover' : 'station') : null;
         const values = [local.conditions.radiation, local.conditions.morale];
         let tooltipTarget: Entity | null = null;
@@ -466,18 +621,31 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
                 { size: 12, color: caution ? p.amber : p.secondary });
         });
 
-        const telemetry = ui.frame(root, [12, 108, 504, 46], p.ink, day ? p.rust : p.edge);
+        const telemetry = interactive
+            ? button('conditions', root, [12, 108, 300, 46], () => open('conditions'), { tone: 'tile', quiet: true }).entity
+            : ui.frame(root, [12, 108, 300, 46], p.ink, day ? p.rust : p.edge);
         const weather = `${weatherAtSol}${day ? ` ${day}/3` : ''}${run.phase !== 'report' ? ` · ${local.conditions.temperatureC} °C` : ''}`;
-        ui.label(telemetry, [12, 0, 326, 38], weather, { size: 16, color: day || weatherAtSol === 'Dust Haze' ? p.amber : p.text });
-        if (interactive) button('conditions', telemetry, [342, 3, 152, 34], () => open('conditions'), { label: 'Weather', labelSize: 14 });
+        ui.label(telemetry, [12, 2, 254, 38], weather, { size: 16, fit: 12, color: day || weatherAtSol === 'Dust Haze' ? p.amber : p.text });
+        if (interactive) ui.label(telemetry, [270, 2, 20, 38], '›', { display: true, size: 22, color: p.secondary });
         if (interactive) {
-            button('station', root, [928, 108, 152, 44], () => { view = 'station'; dirty = true; }, { label: 'Station', tone: !atSite ? 'hero' : 'plain' });
-            button('expedition', root, [1088, 108, 180, 44], () => { view = 'expedition'; dirty = true; }, { label: 'Expedition', tone: atSite ? 'hero' : 'plain' });
+            // Top right: the Station | Expedition tabs, and under them the game's own controls.
+            viewSwitch(root, atSite);
+            const tools: ReadonlyArray<readonly [string, string, () => void, (parent: Entity, color: Color) => void]> = [
+                ['audio', 'Audio', () => open('audio'), speakerIcon],
+                ['help', 'Help', () => { guideVisible = !guideVisible; dirty = true; }, helpIcon],
+                ['game-menu', 'Menu', () => { gameMenu = !gameMenu; dirty = true; }, menuIcon],
+            ];
+            tools.forEach(([key, label, action, icon], index) => {
+                const on = (key === 'help' && guideVisible) || (key === 'game-menu' && gameMenu);
+                const tool = button(key, root, [892 + index * 126, 60, 124, 36], action, { tone: on ? 'hero' : 'plain' }).entity;
+                icon(ui.group(tool, [22, 10, 16, 16]), on ? p.white : p.cyan);
+                ui.label(tool, [44, 2, 72, 32], label, { display: true, size: 15, color: p.text });
+            });
             const caution = status?.review ?? status?.notices[0]?.message;
             if (caution) {
-                warningGlow = ui.box(root, [520, 104, 402, 54], { r: 0.93, g: 0.69, b: 0.4, a: 0.35 });
-                const risk = button('objective-warning', root, [524, 108, 394, 46], () => open('objectives'), { tone: 'tile' });
-                ui.label(risk.entity, [9, 4, 376, 38], caution, { size: 13, fit: 12, color: p.amber, wrap: true });
+                warningGlow = ui.box(root, [320, 104, 952, 54], { r: 0.93, g: 0.69, b: 0.4, a: 0.35 });
+                const risk = button('objective-warning', root, [324, 108, 944, 46], () => open('objectives'), { tone: 'tile' });
+                ui.label(risk.entity, [12, 4, 920, 38], caution, { size: 14, fit: 12, color: p.amber, wrap: true });
             } else {
                 warningGlow = null;
             }
@@ -485,9 +653,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
 
         if (!atSite) {
             const rooms = ['rover', 'instruments', 'life', 'cargo'] as const;
-            ROOM_NAMES.forEach((title, i) => {
-                if (interactive) button(rooms[i]!, root, [24 + 320 * i, 516, 272, 44], () => open(rooms[i]!), { label: title });
-            });
+            ROOM_NAMES.forEach((title, i) => roomTitle(root, rooms[i]!, title, 160 + 320 * i, ROOM_COLOR[i]!, interactive));
         } else {
             const card = ui.frame(root, [24, 280, 416, 220], p.ink, p.teal);
             const eta = fieldReturnEstimate(state);
@@ -499,7 +665,9 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
                 rover?.phase === 'site' ? `At ${site} · Survey active` : run.returnedWithData ? 'Docked · Data recovered' : `Docked · Readying for ${site}`;
             ui.label(card, [16, 8, 368, 44], rover ? 'Rover telemetry' : `${site[0]!.toUpperCase()}${site.slice(1)} overlook`, { display: true, size: 26, fit: 18, color: p.cyan });
             ui.label(card, [16, 58, 368, 38], leg, { wrap: true, size: 15 });
-            ui.label(card, [16, 104, 368, 24], fieldCrew(state).map(member => member.name.split(' ')[0]).join(' + ') || 'No field crew selected', { color: p.secondary });
+            const field = fieldCrew(state);
+            if (!field.length) ui.label(card, [16, 104, 368, 24], 'No field crew selected', { color: p.secondary });
+            field.forEach((member, index) => crewChip(card, member, [16 + index * 128, 96, 120, 40], interactive));
             ui.label(card, [16, 144, 368, 28], `${run.hours}/${surveyHours}h recorded${hasUpgrade(state, 'recorder') ? ` · Recorder ${run.upgrades.recorderUsed ? 'used' : 'ready'}` : ''}`,
                 { size: 15, color: run.hours === surveyHours ? p.good : p.amber });
             ui.label(card, [16, 174, 368, 25], `${run.completed.harden ? 'Hardened' : 'Standard rover'} · ${dockStatus}`, { size: 14, color: dockRisk ? p.bad : p.secondary });
@@ -510,76 +678,59 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             ui.box(route, [24, 39, 4, 14], p.secondary);
             ui.box(route, [379, 39, 4, 14], p.secondary);
             ui.icon(route, 10 + Math.round(356 * roverPosition(state)), 29, 32, 'rover', p.amber);
-            if (interactive) button('fieldLoad', root, [24, 516, 416, 44], () => open(rover ? 'roverCargo' : 'roverChecklist'), { label: rover ? 'Rover supplies & return' : 'Open rover checklist' });
         }
 
-        const checklist = ui.frame(root, [12, 572, 324, 136], p.ink);
-        ui.label(checklist, [12, 1, 154, 22], 'Mission steps', { display: true, size: 18, color: p.amber });
+        // Bottom left: where and when, with Goals and Weather under it.
+        const clock = ui.frame(root, [12, 572, 324, 136], p.ink, day ? p.rust : p.edge);
+        ui.label(clock, [12, 2, 300, 22], expeditionFor(state).region, { display: true, size: 17, fit: 12, color: p.secondary });
+        ui.label(clock, [12, 24, 300, 58], `SOL ${sol} / ${missionDeadline(state)}`, { display: true, size: 48, fit: 30, color: p.amber });
         if (interactive) {
-            objectiveGlow = ui.box(checklist, [169, -1, 142, 27], { r: 0.4, g: 0.85, b: 0.9, a: 0.35 });
-            button('objectives', checklist, [172, 2, 136, 23], () => open('objectives'), { label: 'Goals', labelSize: 13, tone: 'plain' });
+            objectiveGlow = ui.box(clock, [9, 87, 148, 38], { r: 0.4, g: 0.85, b: 0.9, a: 0.35 });
+            button('objectives', clock, [12, 90, 142, 32], () => open('objectives'), { label: 'Goals', labelSize: 15, tone: 'plain' });
+            button('log', clock, [166, 90, 146, 32], () => open('log'), { label: 'Log', labelSize: 15, tone: 'plain' });
         } else {
             objectiveGlow = null;
         }
+        // Crew at the station walk about their rooms with a name tag (crewTag); crew with the rover
+        // show as chips on the expedition tab.
+        crewTags = [];
+        if (!atSite && crewWalkers) {
+            for (const member of state.crew) if (crewOnStation().some(item => item.id === member.id && item.present)) crewTag(root, member, interactive);
+        }
+
+        // Bottom middle: the mission steps, each with its progress.
+        const checklist = ui.frame(root, [348, 572, 532, 136], p.ink);
+        ui.label(checklist, [12, 1, 300, 24], 'Mission steps', { display: true, size: 19, color: p.amber });
         expeditionChecklist(run.expedition).forEach((item, index) => {
             const count = item.orders.filter(id => run.completed[id]).length;
-            const text = `${item.label}  ${count}/${item.orders.length}`;
-            const bx = 12 + (index % 2) * 152;
-            const by = 28 + Math.floor(index / 2) * 44;
-            if (interactive) {
-                if (count < item.orders.length) ui.box(checklist, [bx - 2, by - 2, 148, 40], p.amber);
-                button(`check-${item.bay}`, checklist, [bx, by, 144, 36], () => open(item.bay), {
-                    label: text, labelSize: 15, tone: 'plain',
-                });
-            }
-            else ui.label(checklist, [bx, by, 144, 36], text, { size: 14 });
-        });
-        const crew = ui.frame(root, [348, 572, 532, 136], p.ink);
-        const capacity = stationCrew(state).reduce((sum, member) => sum + stationShiftCapacity(state, member), 0);
-        ui.label(crew, [12, 0, 420, 24], `Your crew · ${run.work.filter(job => job.leadId).length}/${capacity} station shifts`,
-            { display: true, size: 19, fit: 16 });
-        if (interactive) button('morale-info', crew, [442, 1, 74, 23], () => { moraleInfo = !moraleInfo; dirty = true; }, { label: 'Morale', labelSize: 14, tone: moraleInfo ? 'hero' : 'plain' });
-        // On the station screen the crew walk about their rooms with a name tag over their heads
-        // (crewTag); the cards here are only for those who are not walking: out with the rover or
-        // incapacitated. The expedition screen keeps a card for everyone.
-        const walking = new Set(!atSite && crewWalkers ? crewOnStation().filter(member => member.present).map(member => member.id) : []);
-        crewTags = [];
-        for (const member of state.crew) if (walking.has(member.id)) crewTag(root, member, interactive);
-        const cards = state.crew.filter(member => !walking.has(member.id));
-        if (!cards.length) {
-            ui.label(crew, [12, 36, 508, 84], 'Everyone is at the station. Click a crew member in their room to see their specialty.',
-                { size: 15, wrap: true, color: p.secondary });
-        }
-        cards.forEach((member, index) => {
-            const x = 12 + index * 128;
-            const field = rover?.crewIds.includes(member.id);
-            const bounds = [x, 28, 116, 92] as const;
-            const card = interactive ? button(`crew-${member.id}`, crew, bounds, () => open('abilities', member.id)).entity : ui.group(crew, bounds);
-            ui.image(card, [4, 12, 38, 48], member.portraitPath);
-            ui.label(card, [44, 10, 68, 24], member.name.split(' ')[0]!, { display: true, size: 16 });
-            ui.label(card, [44, 32, 68, 18], `${member.health} HP`, { size: 11, color: p.secondary });
-            ui.label(card, [44, 46, 70, 15], `${member.morale}% Morale`, { size: 10, color: member.morale < LOW_MORALE ? p.bad : p.good });
-            ui.label(card, [4, 60, 108, 15], CREW_ABILITIES[member.role].name, { center: true, size: 11, fit: 9, color: p.text });
-            ui.label(card, [4, 76, 108, 14], crewAbilityStatus(state, member), { center: true, size: 10, fit: 9,
-                color: member.health <= 0 ? p.bad : field ? p.cyan : p.amber });
+            const done = count === item.orders.length;
+            const bounds = [12 + (index % 2) * 256, 32 + Math.floor(index / 2) * 50, 248, 44] as const;
+            if (interactive && !done) ui.box(checklist, [bounds[0] - 2, bounds[1] - 2, bounds[2] + 4, bounds[3] + 4], p.amber);
+            const tile = interactive
+                ? button(`check-${item.bay}`, checklist, bounds, () => open(item.bay), { tone: 'tile', quiet: true }).entity
+                : ui.group(checklist, bounds);
+            ui.label(tile, [10, 3, 170, 22], item.label, { display: true, size: 16, fit: 12, color: done ? p.good : p.text });
+            ui.label(tile, [180, 3, 58, 22], done ? 'Done' : `${count}/${item.orders.length}`, { size: 14, color: done ? p.good : p.secondary });
+            ui.box(tile, [10, 30, 228, 6], { r: 1, g: 1, b: 1, a: 0.12 });
+            ui.box(tile, [10, 30, Math.round(228 * count / item.orders.length), 6], done ? p.good : p.amber);
         });
         const ops = ui.frame(root, [892, 572, 376, 136], p.ink, p.teal);
         if (interactive) {
-            button('aries', ops, [8, 6, 145, 31], () => open('aries'), { label: 'A.R.I.E.S.', labelSize: 15, tone: 'hero' });
-            showAriesBadge(ui, ops, [8, 38, 145, 22], terminalStatus);
-            button('roverChecklist', ops, [163, 8, 133, 44], () => open(rover ? 'roverCargo' : 'roverChecklist'), { label: rover ? 'Rover supplies' : 'Rover trip', labelSize: 13 });
-            button('tasks', ops, [305, 8, 55, 44], () => open('assignments'), { label: 'Tasks', labelSize: 13 });
-            button('log', ops, [8, 64, 58, 52], () => open('log'), { label: 'Log', labelSize: 14 });
-            button('audio', ops, [73, 64, 63, 52], () => open('audio'), { label: 'Audio', labelSize: 14 });
-            button('endSol', ops, [144, 64, 216, 52], requestEndSol, { label: status?.review ? 'Review & End Sol' : 'End Sol', tone: 'primary' });
-        } else ui.label(ops, [12, 17, 344, 92], 'Controls', { display: true, size: 26, center: true, color: p.cyan });
-        if (interactive && moraleInfo) {
-            const morale = ui.frame(root, [371, 334, 504, 224], p.ink, p.teal);
-            ui.label(morale, [14, 8, 454, 31], 'Crew Morale', { display: true, size: 23 });
-            ui.label(morale, [14, 48, 470, 50], `Working costs ${dutyMoraleLoss(1)} to ${dutyMoraleLoss(4)} points per Sol as the duty streak grows. A rest Sol restores ${REST_MORALE} and resets the streak.`, { size: 15, wrap: true, top: true });
-            ui.label(morale, [14, 103, 470, 52], `Pace drops 25% below ${LOW_MORALE}% Morale and 50% below ${SEVERE_MORALE}%. Field crew must rest below ${FIELD_REST_MORALE}%.`, { size: 15, wrap: true, color: p.amber, top: true });
-            ui.label(morale, [14, 160, 470, 46], 'Unassign leads in Scheduled tasks or plan a field rest in Expedition supplies.', { size: 14, wrap: true, color: p.secondary, top: true });
+            const capacity = stationCrew(state).reduce((sum, member) => sum + stationShiftCapacity(state, member), 0);
+            const link = ariesStatus(p, terminalStatus);
+            const actions: ReadonlyArray<readonly [string, string, string, Color, () => void, 'plain' | 'hero']> = [
+                ['tasks', 'Tasks', `${run.work.filter(job => job.leadId).length}/${capacity} shifts`, p.secondary, () => open('assignments'), 'plain'],
+                ['roverChecklist', 'Rover', rover ? 'Supplies' : 'Checklist', p.secondary, () => open(rover ? 'roverCargo' : 'roverChecklist'), 'plain'],
+                ['aries', 'A.R.I.E.S.', link.label, link.color, () => open('aries'), 'hero'],
+            ];
+            actions.forEach(([key, title, line, color, action, tone], index) => {
+                const control = button(key, ops, [8 + index * 122, 8, 116, 52], action, { tone }).entity;
+                ui.label(control, [4, 3, 108, 24], title, { display: true, size: 17, fit: 13, center: true, color: p.text });
+                ui.label(control, [4, 27, 108, 18], line, { size: 12, fit: 9, center: true, color });
+            });
+            button('endSol', ops, [8, 66, 360, 60], requestEndSol, { label: status?.review ? 'Review & End Sol' : 'End Sol', labelSize: 22, tone: 'primary' });
         }
+        if (!interactive) ui.label(ops, [12, 17, 344, 92], 'Controls', { display: true, size: 26, center: true, color: p.cyan });
         if (!forecast) return;
         const tooltip = ui.group(root, [524, 104, 394, 90]);
         const tipFrame = ui.frame(tooltip, [0, 0, 394, 90], p.ink, p.cyan);
@@ -727,7 +878,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         }
         drawBackdrop();
         crewWalkers?.sync(crewOnStation());
-        surface = makeAbsBox(world, root, 0, 0, 1280, 720);
+        surface = makeAbsBox(world, uiLayer, 0, 0, 1280, 720);
         ui = makeFlightUi(world, events, surface, art, focus, profile);
         const planning = run.phase === 'planning';
         const load = draft ?? defaultLoad(state);
@@ -750,7 +901,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
                 draft ??= defaultLoad(state);
                 showRoverChecklist({ state, ui, content, button, draft, change, reset: () => { draft = defaultLoad(state); dirty = true; },
                     issuePage, showIssues: page => { issuePage = page; dirty = true; }, openAction,
-                    dispatch: () => { draft = null; view = 'expedition'; open(null); } });
+                    dispatch: () => { draft = null; open(null); goTo('expedition'); } });
             } else if (panel === 'cargo' || panel === 'roverCargo') {
                 showStorage({ state, ui, content, button, area: panel === 'cargo' ? 'station' : 'rover', change,
                     highlight: selected as CargoItemId | undefined, open: target => open(target) });
@@ -813,6 +964,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         if (step?.done) tutorial.markDone();
         if (!training || !step || step.showGuide) showTrainingGuide(ui, surface, button, state, status, guideVisible || Boolean(step), planning && !panel,
             () => { guideVisible = !guideVisible; dirty = true; }, openAction);
+        if (planning && !panel) drawGameMenu();
         coach = step && showCoach(ui, surface, step, key => controls.get(key), {
             next: () => { tutorial.tourStep++; dirty = true; },
             skip: () => { tutorial.finish(); dirty = true; },
@@ -832,6 +984,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         ambience();
         if (dirty && !dragged.size) render();
         moveCrewTags();
+        if (airlock && !airlock.tick()) airlock = null;
         coach?.tick();
         if (!profile.reducedMotion) {
             const pulse = 0.18 + 0.32 * (0.5 + 0.5 * Math.sin(performance.now() * 0.005));

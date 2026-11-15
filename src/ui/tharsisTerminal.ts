@@ -12,10 +12,16 @@ import type { RunButton } from './tharsisFlight';
 
 export type TerminalStatus = 'checking' | 'configured' | 'online' | 'fallback';
 
-export function showAriesBadge(ui: FlightUi, parent: Entity, bounds: Bounds, status: TerminalStatus): void {
-    const p = ui.palette;
+/** What the A.R.I.E.S. link is doing, in words and colour. */
+export function ariesStatus(p: FlightUi['palette'], status: TerminalStatus): { label: string; color: FlightUi['palette']['good'] } {
     const color = status === 'online' ? p.good : status === 'fallback' ? p.amber : p.cyan;
     const label = { online: 'API online', configured: 'API configured', checking: 'Checking API', fallback: 'Local fallback' }[status];
+    return { label, color };
+}
+
+export function showAriesBadge(ui: FlightUi, parent: Entity, bounds: Bounds, status: TerminalStatus): void {
+    const p = ui.palette;
+    const { label, color } = ariesStatus(p, status);
     const badge = ui.frame(parent, bounds, p.ink, color);
     const innerHeight = bounds[3] - 8;
     const iconSize = Math.min(16, innerHeight);

@@ -69,11 +69,11 @@ export interface RunView {
 
 /** Explained once on the first planning screen, before any job is given out. */
 const BOARD_TOUR: readonly CoachStep[] = [
-    { id: 'tour-supplies', area: [400, 12, 868, 84], next: 'Next',
+    { id: 'tour-supplies', area: [12, 12, 868, 84], next: 'Next',
         text: 'This is your Mars station! Up here are your supplies: Power, Food, Water and Air. Never let them run out.' },
-    { id: 'tour-crew', area: [348, 572, 532, 136], next: 'Next',
-        text: 'Here are your 4 astronauts. Each one can do one job every day.' },
-    { id: 'tour-sol', area: [1036, 636, 224, 60], next: 'Got it!',
+    { id: 'tour-crew', area: [16, 380, 1248, 160], next: 'Next',
+        text: 'Here are your astronauts, each in their own room. Each one can do one job every day.' },
+    { id: 'tour-sol', area: [900, 638, 360, 60], next: 'Got it!',
         text: 'A day on Mars is called a SOL. First you give out jobs. Then END SOL finishes the day. Let us give out the first job!' },
 ];
 export const BOARD_TOUR_LENGTH = BOARD_TOUR.length;

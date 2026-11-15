@@ -2,7 +2,8 @@
 //
 // It starts by itself the first time the game is opened and stays on, from the main menu through the
 // training mission, until the player wins the training or presses "Skip tutorial". After that it
-// never starts by itself again; "How to Play" on the main menu starts it over.
+// never starts by itself again; "How to Play" starts it over (on the main menu until the tutorial
+// is done, then in Settings).
 //
 // What it says at each moment is in tutorialSteps.ts; how it is drawn is in coach.ts.
 import { Storage, type Entity } from 'esengine';
@@ -31,6 +32,12 @@ export const tutorial = {
     get active(): boolean {
         load();
         return active;
+    },
+
+    /** Won or skipped once: "How to Play" moves from the main menu into Settings. */
+    get finished(): boolean {
+        load();
+        return finished;
     },
 
     /** Someone who has already finished a mission (before the tutorial existed) is not a new player. */

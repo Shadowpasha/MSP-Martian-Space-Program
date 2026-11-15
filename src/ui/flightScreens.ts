@@ -821,19 +821,29 @@ export function showSettings(
     profile: PlaytestProfile,
     change: (field: SettingField) => void,
     onVolume?: (field: 'masterVolume' | 'musicVolume' | 'sfxVolume', value: number) => void,
+    onHowToPlay?: () => void,
 ): void {
     const { root, palette: p } = ui;
     const panel = ui.frame(root, [248, 108, 1016, 588]);
+    const row = (index: number, title: string, description: string) => {
+        const y = 14 + index * 54;
+        ui.label(panel, [24, y, 600, 28], title, { display: true, size: 22 });
+        ui.label(panel, [24, y + 28, 700, 20], description, { color: p.secondary, size: 14 });
+        return y;
+    };
     for (const [index, [field, title, description]] of ([
         ['soundEnabled', 'Music & Sound', 'Mars music, button clicks and game sounds.'],
         ['vibration', 'Vibration', 'Buzz on taps and launch, on phones and tablets that can vibrate.'],
         ['reducedMotion', 'Reduced Motion', 'Keep the screen still: no slides, hops, shakes or drifting dust.'],
         ['highContrast', 'High Contrast', 'Brighten text, outlines, and focus markers.'],
     ] as const).entries()) {
-        const y = 16 + index * 66;
-        ui.label(panel, [24, y, 600, 32], title, { display: true, size: 24 });
-        ui.label(panel, [24, y + 32, 700, 22], description, { color: p.secondary, size: 14 });
-        ui.button(panel, [800, y + 8, 160, 40], () => change(field), { label: profile[field] ? 'On' : 'Off', tone: profile[field] ? 'primary' : 'plain' });
+        const y = row(index, title, description);
+        ui.button(panel, [800, y + 5, 160, 40], () => change(field), { label: profile[field] ? 'On' : 'Off', tone: profile[field] ? 'primary' : 'plain' });
+    }
+    if (onHowToPlay) {
+        // The tutorial again, from the welcome on the main menu.
+        const y = row(4, 'How to Play', 'Play the tutorial again, with A.R.I.E.S. showing you each step.');
+        ui.button(panel, [800, y + 5, 160, 40], onHowToPlay, { label: 'Start', tone: 'hero' });
     }
 
     ui.box(panel, [24, 286, 936, 2], p.edge);

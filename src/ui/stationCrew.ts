@@ -17,11 +17,9 @@ const FRAME_H = 64 * SCALE;
 /** Where the head centre and the feet sit inside a frame (see art/crew_walkers.py). */
 const HEAD_X = 20 * SCALE;
 const FEET_Y = 62 * SCALE;
-/** The painted floor's back edge (screen px). The room buttons (y 516-560) sit in front of it and
- * hide the crew's boots, like a counter. */
-const FLOOR_Y = 536;
-/** Spots to stand at in each room, head x in screen px: kept within the room button's width, so
- * nobody stands beside a button with their feet showing over the railing. */
+/** The middle of the painted floor deck (screen px), where the crew's feet stand. */
+const FLOOR_Y = 548;
+/** Spots to stand at in each room, head x in screen px: clear of the railings at the room's ends. */
 const ROOM_SPOTS = {
     roverBay: [60, 140, 200, 262],
     lab: [378, 452, 530, 584],
@@ -52,8 +50,10 @@ const idleCell = (frame: number, facing: Facing) => 16 + frame + (facing === 1 ?
 export interface StationCrewMember {
     id: string;
     role: CrewRole;
-    /** At the station and able to move about (not with the rover, not incapacitated). */
+    /** At the station (not with the rover). */
     present: boolean;
+    /** Unable to move about (incapacitated): stands at their spot. */
+    still: boolean;
 }
 
 interface Walker {
@@ -62,6 +62,7 @@ interface Walker {
     x: number;
     facing: Facing;
     present: boolean;
+    still: boolean;
     target: number | null;
     waitUntil: number;
     walkedMs: number;
@@ -113,7 +114,7 @@ export function mountStationCrew(ui: FlightUi, parent: Entity, motion: Motion, c
             `assets/textures/crew_walk_${member.role}.png`, ui.palette.white, idleCell(0, facing));
         ui.show(sprite, member.present);
         return {
-            sprite, spots, x, facing, present: member.present, target: null,
+            sprite, spots, x, facing, present: member.present, still: member.still, target: null,
             waitUntil: Date.now() + 1500 + Math.random() * 3000, walkedMs: 0, idleMs: Math.random() * 1000,
         };
     }
@@ -121,8 +122,12 @@ export function mountStationCrew(ui: FlightUi, parent: Entity, motion: Motion, c
     function sync(members: readonly StationCrewMember[]): void {
         for (const member of members) {
             const walker = walkers.get(member.id);
-            if (!walker) walkers.set(member.id, spawn(member));
-            else if (walker.present !== member.present) {
+            if (!walker) {
+                walkers.set(member.id, spawn(member));
+                continue;
+            }
+            walker.still = member.still;
+            if (walker.present !== member.present) {
                 walker.present = member.present;
                 ui.show(walker.sprite, member.present);
             }
@@ -136,6 +141,11 @@ export function mountStationCrew(ui: FlightUi, parent: Entity, motion: Motion, c
     }
 
     function step(walker: Walker, now: number, dt: number): void {
+        if (walker.still) {
+            walker.target = null;
+            ui.setSlot(walker.sprite, idleCell(0, walker.facing));
+            return;
+        }
         if (walker.target === null) {
             walker.idleMs += dt;
             ui.setSlot(walker.sprite, idleCell(Math.floor(walker.idleMs / IDLE_MS) % IDLE_FRAMES, walker.facing));
