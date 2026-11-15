@@ -245,6 +245,9 @@ function perkScope(member: CrewMember): string {
     return `On ${category}${member.role === 'pilot' ? ' and Expedition' : ''} jobs:`;
 }
 
+/** Two taps on the same crew card within this many ms add or remove them. */
+const DOUBLE_TAP_MS = 400;
+
 export function showCrew(
     ui: FlightUi, profile: PlaytestProfile, initialId: string, onCrew: (ids: string[]) => void, selectedId: (id: string) => void,
 ): () => void {
@@ -270,6 +273,7 @@ export function showCrew(
     let streak = 0;
     let lastTap = 0;
     let field = false;
+    let cardTaps = { id: '', time: 0, count: 0 };
     const cards = AVAILABLE_CREW.map((member, index) => {
         const cardX = 12 + (index % 3) * 204;
         const cardY = 48 + Math.floor(index / 3) * 270;
@@ -277,6 +281,13 @@ export function showCrew(
             selected = member;
             selectedId(member.id);
             if (member.role === 'scientist') tap();
+            // Double-tap a card to add or remove that crew member. Only the second quick tap
+            // counts, so a longer burst of taps does not keep flipping them on and off.
+            const time = Date.now();
+            cardTaps = cardTaps.id === member.id && time - cardTaps.time < DOUBLE_TAP_MS
+                ? { id: member.id, time, count: cardTaps.count + 1 }
+                : { id: member.id, time, count: 1 };
+            if (cardTaps.count === 2) { toggleSelected(); return; }
             refresh();
         }, { tone: 'tile' });
         const outline = [
@@ -345,19 +356,29 @@ export function showCrew(
     const abilityName = ui.label(abilityCard, [12, 3, 316, 23], '', { display: true, size: 18, color: p.cyan });
     const abilityText = ui.label(abilityCard, [12, 26, 316, 46], '', { size: 13, color: p.text, wrap: true, top: true });
     // One action per state: Add (seat open), Remove (on the crew), or a plain "Crew is full" note.
-    const add = ui.button(inspector, [16, 532, 332, 44], () => {
+    function addSelected(): void {
         if (assigned.includes(selected.id) || assigned.length >= LAUNCH_CREW_SIZE) return;
         assigned = [...assigned, selected.id];
         onCrew(assigned);
         refresh();
         celebrateJoin();
-    }, { tone: 'primary', label: 'Add to Crew' });
-    const remove = ui.button(inspector, [16, 532, 332, 44], () => {
+    }
+    function removeSelected(): void {
         if (!assigned.includes(selected.id)) return;
         assigned = assigned.filter(id => id !== selected.id);
         onCrew(assigned);
         refresh();
-    }, { label: 'Remove from Crew' });
+    }
+    /** Double-tap: on the crew → off; open seat → on; crew full → the "Crew is full" plate shakes. */
+    function toggleSelected(): void {
+        if (assigned.includes(selected.id)) { removeSelected(); play('blip', 0.8); return; }
+        if (assigned.length < LAUNCH_CREW_SIZE) { addSelected(); return; }
+        refresh();
+        play('buzz');
+        motion.shake(fullPlate, 16, 532, 3, 240);
+    }
+    const add = ui.button(inspector, [16, 532, 332, 44], addSelected, { tone: 'primary', label: 'Add to Crew' });
+    const remove = ui.button(inspector, [16, 532, 332, 44], removeSelected, { label: 'Remove from Crew' });
     const fullPlate = ui.box(inspector, [16, 532, 332, 44], p.well);
     ui.icon(fullPlate, 12, 12, 20, 'lock', p.muted);
     ui.label(fullPlate, [44, 0, 276, 44], 'Crew is full', { size: 15, color: p.muted });

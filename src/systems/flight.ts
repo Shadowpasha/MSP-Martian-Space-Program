@@ -141,7 +141,7 @@ export const flightSystem = defineSystem(
             let surfaceTick: ((state: typeof input) => boolean | void) | undefined;
             switch (page) {
                 case 'crew':
-                    showShell(ui, page, 'Crew', 'Pick 4 crew for your next mission.', 'crew', navigate);
+                    showShell(ui, page, 'Crew', 'Pick 4 crew for your next mission. Double-tap a card to add or remove.', 'crew', navigate);
                     surfaceTick = showCrew(ui, profile, selectedCrewId, crewIds => saveProfile({ ...profile, crewIds }), id => { selectedCrewId = id; });
                     break;
                 case 'upgrade':
