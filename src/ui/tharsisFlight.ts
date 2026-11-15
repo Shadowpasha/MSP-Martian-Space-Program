@@ -421,7 +421,6 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             // Hover events bubble up from the plate's parts: react once per real enter or exit.
             if (!world.valid(group) || hovered === on) return;
             hovered = on;
-            if (on) play('tick');
             outline.forEach(edge => ui.show(edge, on));
             setVisualColor(world, back, on ? { r: 0.14, g: 0.14, b: 0.24, a: 0.94 } : fill);
             ui.show(shadow, !on);
@@ -488,7 +487,6 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         const hover = (on: boolean) => {
             if (!world.valid(group) || hovered === on) return;
             hovered = on;
-            if (on) play('tick');
             ui.show(underline, on);
             setTextColor(world, name, on ? p.amber : p.white);
         };
@@ -519,7 +517,6 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             const hover = (on: boolean) => {
                 if (!world.valid(side) || hovered === on) return;
                 hovered = on;
-                if (on) play('tick');
                 setVisualColor(world, fill, { r: 1, g: 1, b: 1, a: on ? 0.1 : 0 });
                 setTextColor(world, text, on ? p.white : p.secondary);
             };
