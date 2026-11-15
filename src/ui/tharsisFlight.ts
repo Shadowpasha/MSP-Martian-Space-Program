@@ -1,26 +1,35 @@
 import { Draggable, UINode, UIPositionType, px, uiNodeWorldBox, type Entity, type FocusManagerState,
     type InputState, type UIEventQueue, type World } from 'esengine';
-import type { MainLoopResult, MissionSetupInput, ResourcePool } from '../contracts/gameContract';
-import { formatResource, resourceEntries, RESOURCE_LABELS } from '../data/missions';
-import { CHECKLIST, type Technique } from '../data/tharsisOrders';
-import { assistantIsAvailable, checkGeminiConnection } from '../services/geminiPlanner';
+import type { CargoItemId, MainLoopResult, MissionSetupInput, ResourcePool } from '../contracts/gameContract';
+import { CREW_ABILITIES } from '../data/crewAbilities';
+import { formatResource, missionDeadline, resourceEntries, RESOURCE_LABELS } from '../data/missions';
+import { expeditionChecklist, type Technique } from '../data/tharsisOrders';
+import { checkGeminiConnection } from '../services/geminiPlanner';
 import { discussWork, draftSurveyBriefing, type DiscussionMessage, type TaskDraft } from '../services/tharsisAries';
 import { advanceSol, commitBriefing, continueAfterOutcome, continueAfterReport, createInitialGameState, isTharsis } from '../simulation/solEngine';
 import { defaultLoad, expeditionFor, fieldCrew, fieldReturnEstimate, resourceForecast, roverPosition, stormDay, type RoverLoad } from '../simulation/tharsis';
-import { resolveBriefing, choiceBlock, commitmentLabel } from '../simulation/tharsisEvents';
+import { briefingPreview, captainCanPreview, resolveBriefing, selectBriefingPreview, choiceBlock, commitmentLabel } from '../simulation/tharsisEvents';
 import { dutyMoraleLoss, FIELD_REST_MORALE, LOW_MORALE, radiationEffects, REST_MORALE, SEVERE_MORALE } from '../simulation/tharsisConditions';
 import { acceptCustomWork, acceptWork, assignWork, findOrder, stationCrew } from '../simulation/tharsisWork';
+import { assessMission, type MissionAction } from '../simulation/missionStatus';
+import { crewAbilityStatus, stationShiftCapacity } from '../simulation/crewAbilities';
+import { hasUpgrade } from '../simulation/tharsisUpgrades';
 import { makeFlightUi, type Bounds, type FlightArt, type FlightUi } from './flightUi';
 import { showRoverChecklist, showStorage } from './tharsisManifest';
 import { RESOURCE_KEYS, resourceRate, runway, showConditions, showResources, signed } from './tharsisResources';
-import { showTerminal, type TerminalStatus } from './tharsisTerminal';
+import { showAriesBadge, showTerminal, type TerminalStatus } from './tharsisTerminal';
 import { showWorkConsole, type WorkPanel } from './tharsisWorkConsole';
 import { makeAbsBox } from './theme';
+import { showCrewAbilities } from './tharsisCrew';
+import { showMissionObjectives, showSolReview, type MissionAssessment } from './tharsisObjectives';
+import { showTrainingGuide } from './trainingGuide';
+import { currentMissionMusic, nextMissionMusic } from '../audio/soundManager';
+import { showVolumeControls, type AudioSettings, type VolumeField } from './audioSettings';
 
 const STATION = 'assets/textures/tharsis_station.png';
 const SITE = 'assets/textures/tharsis_site.png';
 const ROOM_NAMES = ['Rover Bay', 'Instrument Lab', 'Life Support', 'Storage'] as const;
-type Panel = WorkPanel | 'roverChecklist' | 'cargo' | 'roverCargo' | 'log' | 'aries' | 'resources' | 'conditions';
+type Panel = WorkPanel | 'roverChecklist' | 'cargo' | 'roverCargo' | 'log' | 'aries' | 'resources' | 'conditions' | 'objectives' | 'abilities' | 'solReview' | 'audio';
 
 interface Options {
     world: World;
@@ -30,9 +39,12 @@ interface Options {
     focus: FocusManagerState;
     art: FlightArt;
     setup: MissionSetupInput;
-    profile: { highContrast: boolean; reducedMotion: boolean };
+    profile: AudioSettings & { highContrast: boolean; reducedMotion: boolean };
     onFinish: (result: MainLoopResult) => void;
     onExit: (target: 'menu' | 'mission') => void;
+    onRetry: () => void;
+    onVolume: (field: VolumeField, value: number) => void;
+    onSound: (enabled: boolean) => void;
 }
 
 export type RunButton = (key: string, parent: Entity, bounds: Bounds, action: () => void, options?: Parameters<FlightUi['button']>[3]) => ReturnType<FlightUi['button']>;
@@ -41,11 +53,12 @@ function resourceLine(pool: ResourcePool, inRover = false): string {
     return resourceEntries(pool).map(([key, val]) => inRover && key === 'oxygen' ? `${val} O₂` : formatResource(key, val)).join('   ');
 }
 
-export function mountTharsisFlight({ world, root, events, input, focus, art, setup, profile, onFinish, onExit }: Options) {
+export function mountTharsisFlight({ world, root, events, input, focus, art, setup, profile, onFinish, onExit, onRetry, onVolume, onSound }: Options) {
     const initial = createInitialGameState(setup);
     if (!isTharsis(initial)) throw new Error('Expected the Tharsis expedition setup.');
     const state = initial;
     const run = state.tharsis;
+    const training = run.expedition === 'training';
     let ui: FlightUi;
     let view: 'station' | 'expedition' = 'station';
     let panel: Panel | null = null;
@@ -61,14 +74,21 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     const conversations = new Map<string | null, { messages: DiscussionMessage[]; draft: TaskDraft | null }>();
     const methods = new Map<string, Technique>();
     let chatPage = 0;
-    let terminalStatus: TerminalStatus = 'checking';
-    let pendingCheck = false;
+    let terminalStatus: TerminalStatus = training ? 'fallback' : 'checking';
+    let apiProbe: AbortController | null = null;
     let draftNotice = '';
     let prompt = '';
     let selectedResource: keyof ResourcePool = 'energy';
     let resourcePage = 0;
     let moraleInfo = false;
     let reportPage = 0;
+    let objectivePage = 0;
+    let issuePage: number | null = null;
+    let guideVisible = true;
+    const levels: AudioSettings = { masterVolume: profile.masterVolume, musicVolume: profile.musicVolume,
+        sfxVolume: profile.sfxVolume, soundEnabled: profile.soundEnabled };
+    let trackLabel: Entity | null = null;
+    let shownTrack: string | null = null;
     let textInput: Entity | null = null;
     let controls = new Map<string, Entity>();
     let dragCards: { entity: Entity; crewId: string; home: Bounds }[] = [];
@@ -79,9 +99,33 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         stop();
         ask?.abort();
         pendingBriefing?.abort();
+        apiProbe?.abort();
     });
 
+    function probeAries() {
+        if (training || apiProbe) return;
+        const operation = new AbortController();
+        apiProbe = operation;
+        terminalStatus = 'checking';
+        dirty = true;
+        void checkGeminiConnection(operation.signal).then(configured => {
+            if (!world.valid(root) || operation.signal.aborted) return;
+            apiProbe = null;
+            if (terminalStatus === 'checking') terminalStatus = configured ? 'configured' : 'fallback';
+            dirty = true;
+        });
+    }
+
+    function settleAries(success: boolean) {
+        apiProbe?.abort();
+        apiProbe = null;
+        terminalStatus = success ? 'online' : 'fallback';
+        dirty = true;
+    }
+
     function open(next: Panel | null, orderId?: string) {
+        if (next === 'roverChecklist' && panel !== next) issuePage = null;
+        if (next === 'objectives' && panel !== next) objectivePage = 0;
         panel = next;
         selected = orderId ?? null;
         message = '';
@@ -93,15 +137,6 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
                 prompt = '';
                 chatPage = 0;
                 draftNotice = '';
-            }
-            if (terminalStatus === 'checking' && !pendingCheck) {
-                pendingCheck = true;
-                void checkGeminiConnection().then(() => {
-                    if (!world.valid(root)) return;
-                    pendingCheck = false;
-                    if (!ask && terminalStatus === 'checking') terminalStatus = assistantIsAvailable() ? 'connected' : 'unavailable';
-                    if (panel === 'aries') dirty = true;
-                });
             }
         }
         dirty = true;
@@ -137,7 +172,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
 
     function submit(value: string) {
         const text = value.trim().slice(0, 480);
-        if (!text || ask) return;
+        if (!text || ask || training || terminalStatus === 'fallback') return;
         const room = conversation();
         const requestedTopic = topic;
         const operation = new AbortController();
@@ -153,7 +188,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             if (!world.valid(root) || operation.signal.aborted) return;
             ask = null;
             sentMessage = null;
-            terminalStatus = reply ? 'connected' : 'unavailable';
+            settleAries(Boolean(reply));
             if (reply) {
                 room.messages.push({ speaker: 'aries', text: reply.message });
                 if (reply.draft !== undefined) room.draft = reply.draft;
@@ -166,6 +201,30 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         selectedResource = key;
         resourcePage = 0;
         open('resources');
+    }
+
+    function openWork(orderId: string) {
+        const order = findOrder(state, orderId);
+        if (!order) return;
+        open(run.work.some(job => job.orderId === orderId) || order.bay === 'custom' ? 'assignments' : order.bay, orderId);
+    }
+
+    function openAction(action: MissionAction) {
+        if ('area' in action && action.area) view = action.area === 'station' ? 'station' : 'expedition';
+        switch (action.panel) {
+            case 'resources': pickResource(action.resource); break;
+            case 'work': openWork(action.orderId); break;
+            case 'workOrders': open('rover'); break;
+            case 'abilities': open('abilities', action.memberId); break;
+            case 'cargo': open(action.area === 'station' ? 'cargo' : 'roverCargo', action.item); break;
+            case 'retry': onRetry(); break;
+            default: open(action.panel);
+        }
+    }
+
+    function requestEndSol() {
+        if (assessMission(state, draft ?? defaultLoad(state)).review) open('solReview');
+        else endSol();
     }
 
     function acceptDraft() {
@@ -204,11 +263,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             void draftSurveyBriefing(state, operation.signal).then(briefing => {
                 if (!world.valid(root) || operation.signal.aborted) return;
                 pendingBriefing = null;
-                if (briefing) {
-                    commitBriefing(state, sol, briefing);
-                    terminalStatus = 'connected';
-                } else terminalStatus = 'unavailable';
-                dirty = true;
+                settleAries(Boolean(briefing && commitBriefing(state, sol, briefing)));
             });
         }
     }
@@ -220,7 +275,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         dirty = true;
     }
 
-    function board(root: Entity, interactive: boolean) {
+    function board(root: Entity, interactive: boolean, status?: MissionAssessment) {
         const p = ui.palette;
         const atSite = view === 'expedition';
         const rover = run.rover;
@@ -232,7 +287,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         if (day) ui.box(root, [0, 98, 1280, 476], { r: 0.41, g: 0.15, b: 0.08, a: 0.26 });
         const clock = ui.frame(root, [12, 12, 376, 84], p.ink, day ? p.rust : p.edge);
         ui.label(clock, [14, 4, 352, 34], expeditionFor(state).region, { display: true, size: 33, fit: 20 });
-        ui.label(clock, [16, 44, 342, 22], `SOL ${sol} / ${state.goal.deadlineSol}   ·   ${atSite ? 'EXPEDITION' : 'STATION'}`, { color: p.amber, size: 15 });
+        ui.label(clock, [16, 44, 342, 22], `SOL ${sol} / ${missionDeadline(state)}   ·   ${atSite ? 'EXPEDITION' : 'STATION'}`, { color: p.amber, size: 15 });
 
         const monitor = ui.frame(root, [400, 12, 868, 84], p.ink, p.teal);
         const forecast = interactive ? resourceForecast(state, atSite && rover ? 'rover' : 'station') : null;
@@ -277,6 +332,11 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         if (interactive) {
             button('station', root, [928, 108, 152, 44], () => { view = 'station'; dirty = true; }, { label: 'Station', tone: !atSite ? 'hero' : 'plain' });
             button('expedition', root, [1088, 108, 180, 44], () => { view = 'expedition'; dirty = true; }, { label: 'Expedition', tone: atSite ? 'hero' : 'plain' });
+            const caution = status?.review ?? status?.notices[0]?.message;
+            if (caution) {
+                const risk = button('objective-warning', root, [524, 108, 394, 46], () => open('objectives'), { tone: 'tile' });
+                ui.label(risk.entity, [9, 4, 376, 38], caution, { size: 13, fit: 12, color: p.amber, wrap: true });
+            }
         }
 
         if (!atSite) {
@@ -288,15 +348,16 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             const card = ui.frame(root, [24, 280, 416, 220], p.ink, p.teal);
             const eta = fieldReturnEstimate(state);
             const { site, surveyHours } = expeditionFor(state);
-            const dockStatus = !rover ? `Return by Sol ${state.goal.deadlineSol}` :
+            const dockStatus = !rover ? `Return by Sol ${missionDeadline(state)}` :
                 eta === null ? 'Critical exposure projected' : `Projected dock Sol ${eta}`;
-            const dockRisk = rover && (eta === null || eta > state.goal.deadlineSol);
+            const dockRisk = rover && (eta === null || eta > missionDeadline(state));
             const leg = rover?.phase === 'outbound' ? `En route to ${site} · ${rover.travelLeft} Sol left` : rover?.phase === 'returning' ? `Returning · ${rover.travelLeft} Sol left` :
                 rover?.phase === 'site' ? `At ${site} · Survey active` : run.returnedWithData ? 'Docked · Data recovered' : `Docked · Readying for ${site}`;
             ui.label(card, [16, 8, 368, 44], rover ? 'Rover telemetry' : `${site[0]!.toUpperCase()}${site.slice(1)} overlook`, { display: true, size: 26, fit: 18, color: p.cyan });
             ui.label(card, [16, 58, 368, 38], leg, { wrap: true, size: 15 });
             ui.label(card, [16, 104, 368, 24], fieldCrew(state).map(member => member.name.split(' ')[0]).join(' + ') || 'No field crew selected', { color: p.secondary });
-            ui.label(card, [16, 144, 368, 28], `${run.hours}/${surveyHours} consecutive hours`, { color: run.hours === surveyHours ? p.good : p.amber });
+            ui.label(card, [16, 144, 368, 28], `${run.hours}/${surveyHours}h recorded${hasUpgrade(state, 'recorder') ? ` · Recorder ${run.upgrades.recorderUsed ? 'used' : 'ready'}` : ''}`,
+                { size: 15, color: run.hours === surveyHours ? p.good : p.amber });
             ui.label(card, [16, 174, 368, 25], `${run.completed.harden ? 'Hardened' : 'Standard rover'} · ${dockStatus}`, { size: 14, color: dockRisk ? p.bad : p.secondary });
             const route = ui.frame(root, [24, 176, 416, 80], p.ink, p.teal);
             ui.label(route, [12, 0, 140, 28], 'STATION', { size: 13, color: p.secondary });
@@ -309,37 +370,41 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         }
 
         const checklist = ui.frame(root, [12, 572, 324, 136], p.ink);
-        ui.label(checklist, [12, 1, 288, 22], 'Dispatch checklist', { display: true, size: 19, color: p.amber });
-        CHECKLIST.forEach((item, index) => {
+        ui.label(checklist, [12, 1, 154, 22], 'Dispatch prep', { display: true, size: 18, color: p.amber });
+        if (interactive) button('objectives', checklist, [172, 2, 136, 23], () => open('objectives'), { label: 'Objectives', labelSize: 13, tone: 'hero' });
+        expeditionChecklist(run.expedition).forEach((item, index) => {
             const count = item.orders.filter(id => run.completed[id]).length;
             const text = `${item.label}  ${count}/${item.orders.length}`;
             if (interactive) button(`check-${item.bay}`, checklist, [12 + index % 2 * 152, 28 + Math.floor(index / 2) * 44, 144, 36], () => open(item.bay), { label: text, labelSize: 15 });
             else ui.label(checklist, [12 + index % 2 * 152, 28 + Math.floor(index / 2) * 44, 144, 36], text, { size: 14 });
         });
         const crew = ui.frame(root, [348, 572, 532, 136], p.ink);
-        ui.label(crew, [12, 0, 420, 24], `Crew assignments   ${run.work.filter(job => job.leadId).length}/${stationCrew(state).length} assigned`, { display: true, size: 19 });
+        const capacity = stationCrew(state).reduce((sum, member) => sum + stationShiftCapacity(state, member), 0);
+        ui.label(crew, [12, 0, 420, 24], `Crew specialties · ${run.work.filter(job => job.leadId).length}/${capacity} station shifts`,
+            { display: true, size: 19, fit: 16 });
         if (interactive) button('morale-info', crew, [442, 1, 74, 23], () => { moraleInfo = !moraleInfo; dirty = true; }, { label: 'Morale', labelSize: 14, tone: moraleInfo ? 'hero' : 'plain' });
         state.crew.forEach((member, index) => {
             const x = 12 + index * 128;
-            const active = run.work.find(job => job.leadId === member.id);
             const field = rover?.crewIds.includes(member.id);
             const bounds = [x, 28, 116, 92] as const;
-            const card = interactive ? button(`crew-${member.id}`, crew, bounds, () => open('assignments', active?.orderId)).entity : ui.group(crew, bounds);
+            const card = interactive ? button(`crew-${member.id}`, crew, bounds, () => open('abilities', member.id)).entity : ui.group(crew, bounds);
             ui.image(card, [4, 12, 38, 48], member.portraitPath);
             ui.label(card, [44, 10, 68, 24], member.name.split(' ')[0]!, { display: true, size: 16 });
-            const streak = run.dutyStreak[member.id] ?? 0;
             ui.label(card, [44, 32, 68, 18], `${member.health} HP`, { size: 11, color: p.secondary });
-            ui.label(card, [44, 48, 70, 17], `${member.morale}% Morale`, { size: 10, color: member.morale < LOW_MORALE ? p.bad : p.good });
-            const duty = field ? 'Expedition' : 'Assigned';
-            ui.label(card, [5, 67, 106, 20], member.health <= 0 ? 'Incapacitated' : field || active ? streak ? `Duty streak ${streak}` : duty : 'Rest next Sol', { center: true, size: 12, color: member.health <= 0 ? p.bad : field ? p.cyan : active ? p.amber : p.muted });
+            ui.label(card, [44, 46, 70, 15], `${member.morale}% Morale`, { size: 10, color: member.morale < LOW_MORALE ? p.bad : p.good });
+            ui.label(card, [4, 60, 108, 15], CREW_ABILITIES[member.role].name, { center: true, size: 11, fit: 9, color: p.text });
+            ui.label(card, [4, 76, 108, 14], crewAbilityStatus(state, member), { center: true, size: 10, fit: 9,
+                color: member.health <= 0 ? p.bad : field ? p.cyan : p.amber });
         });
         const ops = ui.frame(root, [892, 572, 376, 136], p.ink, p.teal);
         if (interactive) {
-            button('aries', ops, [8, 8, 111, 43], () => open('aries'), { label: 'A.R.I.E.S.', tone: 'hero' });
-            button('roverChecklist', ops, [127, 8, 145, 43], () => open(rover ? 'roverCargo' : 'roverChecklist'), { label: rover ? 'Field supplies' : 'Rover checklist', labelSize: 15 });
-            button('tasks', ops, [280, 8, 80, 43], () => open('assignments'), { label: 'Tasks', labelSize: 16 });
-            button('log', ops, [8, 64, 74, 52], () => open('log'), { label: 'Log' });
-            button('endSol', ops, [91, 64, 269, 52], endSol, { label: 'End Sol', tone: 'primary' });
+            button('aries', ops, [8, 6, 145, 31], () => open('aries'), { label: 'A.R.I.E.S.', labelSize: 15, tone: 'hero' });
+            showAriesBadge(ui, ops, [8, 38, 145, 22], terminalStatus);
+            button('roverChecklist', ops, [163, 8, 133, 44], () => open(rover ? 'roverCargo' : 'roverChecklist'), { label: rover ? 'Field supplies' : 'Rover checklist', labelSize: 13 });
+            button('tasks', ops, [305, 8, 55, 44], () => open('assignments'), { label: 'Tasks', labelSize: 13 });
+            button('log', ops, [8, 64, 58, 52], () => open('log'), { label: 'Log', labelSize: 14 });
+            button('audio', ops, [73, 64, 63, 52], () => open('audio'), { label: 'Audio', labelSize: 14 });
+            button('endSol', ops, [144, 64, 216, 52], requestEndSol, { label: status?.review ? 'Review & End Sol' : 'End Sol', tone: 'primary' });
         } else ui.label(ops, [12, 17, 344, 92], 'Operations control', { display: true, size: 26, center: true, color: p.cyan });
         if (interactive && moraleInfo) {
             const morale = ui.frame(root, [371, 334, 504, 224], p.ink, p.teal);
@@ -377,21 +442,41 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         const p = ui.palette;
         if (run.phase === 'briefing') {
             const { briefing } = run;
-            const box = console([132, 68, 1016, 584], briefing.title, `SOL ${state.sol} · ${briefing.area === 'rover' ? 'ROVER UPLINK' : 'STATION BRIEFING'}`);
+            const source = briefing.source === 'Gemini' ? 'Live API' : 'Authored';
+            const box = console([132, 68, 1016, 584], briefing.title, `Sol ${state.sol} · ${briefing.area === 'rover' ? 'Rover briefing' : 'Station briefing'} · ${source}`);
             const storm = run.stormBriefing;
-            if (storm) ui.label(box, [22, 91, 968, 60], `${storm.title.toUpperCase()}  ·  ${storm.observation}`, { size: 14, color: p.amber, wrap: true, top: true });
-            ui.label(box, [22, storm ? 159 : 96, 968, 96], briefing.observation, { size: 18, wrap: true, top: true });
+            if (storm) ui.label(box, [22, 88, 968, 54], `${storm.title.toUpperCase()}  ·  ${storm.observation}`, { size: 14, color: p.amber, wrap: true, top: true });
+            ui.label(box, [22, storm ? 146 : 96, 968, 82], briefing.observation, { size: 18, fit: 16, wrap: true, top: true });
             const width = briefing.choices.length === 2 ? 476 : 312;
+            const canPreview = captainCanPreview(state);
+            if (canPreview) ui.label(box, [22, 228, 970, 26], run.previewedChoice === null ? 'Read the Situation · The Captain can preview one response.' :
+                'Read the Situation · One response previewed.', { size: 14, color: p.cyan });
             briefing.choices.forEach((choice, index) => {
                 const blocker = choiceBlock(state, choice);
-                const card = ui.frame(box, [16 + (width + 16) * index, 260, width, 256], p.raised);
+                const recommended = training && guideVisible && !index && !blocker;
+                const card = ui.frame(box, [16 + (width + 16) * index, 260, width, 254], p.raised,
+                    run.previewedChoice === index || recommended ? p.cyan : undefined);
                 ui.label(card, [12, 8, width - 32, 66], choice.action, { display: true, size: 22, wrap: true, top: true });
                 ui.label(card, [12, 79, width - 32, 104], choice.detail, { size: 15, wrap: true, top: true });
                 const commitment = commitmentLabel(choice);
                 ui.label(card, [12, 183, width - 32, 27], blocker ?? (commitment ? `Uses ${commitment}` : 'No upfront cost'), { size: 13, color: blocker ? p.bad : p.secondary, wrap: true });
-                button(`choice-${index}`, card, [12, 211, width - 32, 36], () => change(() => resolveBriefing(state, index)), { label: blocker ? 'Unavailable' : 'Commit decision', disabled: Boolean(blocker), tone: blocker ? 'plain' : 'hero' });
+                const previewWidth = canPreview ? 136 : 0;
+                button(`choice-${index}`, card, [12, 211, width - 32 - previewWidth, 36], () => change(() => resolveBriefing(state, index)), {
+                    label: blocker ? 'Unavailable' : recommended ? 'Commit recommended response' : 'Commit decision',
+                    disabled: Boolean(blocker), tone: blocker ? 'plain' : 'hero', labelSize: 14,
+                });
+                if (canPreview) button(`preview-choice-${index}`, card, [width - previewWidth - 11, 211, previewWidth - 10, 36],
+                    () => change(() => selectBriefingPreview(state, index)), {
+                        label: run.previewedChoice === index ? 'Previewed' : 'Preview outcome', labelSize: 12,
+                        disabled: Boolean(blocker) || run.previewedChoice !== null,
+                    });
             });
-            if (message) ui.label(box, [22, 530, 960, 26], message, { color: p.bad });
+            const preview = briefingPreview(state);
+            if (preview) {
+                const plate = ui.frame(box, [16, 519, 976, 56], p.ink, p.teal);
+                ui.label(plate, [10, 4, 948, 45], `${preview.choice.action} · ${preview.outcome.join(' · ')}`,
+                    { size: 14, wrap: true, fit: 13, color: p.cyan });
+            } else if (message) ui.label(box, [22, 530, 960, 26], message, { color: p.bad });
         } else if (run.phase === 'outcome') {
             const box = console([188, 188, 904, 344], run.briefing.title, 'DECISION OUTCOME');
             ui.label(box, [22, 100, 846, 78], run.outcome[0] ?? '', { size: 19, wrap: true, top: true });
@@ -419,6 +504,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             result.lessons.slice(0, 4).forEach((lesson, index) => ui.label(box, [22, 192 + 58 * index, 912, 52], lesson, { size: 17, wrap: true }));
             button('menu', box, [22, 454, 286, 52], () => onExit('menu'), { label: 'Main Menu', tone: 'primary' });
             button('mission', box, [331, 454, 286, 52], () => onExit('mission'), { label: 'New Mission' });
+            button('retry', box, [640, 454, 286, 52], onRetry, { label: training ? 'Retry Training' : 'Retry Mission' });
         }
     }
 
@@ -429,16 +515,24 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         dragCards = [];
         dropTarget = null;
         textInput = null;
+        trackLabel = null;
         dragged.clear();
         if (surface !== null) world.despawn(surface);
         surface = makeAbsBox(world, root, 0, 0, 1280, 720);
         ui = makeFlightUi(world, events, surface, art, focus, profile);
         const planning = run.phase === 'planning';
-        board(surface, planning && !panel);
+        const load = draft ?? defaultLoad(state);
+        const status = planning ? assessMission(state, load) : undefined;
+        board(surface, planning && !panel, status);
         if (!planning) phaseOverlay();
+        else if (panel === 'solReview') {
+            const content = console([181, 166, 918, 372], 'Review End Sol');
+            showSolReview(ui, content, button, status!, openAction, () => open(null), endSol);
+        }
         else if (panel) {
             const titles: Partial<Record<Panel, string>> = { roverChecklist: 'Rover Checklist', cargo: 'Station storage', roverCargo: 'Expedition supplies',
-                log: 'Mission log', aries: 'A.R.I.E.S. Terminal', assignments: 'Scheduled tasks', resources: 'Resource management', conditions: 'Environmental conditions' };
+                log: 'Mission log', aries: 'A.R.I.E.S. Terminal', assignments: 'Scheduled tasks', resources: 'Resource management',
+                conditions: 'Environmental conditions', objectives: 'Mission Objectives', abilities: 'Crew Specialties', audio: 'Audio Settings' };
             const title = titles[panel] ?? 'Work orders';
             const content = console([48, 28, 1184, 664], title);
             button('close', content, [1028, 12, 120, 42], () => open(null), { label: 'Close' });
@@ -446,20 +540,45 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             if (panel === 'roverChecklist') {
                 draft ??= defaultLoad(state);
                 showRoverChecklist({ state, ui, content, button, draft, change, reset: () => { draft = defaultLoad(state); dirty = true; },
+                    issuePage, showIssues: page => { issuePage = page; dirty = true; }, openAction,
                     dispatch: () => { draft = null; view = 'expedition'; open(null); } });
             } else if (panel === 'cargo' || panel === 'roverCargo') {
-                showStorage({ state, ui, content, button, area: panel === 'cargo' ? 'station' : 'rover', change, open: target => open(target) });
+                showStorage({ state, ui, content, button, area: panel === 'cargo' ? 'station' : 'rover', change,
+                    highlight: selected as CargoItemId | undefined, open: target => open(target) });
             } else if (panel === 'aries') {
                 const room = conversation();
                 textInput = showTerminal({ ui, content, world, events, button, state, topic, history: room.messages, page: chatPage, status: terminalStatus,
                     pending: Boolean(ask), prompt, draft: room.draft, notice: draftNotice, onSubmit: submit,
                     onInput: value => { prompt = value; }, onPage: value => { chatPage = value; dirty = true; },
                     onDiscard: () => { room.draft = null; draftNotice = ''; dirty = true; }, onAccept: acceptDraft,
-                    onQueue: () => open('assignments'),
+                    onQueue: () => open('assignments'), onRetry: probeAries, onObjectives: () => open('objectives'),
+                    onWorkOrders: () => topic ? openWork(topic) : open('rover'),
                 });
+            } else if (panel === 'objectives') {
+                showMissionObjectives(ui, content, button, state, load, status!, objectivePage, page => { objectivePage = page; dirty = true; }, openAction);
+            } else if (panel === 'abilities') {
+                showCrewAbilities(ui, content, button, state, selected, id => open('abilities', id), openWork, change);
+            } else if (panel === 'audio') {
+                const audio = ui.frame(content, [100, 105, 984, 408], ui.palette.ink, ui.palette.teal);
+                showVolumeControls(ui, audio, 22, levels, (field, value) => {
+                    levels[field] = value;
+                    onVolume(field, value);
+                });
+                ui.box(audio, [24, 272, 936, 1], ui.palette.edge);
+                shownTrack = currentMissionMusic();
+                trackLabel = ui.label(audio, [24, 301, 640, 47], musicStatus(), { size: 16, color: ui.palette.cyan, wrap: true });
+                button('track-next', audio, [702, 294, 244, 50], () => { void nextMissionMusic(); }, {
+                    label: 'Next Track', tone: 'hero', disabled: !levels.soundEnabled,
+                });
+                ui.label(audio, [24, 357, 924, 33], '8-bit Space Music © 2024 Kyra van Meijl · CC BY 4.0', { size: 14, color: ui.palette.secondary });
+                button('toggle-sound', content, [100, 532, 252, 48], () => {
+                    levels.soundEnabled = !levels.soundEnabled;
+                    onSound(levels.soundEnabled);
+                    dirty = true;
+                }, { label: levels.soundEnabled ? 'Mute All Audio' : 'Unmute All Audio' });
             } else if (panel === 'resources') {
                 showResources(ui, content, button, state, view === 'expedition' ? 'rover' : 'station', selectedResource, resourcePage,
-                    key => { selectedResource = key; resourcePage = 0; dirty = true; }, page => { resourcePage = page; dirty = true; });
+                    key => { selectedResource = key; resourcePage = 0; dirty = true; }, page => { resourcePage = page; dirty = true; }, change);
             } else if (panel === 'conditions') {
                 showConditions(ui, content, button, state, view === 'expedition' ? 'rover' : 'station',
                     area => { view = area === 'rover' ? 'expedition' : 'station'; dirty = true; },
@@ -475,14 +594,24 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
                 });
             }
         }
+        if (training) showTrainingGuide(ui, surface, button, state, status, guideVisible, planning && !panel,
+            () => { guideVisible = !guideVisible; dirty = true; }, openAction);
         if (lastKey) {
             const next = controls.get(lastKey) ?? controls.values().next().value;
             if (next !== undefined) focus.focus(next, true);
         }
     }
 
+    probeAries();
+    function musicStatus() {
+        return levels.soundEnabled ? shownTrack ? `Now playing · ${shownTrack}` : 'Loading mission music…' : 'Audio muted';
+    }
     return () => {
         if (dirty && !dragged.size) render();
+        if (trackLabel !== null && shownTrack !== currentMissionMusic()) {
+            shownTrack = currentMissionMusic();
+            ui.setText(trackLabel, musicStatus());
+        }
         if (input.isKeyPressed('Escape') && panel) open(null);
         if (focus.focusedEntity !== textInput || textInput === null) ui.updateFocus(input);
         if (!dragCards.length) return;

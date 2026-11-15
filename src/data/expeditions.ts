@@ -5,9 +5,9 @@
 // a three-Sol hazard, and a return with the data before the deadline. A profile only changes the
 // numbers and the words; the rules are the same for all of them.
 //
-import type { CargoItemId, MissionRequirement, WeatherType } from '../contracts/gameContract';
-
-export type ExpeditionId = 'tharsis' | 'radiation' | 'ice';
+import type { CargoItemId, ExpeditionId, MissionRequirement, WeatherType } from '../contracts/gameContract';
+import { expeditionChecklist } from './tharsisOrders';
+export type { ExpeditionId } from '../contracts/gameContract';
 
 export interface Expedition {
     id: ExpeditionId;
@@ -69,12 +69,21 @@ export const EXPEDITIONS: Record<ExpeditionId, Expedition> = {
         aries: 'the crater-rim ice drilling expedition (shallow subsurface water ice)',
         ariesExamples: 'drill torque and bit temperature checks, core-tube seals, heater and battery faults in the cold, scheduled relay contacts and oxygen-generator inlet faults',
     },
+    training: {
+        id: 'training', region: 'Tharsis Training Range', site: 'Training Marker', instrument: 'windSampler', surveyHours: 24, dataKind: 'weather data',
+        legs: { pilot: 1, backup: 2 },
+        hazard: { kind: 'dust', firstSol: 8, spread: 1, exposure: 1 },
+        temperature: { clear: -58, warning: -58, hazard: -58 },
+        intro: 'Prepare the rover, record 24 hours of weather at Training Marker, and dock with the data by Sol {deadline}. The guide tracks each step from briefing to return.',
+        aries: 'the Tharsis training run',
+        ariesExamples: 'weather instrument checks and relay contacts',
+    },
 };
 
-export const INSTRUMENTS: readonly CargoItemId[] = Object.values(EXPEDITIONS).map(expedition => expedition.instrument);
+export const INSTRUMENTS: readonly CargoItemId[] = [...new Set(Object.values(EXPEDITIONS).map(expedition => expedition.instrument))];
 
 export function expeditionOf(id: ExpeditionId | undefined): Expedition {
-    return EXPEDITIONS[id ?? 'tharsis'];
+    return EXPEDITIONS[id ?? 'tharsis'] ?? EXPEDITIONS.tharsis;
 }
 
 /** The weather on a hazard Sol, and on the warning Sol before it. */
@@ -85,13 +94,17 @@ export function hazardWeather(expedition: Expedition): { warning: WeatherType; h
 }
 
 /** The launch checklist every expedition shares (the work-order groups in data/tharsisOrders.ts). */
-export function expeditionRequirements(): MissionRequirement[] {
-    return [
-        { id: 'req_rover', label: 'Rover work orders', kind: 'prep_rover', current: 0, target: 3 },
-        { id: 'req_sensor', label: 'Instrument checks', kind: 'prep_sensor', current: 0, target: 3 },
-        { id: 'req_supplies', label: 'Field supply checks', kind: 'prep_supplies', current: 0, target: 2 },
-        { id: 'req_crew', label: 'Field crew checks', kind: 'assign_crew', current: 0, target: 2 },
-    ];
+export function expeditionRequirements(id: ExpeditionId = 'tharsis'): MissionRequirement[] {
+    const details = {
+        prep_rover: ['req_rover', 'Rover work orders'],
+        prep_sensor: ['req_sensor', 'Instrument checks'],
+        prep_supplies: ['req_supplies', 'Field supply checks'],
+        assign_crew: ['req_crew', 'Field crew checks'],
+    } as const;
+    return expeditionChecklist(id).map(({ kind, orders }) => {
+        const [requirementId, label] = details[kind];
+        return { id: requirementId, label, kind, current: 0, target: orders.length };
+    });
 }
 
 /** Every expedition keeps the same reserves on return. */

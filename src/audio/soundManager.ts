@@ -1,4 +1,5 @@
-import type { AudioAPI } from 'esengine';
+import type { AudioAPI, AudioHandle } from 'esengine';
+import { MISSION_SOUNDTRACK } from './missionSoundtrack';
 
 export type MusicTrack = 'menu' | 'game';
 export type SfxKind =
@@ -38,6 +39,11 @@ let musicVol = 0.18;
 let sfxVol = 0.34;
 let audioUnlocked = false;
 let preloaded = false;
+let missionQueue: Array<typeof MISSION_SOUNDTRACK[number]> = [];
+let previousMissionUrl: string | null = null;
+let missionVoice: { audio: AudioAPI; handle: AudioHandle; url: string } | null = null;
+let missionTitle: string | null = null;
+let missionPlayback = 0;
 
 export function bindAudio(audio: AudioAPI | null): void {
     boundAudio = audio;
@@ -108,11 +114,89 @@ export function unlockAudio(): void {
     }
 }
 
+function releaseMissionVoice(): void {
+    const voice = missionVoice;
+    if (!voice) return;
+    missionVoice = null;
+    voice.handle.onEnd = undefined;
+    voice.handle.stop();
+    voice.audio.releaseBuffer(voice.url);
+}
+
+function nextFromShuffle() {
+    if (!missionQueue.length) {
+        missionQueue = [...MISSION_SOUNDTRACK];
+        for (let index = missionQueue.length - 1; index > 0; index--) {
+            const other = Math.floor(Math.random() * (index + 1));
+            [missionQueue[index], missionQueue[other]] = [missionQueue[other]!, missionQueue[index]!];
+        }
+        if (missionQueue[0]?.url === previousMissionUrl) {
+            [missionQueue[0], missionQueue[1]] = [missionQueue[1]!, missionQueue[0]!];
+        }
+    }
+    return missionQueue.shift()!;
+}
+
+export function currentMissionMusic(): string | null {
+    return missionTitle;
+}
+
+export async function nextMissionMusic(): Promise<void> {
+    const audio = boundAudio;
+    if (!audio || desiredTrack !== 'game') return;
+    const playback = ++missionPlayback;
+    releaseMissionVoice();
+    missionTitle = null;
+    for (let attempt = 0; attempt < MISSION_SOUNDTRACK.length; attempt++) {
+        const track = nextFromShuffle();
+        let pinned = false;
+        try {
+            await audio.preload(track.url);
+            if (playback !== missionPlayback || audio !== boundAudio) return;
+            const buffer = audio.getBufferHandle(track.url);
+            if (!buffer || !audio.retainBuffer(track.url)) continue;
+            pinned = true;
+            audio.stopBGM(0.15);
+            const handle = audio.playBuffer(buffer, { bus: 'music', loop: false, volume: 0.30, priority: 10 });
+            missionVoice = { audio, handle, url: track.url };
+            previousMissionUrl = track.url;
+            missionTitle = track.title;
+            handle.onEnd = () => {
+                if (playback === missionPlayback) void nextMissionMusic();
+            };
+            return;
+        } catch {
+            if (pinned) audio.releaseBuffer(track.url);
+            if (playback !== missionPlayback) return;
+        }
+    }
+    missionTitle = 'Crimson Space Station';
+    try {
+        audio.playBGM(MUSIC_PATHS.game.url, { volume: MUSIC_PATHS.game.volume, fadeIn: 0.85 });
+    } catch {
+        missionTitle = null;
+    }
+}
+
 export function playMusic(track: MusicTrack): void {
     desiredTrack = track;
-    if (!boundAudio || !soundEnabled) return;
+    if (track === 'menu' && currentTrack === 'game') {
+        missionPlayback++;
+        releaseMissionVoice();
+        missionTitle = null;
+    }
+    if (!boundAudio || !soundEnabled || !audioUnlocked) return;
     if (currentTrack === track) return;
     currentTrack = track;
+    missionPlayback++;
+    releaseMissionVoice();
+    missionTitle = null;
+    if (track === 'game') {
+        missionQueue = [];
+        boundAudio.stopBGM(0.6);
+        void nextMissionMusic();
+        return;
+    }
     const spec = MUSIC_PATHS[track];
     try {
         boundAudio.playBGM(spec.url, {
@@ -128,6 +212,9 @@ export function playMusic(track: MusicTrack): void {
 export function stopMusic(): void {
     desiredTrack = null;
     currentTrack = null;
+    missionPlayback++;
+    missionTitle = null;
+    releaseMissionVoice();
     if (!boundAudio) return;
     try {
         boundAudio.stopBGM(0.4);

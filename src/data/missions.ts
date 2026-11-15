@@ -1,9 +1,9 @@
 import {
-    AVAILABLE_CREW, cloneSetup, DEFAULT_MARS_SETUP,
+    AVAILABLE_CREW, cloneSetup, DEFAULT_MARS_SETUP, GAMEPLAY_UPGRADES,
     type CrewMember, type MissionSetupInput, type ResourcePool,
 } from '../contracts/gameContract';
 import { CARGO_BY_ID, normalizeCargo, packedInventory, type CargoPlacement } from './cargo';
-import { EXPEDITION_RESERVES, expeditionRequirements } from './expeditions';
+import { EXPEDITION_RESERVES, expeditionOf, expeditionRequirements } from './expeditions';
 import { nasaMissionOffers, type MissionDifficulty } from './nasaMissions';
 
 export const LAUNCH_CREW_SIZE = 4;
@@ -25,12 +25,33 @@ export const WEATHER_SURVEY: MissionSetupInput = {
     },
 };
 
+export const TRAINING_RUN: MissionSetupInput = {
+    ...cloneSetup(WEATHER_SURVEY),
+    expedition: 'training',
+    targetSol: 6,
+    missionGoal: {
+        ...WEATHER_SURVEY.missionGoal,
+        id: 'tharsis_training',
+        title: 'Tharsis Training Run',
+        description: 'Record 24 hours of weather at Training Marker and return to the station.',
+        durationHours: 24,
+        deadlineSol: 6,
+        requirements: expeditionRequirements('training'),
+    },
+    crew: AVAILABLE_CREW.filter(member => ['captain', 'scientist', 'pilot', 'engineer'].includes(member.role))
+        .map((member, index) => ({ ...member, stageAnchor: { ...surveyBase.crew[index]!.stageAnchor } })),
+    startingResources: { energy: 70, food: 38, water: 42, oxygen: 46, res: 12 },
+    startingConditions: { ...surveyBase.startingConditions, radiation: 8 },
+    cargo: { windSampler: 1, batteryPacks: 1, waterCanisters: 1, oxygenTanks: 1, extraRations: 1, repairKits: 0, medkits: 0, seedPods: 0 },
+    upgradeIds: [GAMEPLAY_UPGRADES.electrolysis],
+};
+
 export interface MissionOffer {
     title: string;
     site: string;
     description: string;
     setup?: MissionSetupInput;
-    prepared?: 'team';
+    prepared?: 'team' | 'training';
     /** Card picture; defaults to assets/textures/mission_<slot>.png. */
     image?: string;
     /** Difficulty bar on the card (1 Easy, 2 Medium, 3 Hard); a team manifest has none. */
@@ -66,19 +87,26 @@ export const THARSIS_BRIEFING: MissionBriefing = {
 const laterMissions: MissionOffer[] = nasaMissionOffers();
 
 export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
-    const mission = pending ?? WEATHER_SURVEY;
+    const training: MissionOffer = {
+        title: TRAINING_RUN.missionGoal.title,
+        site: 'TUTORIAL · 6 SOLS',
+        description: 'Practice crew assignments, rover dispatch, and survival with a guide.',
+        setup: TRAINING_RUN,
+        prepared: 'training',
+        image: 'assets/textures/mission_1.png',
+    };
+    const survey: MissionOffer = {
+        title: WEATHER_SURVEY.missionGoal.title, site: 'MARS · SITE A',
+        description: 'Record 48 hours of weather data at Site A.',
+        setup: WEATHER_SURVEY, difficulty: 1, briefing: THARSIS_BRIEFING, image: 'assets/textures/mission_1.png',
+    };
     return [
-        {
-            title: mission.missionGoal.title,
-            site: pending ? mission.planet.toUpperCase() + ' · TEAM SETUP' : 'MARS · SITE A',
-            // The card line is the goal only; the deadline has its own line on the card.
-            description: pending ? mission.missionGoal.description : 'Record 48 hours of weather data at Site A.',
-            setup: mission,
-            // The starter: one tool to pack, a nearby site and 16 sols for a 2-sol job.
-            difficulty: pending ? undefined : 1,
-            prepared: pending ? 'team' : undefined,
-            briefing: pending ? undefined : THARSIS_BRIEFING,
-        },
+        ...(pending ? [{
+            title: pending.missionGoal.title, site: pending.planet.toUpperCase() + ' · TEAM SETUP',
+            description: pending.missionGoal.description, setup: pending, prepared: 'team' as const,
+        }] : []),
+        training,
+        ...(!pending ? [survey] : []),
         ...laterMissions,
     ];
 }
@@ -93,6 +121,16 @@ export function formatResource(key: keyof ResourcePool, amount: number): string 
 
 export function resourceEntries(resources: Partial<ResourcePool> | undefined): [keyof ResourcePool, number][] {
     return Object.entries(resources ?? {}) as [keyof ResourcePool, number][];
+}
+
+export function missionDeadline(setup: { targetSol: number; goal?: { deadlineSol: number }; missionGoal?: { deadlineSol: number } }): number {
+    return Math.min(setup.targetSol, setup.goal?.deadlineSol ?? setup.missionGoal?.deadlineSol ?? setup.targetSol);
+}
+
+export function victoryCriteria(setup: MissionSetupInput): string {
+    const reserves = resourceEntries(setup.missionGoal.minimumReserves).map(([key, amount]) => formatResource(key, amount));
+    const goal = `Dock with both travelers and ${expeditionOf(setup.expedition).surveyHours}h of data by Sol ${missionDeadline(setup)}.`;
+    return reserves.length ? `${goal} Keep ${reserves.join(' · ')} at the station.` : goal;
 }
 
 export function launchProblem(setup: MissionSetupInput): string | null {

@@ -3,12 +3,12 @@ import {
     type Entity, type World,
 } from 'esengine';
 import {
-    computeSkillModifiers, DEFAULT_SKILL_MODIFIERS, SKILL_TREE_UPGRADES, STORAGE_KEYS,
+    SKILL_TREE_UPGRADES, STORAGE_KEYS,
     type MainLoopResult, type MissionSetupInput,
 } from '../contracts/gameContract';
 import type { CargoPlacement } from '../data/cargo';
 import { buildLaunchSetup, LAUNCH_CREW_SIZE, launchProblem, missionOffers, type MissionOffer } from '../data/missions';
-import { awardResearch, loadProfile, purchaseUpgrade, resetUpgrades, type PlaytestProfile } from '../data/profile';
+import { loadProfile, purchaseUpgrade, recordResearch, resetUpgrades, type PlaytestProfile } from '../data/profile';
 import { showCargoPacker } from '../ui/cargoPacker';
 import { showLaunchSummary } from '../ui/launchSummary';
 import {
@@ -19,6 +19,7 @@ import { makeAbsBox, setNodeDisplayed } from '../ui/theme';
 import { setFeedbackPrefs } from '../ui/feedback';
 import { bindAudio, playMusic, setSoundEnabled, setVolumes, unlockAudio } from '../audio/soundManager';
 import { mountTharsisFlight } from '../ui/tharsisFlight';
+import type { VolumeField } from '../ui/audioSettings';
 
 const controllers = new WeakMap<World, { root: Entity; update: () => void }>();
 
@@ -76,6 +77,12 @@ export const flightSystem = defineSystem(
             nextPage = destination;
         }
 
+        function changeVolume(field: VolumeField, value: number): void {
+            if (profile[field] === value) return;
+            saveProfile({ ...profile, [field]: value });
+            setVolumes(profile.masterVolume, profile.musicVolume, profile.sfxVolume);
+        }
+
         function selectMission(next: MissionOffer): void {
             const newKey = next.setup ? `${next.setup.planet}:${next.setup.missionGoal.id}` : '';
             if (!next.setup) return;
@@ -88,7 +95,9 @@ export const flightSystem = defineSystem(
         function launch(next: MissionOffer, usePreparedCrew: boolean): void {
             const setup = buildLaunchSetup(next, profile.crewIds, draft, usePreparedCrew);
             if (!setup || launchProblem(setup)) return;
-            setup.skillModifiers = computeSkillModifiers(profile.upgradeIds, { ...DEFAULT_SKILL_MODIFIERS, ...setup.skillModifiers });
+            if (next.prepared !== 'training') {
+                setup.upgradeIds = [...new Set([...(Array.isArray(setup.upgradeIds) ? setup.upgradeIds : []), ...profile.upgradeIds])];
+            }
             runSetup = setup;
             draft = [];
             draftKey = '';
@@ -111,12 +120,19 @@ export const flightSystem = defineSystem(
             if (page === 'run' && runSetup) {
                 const runId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
                 const finish = (result: MainLoopResult) => {
-                    saveProfile(awardResearch(profile, runId, result.researchPointsEarned));
+                    saveProfile(recordResearch(profile, runId, result, runSetup?.expedition === 'training'));
                     Storage.setJSON(STORAGE_KEYS.LAST_RESULT, result);
                 };
                 // Every mission is an expedition; a team manifest without rules runs as the Tharsis survey.
                 const setup: MissionSetupInput = { ...runSetup, rules: 'tharsis-expedition' };
-                tickPage = mountTharsisFlight({ world, events, input, focus, root, art, setup, profile, onFinish: finish, onExit: target => navigate(target) });
+                tickPage = mountTharsisFlight({
+                    world, events, input, focus, root, art, setup, profile, onFinish: finish,
+                    onExit: target => navigate(target), onRetry: () => navigate('run'),
+                    onVolume: changeVolume, onSound: soundEnabled => {
+                        saveProfile({ ...profile, soundEnabled });
+                        setSoundEnabled(soundEnabled);
+                    },
+                });
                 return;
             }
 
@@ -129,7 +145,7 @@ export const flightSystem = defineSystem(
                     surfaceTick = showCrew(ui, profile, selectedCrewId, crewIds => saveProfile({ ...profile, crewIds }), id => { selectedCrewId = id; });
                     break;
                 case 'upgrade':
-                    showShell(ui, page, 'Upgrade', 'Spend research points to make every mission easier.', 'upgrade', navigate);
+                    showShell(ui, page, 'Upgrade', 'Spend research points to unlock station systems and procedures.', 'upgrade', navigate);
                     surfaceTick = showUpgrades(ui, profile, SKILL_TREE_UPGRADES.find(node => node.id === selectedUpgradeId)!, id => {
                         if (id !== selectedUpgradeId) { selectedUpgradeId = id; navigate('upgrade'); }
                     }, node => {
@@ -157,7 +173,7 @@ export const flightSystem = defineSystem(
                 case 'cargo': {
                     const chosen = offer;
                     if (!chosen?.setup) { navigate('mission'); break; }
-                    showShell(ui, page, 'Cargo Preparation', `${chosen.title} · pack what the mission needs`,
+                    showShell(ui, page, chosen.prepared ? 'Launch Briefing' : 'Cargo Preparation', chosen.prepared ? chosen.title : `${chosen.title} · pack what the mission needs`,
                         (Object.keys(chosen.setup.missionGoal.requiredEquipment ?? {})[0] ?? 'windSampler') as IconName, navigate);
                     const problem = (placements: CargoPlacement[]) => {
                         const setup = buildLaunchSetup(chosen, profile.crewIds, placements);
@@ -188,11 +204,7 @@ export const flightSystem = defineSystem(
                             if (setting === 'soundEnabled') setSoundEnabled(updated.soundEnabled);
                             navigate('settings');
                         },
-                        (field, value) => {
-                            const updated = { ...profile, [field]: value };
-                            saveProfile(updated);
-                            setVolumes(updated.masterVolume, updated.musicVolume, updated.sfxVolume);
-                        },
+                        changeVolume,
                     );
                     break;
                 case 'quit':

@@ -5,6 +5,7 @@
  */
 
 export type PlanetId = 'mars' | 'moon';
+export type ExpeditionId = 'tharsis' | 'radiation' | 'ice' | 'training';
 
 export const CREW_ROLES = ['engineer', 'botanist', 'pilot', 'medic', 'scientist', 'captain'] as const;
 export type CrewRole = typeof CREW_ROLES[number];
@@ -140,12 +141,14 @@ export interface MissionSetupInput {
     missionGoal: MissionGoal;
     rules?: 'tharsis-expedition';
     /** Which expedition profile (src/data/expeditions.ts) the run uses; Tharsis when absent. */
-    expedition?: 'tharsis' | 'radiation' | 'ice';
+    expedition?: ExpeditionId;
     startingResources: ResourcePool;
     startingConditions: ConditionState;
     cargo: CargoInventory;
     crew: CrewMember[];
     skillModifiers: SkillTreeModifiers;
+    /** Purchased nodes to apply to this manifest's base modifiers at run initialization. */
+    upgradeIds?: readonly string[];
 }
 
 export interface SolSummaryRecord {
@@ -212,7 +215,7 @@ interface UpgradeSpec {
     id: string;
     label: string;
     summary: string;
-    effects: UpgradeEffects;
+    effects?: UpgradeEffects;
 }
 
 function upgradeBranch(branch: UpgradeBranch, specs: readonly [UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec]): SkillUpgradeDef[] {
@@ -226,6 +229,7 @@ function upgradeBranch(branch: UpgradeBranch, specs: readonly [UpgradeSpec, Upgr
         return {
             ...spec, branch, tier, slot: slots[index]!, cost: prices[tier], prerequisites: parents[index]!,
             apply(modifiers) {
+                if (!effects) return modifiers;
                 const next = { ...modifiers };
                 for (const key of Object.keys(effects) as Array<keyof SkillTreeModifiers>) {
                     const amount = effects[key]!;
@@ -241,38 +245,49 @@ function upgradeBranch(branch: UpgradeBranch, specs: readonly [UpgradeSpec, Upgr
     });
 }
 
+export const GAMEPLAY_UPGRADES = {
+    batteryBank: 'solar_mppt',
+    microgrid: 'habitat_microgrid',
+    electrolysis: 'closed_o2',
+    emergencyStores: 'redundant_scrubbers',
+    weatherRelay: 'ai_logistics',
+    recorder: 'autonomous_logistics',
+    crossTraining: 'rad_hull',
+    protectedRotation: 'crew_support',
+} as const;
+
 export const SKILL_TREE_UPGRADES = [
     ...upgradeBranch('Infrastructure', [
-        { id: 'solar_mppt', label: 'Dust-Repel Solar Coating', summary: 'Makes 30% more solar power. Uses 15% less power each day.', effects: { solarOutputMult: 1.3, energyConsumptionMult: 0.85 } },
+        { id: GAMEPLAY_UPGRADES.batteryBank, label: 'Battery Bank', summary: 'Store 12 station Power for later. Charge or discharge once per Sol.' },
         { id: 'efficient_inverters', label: 'Efficient Inverters', summary: 'Makes 15% more solar power.', effects: { solarOutputMult: 1.15 } },
         { id: 'power_balancing', label: 'Power Balancing', summary: 'Uses 10% less power each day.', effects: { energyConsumptionMult: 0.9 } },
         { id: 'sun_tracking', label: 'Sun Tracking', summary: 'Makes 15% more solar power.', effects: { solarOutputMult: 1.15 } },
         { id: 'heat_recovery', label: 'Heat Recovery', summary: 'Uses 10% less power each day.', effects: { energyConsumptionMult: 0.9 } },
-        { id: 'habitat_microgrid', label: 'Habitat Microgrid', summary: 'Makes 10% more solar power. Uses 10% less power each day.', effects: { solarOutputMult: 1.1, energyConsumptionMult: 0.9 } },
+        { id: GAMEPLAY_UPGRADES.microgrid, label: 'Habitat Microgrid', summary: 'Indoor Life Support orders can run through full storm shelter.' },
     ]),
     ...upgradeBranch('Survival', [
-        { id: 'closed_o2', label: 'Closed-Loop Scrubbers', summary: 'Uses 25% less oxygen each day.', effects: { oxygenConsumptionMult: 0.75 } },
+        { id: GAMEPLAY_UPGRADES.electrolysis, label: 'Emergency Electrolysis', summary: 'Trade 4 Water and 3 Power for 12 station O₂ once per Sol.' },
         { id: 'hydro_rationing', label: 'Algae Nutrient Loop', summary: 'Uses 25% less food each day. Plant tasks grow 20% more.', effects: { foodConsumptionMult: 0.75, hydroponicsYieldMult: 1.2 } },
         { id: 'greywater_reclaimer', label: 'Greywater Reclaimer', summary: 'Uses 15% less water each day.', effects: { waterConsumptionMult: 0.85 } },
         { id: 'grow_trays', label: 'Grow Trays', summary: 'Plant tasks grow 15% more.', effects: { hydroponicsYieldMult: 1.15 } },
         { id: 'condenser', label: 'Condenser', summary: 'Uses 15% less water each day.', effects: { waterConsumptionMult: 0.85 } },
-        { id: 'redundant_scrubbers', label: 'Redundant Scrubbers', summary: 'Uses 15% less oxygen and 10% less water each day.', effects: { oxygenConsumptionMult: 0.85, waterConsumptionMult: 0.9 } },
+        { id: GAMEPLAY_UPGRADES.emergencyStores, label: 'Emergency Stores', summary: 'When station upkeep first depletes Food, Water, or O₂, release 8 Food, 8 Water, and 12 O₂.' },
     ]),
     ...upgradeBranch('Operations', [
-        { id: 'ai_logistics', label: 'A.R.I.E.S. Logistics Co-Pilot', summary: 'A.R.I.E.S. plans cost 20% less. Rover trips bring back 20% more.', effects: { aiCostDiscountMult: 0.8, roverYieldMult: 1.2 } },
+        { id: GAMEPLAY_UPGRADES.weatherRelay, label: 'Weather Relay', summary: 'Reveal the exact storm dates from Sol 1 for route planning and rover loads.' },
         { id: 'survey_routes', label: 'Survey Routes', summary: 'Rover trips bring back 15% more.', effects: { roverYieldMult: 1.15 } },
         { id: 'planning_cache', label: 'Planning Cache', summary: 'A.R.I.E.S. plans cost 10% less.', effects: { aiCostDiscountMult: 0.9 } },
         { id: 'rover_racks', label: 'Rover Racks', summary: 'Rover trips bring back 15% more.', effects: { roverYieldMult: 1.15 } },
         { id: 'dispatch_automation', label: 'Dispatch Automation', summary: 'Crewed tasks go 10% faster.', effects: { taskSpeedBonus: 0.1 } },
-        { id: 'autonomous_logistics', label: 'Autonomous Logistics', summary: 'Rover trips bring back 10% more. A.R.I.E.S. plans cost 10% less.', effects: { roverYieldMult: 1.1, aiCostDiscountMult: 0.9 } },
+        { id: GAMEPLAY_UPGRADES.recorder, label: 'Autonomous Recorder', summary: 'Keep partial survey data through one lost sampling Sol per mission.' },
     ]),
     ...upgradeBranch('Crew', [
-        { id: 'rad_hull', label: 'Polyethylene Rad Shielding', summary: 'Blocks 35% of radiation spikes.', effects: { radiationShielding: 0.35 } },
+        { id: GAMEPLAY_UPGRADES.crossTraining, label: 'Cross-Training', summary: 'Spend 4 Power to train one station crew member in a second work role.' },
         { id: 'habitation_quarters', label: 'Habitation Quarters', summary: 'Crew spirit drops 10% slower.', effects: { moraleDecayMult: 0.9 } },
         { id: 'dosimeter_network', label: 'Dosimeter Network', summary: 'Blocks 10% more radiation.', effects: { radiationShielding: 0.1 } },
         { id: 'shift_scheduling', label: 'Shift Scheduling', summary: 'Crewed tasks go 20% faster.', effects: { taskSpeedBonus: 0.2 } },
         { id: 'storm_shelter', label: 'Storm Shelter', summary: 'Blocks 15% more radiation.', effects: { radiationShielding: 0.15 } },
-        { id: 'crew_support', label: 'Crew Support Systems', summary: 'Crew spirit drops 15% slower. Crewed tasks go 20% faster.', effects: { moraleDecayMult: 0.85, taskSpeedBonus: 0.2 } },
+        { id: GAMEPLAY_UPGRADES.protectedRotation, label: 'Protected Rotation', summary: 'Spend 2 Food to give one crew member their rest Morale while they work this Sol.' },
     ]),
 ];
 

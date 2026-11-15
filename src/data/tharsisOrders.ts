@@ -1,4 +1,4 @@
-import type { CrewRole, ResourcePool, TaskCategory } from '../contracts/gameContract';
+import type { CrewRole, ExpeditionId, MissionRequirementKind, ResourcePool, TaskCategory } from '../contracts/gameContract';
 import type { StationEquipmentId } from './tharsisEquipment';
 
 type Bay = 'rover' | 'instruments' | 'life' | 'stores' | 'crew' | 'custom';
@@ -70,12 +70,46 @@ export const WORK_ORDERS: readonly WorkOrder[] = [
 ];
 
 export const ORDER_BY_ID = new Map(WORK_ORDERS.map(order => [order.id, order]));
+interface ChecklistGroup {
+    kind: MissionRequirementKind;
+    label: string;
+    bay: Exclude<Bay, 'life' | 'custom'>;
+    orders: readonly string[];
+}
+
 export const CHECKLIST = [
     { kind: 'prep_rover', label: 'Rover', bay: 'rover', orders: ['drive-check', 'drive-service', 'load-test'] },
     { kind: 'prep_sensor', label: 'Instruments', bay: 'instruments', orders: ['sampler', 'calibrate', 'telemetry'] },
     { kind: 'prep_supplies', label: 'Field supplies', bay: 'stores', orders: ['audit', 'seal'] },
     { kind: 'assign_crew', label: 'Field crew', bay: 'crew', orders: ['route', 'suits'] },
-] as const;
+] as const satisfies readonly ChecklistGroup[];
+
+const TRAINING_CHECKLIST: readonly ChecklistGroup[] = [
+    { ...CHECKLIST[0], orders: ['drive-check'] },
+    { ...CHECKLIST[1], orders: ['sampler', 'calibrate'] },
+    { ...CHECKLIST[2], orders: ['audit'] },
+    { ...CHECKLIST[3], orders: ['suits'] },
+];
+
+export function expeditionChecklist(id: ExpeditionId): readonly ChecklistGroup[] {
+    return id === 'training' ? TRAINING_CHECKLIST : CHECKLIST;
+}
+
+const trainingOrderIds = new Set(TRAINING_CHECKLIST.flatMap(group => group.orders));
+const trainingOrders = WORK_ORDERS.filter(order => trainingOrderIds.has(order.id) || repeatable(order)).map(order => {
+    if (order.id === 'calibrate') return { ...order, needs: ['drive-check', 'sampler'] };
+    if (order.id === 'suits') return { ...order, needs: ['calibrate', 'audit'] };
+    return order;
+});
+const trainingOrderById = new Map(trainingOrders.map(order => [order.id, order]));
+
+export function expeditionOrders(id: ExpeditionId): readonly WorkOrder[] {
+    return id === 'training' ? trainingOrders : WORK_ORDERS;
+}
+
+export function expeditionOrder(id: ExpeditionId, orderId: string): WorkOrder | undefined {
+    return (id === 'training' ? trainingOrderById : ORDER_BY_ID).get(orderId);
+}
 
 export function repeatable(order: WorkOrder): boolean {
     return order.yield !== undefined || order.recovery !== undefined;

@@ -2,6 +2,7 @@
   "version": "1.0",
   "groups": {
     "game-textures": { "folder": "assets/textures", "mode": "local", "alwaysInclude": true },
-    "game-fonts": { "folder": "assets/fonts", "mode": "local", "alwaysInclude": true }
+    "game-fonts": { "folder": "assets/fonts", "mode": "local", "alwaysInclude": true },
+    "mission-music": { "folder": "assets/audio/mission", "mode": "local", "alwaysInclude": true }
   }
 }

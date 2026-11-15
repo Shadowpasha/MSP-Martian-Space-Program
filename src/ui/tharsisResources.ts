@@ -1,10 +1,11 @@
 import type { Entity } from 'esengine';
 import type { ResourcePool } from '../contracts/gameContract';
 import { EQUIPMENT_IDS, STATION_EQUIPMENT } from '../data/tharsisEquipment';
-import { RESOURCE_LABELS } from '../data/missions';
+import { missionDeadline, RESOURCE_LABELS } from '../data/missions';
 import { round1 } from '../simulation/stateOps';
 import { localArea, localBudget, resourceForecast, stormDay, type Area, type TharsisState } from '../simulation/tharsis';
 import { radiationAfterDose, radiationEffects } from '../simulation/tharsisConditions';
+import { activateUpgrade, hasUpgrade, upgradeProblem, type UpgradeCommand } from '../simulation/tharsisUpgrades';
 import type { FlightUi } from './flightUi';
 import type { RunButton } from './tharsisFlight';
 
@@ -16,7 +17,8 @@ export function resourceRate(forecast: Forecast, key: Resource) {
     const passive = round1(forecast.passive[key]);
     const use = round1(forecast.upkeep[key] + forecast.tasks.reduce((sum, flow) => sum + (flow.cost?.[key] ?? 0), 0));
     const recovery = round1(forecast.tasks.reduce((sum, flow) => sum + (flow.remaining === 1 ? flow.yield?.[key] ?? 0 : 0), 0));
-    return { passive, use, recovery, daily: round1(passive + recovery - use) };
+    const automatic = forecast.recovery[key];
+    return { passive, use, recovery, automatic, daily: round1(passive + recovery + automatic - use) };
 }
 
 export const signed = (value: number) => value ? `${value > 0 ? '+' : '−'}${Math.abs(value)}` : '0';
@@ -43,7 +45,12 @@ export function showConditions(ui: FlightUi, content: Entity, button: RunButton,
     button('condition-rover', content, [204, 68, 172, 39], () => select('rover'), {
         label: 'Rover', tone: actualArea === 'rover' ? 'hero' : 'plain', disabled: !state.tharsis.rover,
     });
-    ui.label(content, [866, 70, 284, 32], `SOL ${state.sol} / ${state.goal.deadlineSol}`, { size: 15, color: p.cyan, center: true });
+    ui.label(content, [866, 70, 284, 32], `SOL ${state.sol} / ${missionDeadline(state)}`, { size: 15, color: p.cyan, center: true });
+    if (hasUpgrade(state, 'weatherRelay')) {
+        const start = state.tharsis.stormStart;
+        ui.label(content, [402, 70, 459, 35], start <= missionDeadline(state) ? `Weather Relay · Storm Sols ${start}–${start + 2}` : 'Weather Relay · Clear through deadline',
+            { size: 15, color: p.amber });
+    }
 
     const columns = [
         {
@@ -83,20 +90,36 @@ export function showConditions(ui: FlightUi, content: Entity, button: RunButton,
     const text = actualArea === 'station' ? `Shelter ${state.tharsis.shelter} · ${state.tharsis.completed.shield ? 'Shelter panels fitted' : 'Standard shielding'}` :
         state.tharsis.completed.harden ? 'Hardened rover · Added shielding and insulation' : 'Standard rover · Must shelter in a storm';
     ui.label(content, [24, 519, 810, 44], text, { size: 16, color: p.amber });
+    if (actualArea === 'station' && hasUpgrade(state, 'microgrid')) {
+        ui.label(content, [24, 563, 810, 27], 'Habitat Microgrid · Indoor Life Support can run in full storm shelter.', { size: 14, color: p.cyan });
+    }
     button('condition-controls', content, [860, 512, 272, 49], () => openControls(actualArea), {
         label: actualArea === 'station' ? 'Life support controls' : 'Expedition supplies', tone: 'hero',
     });
 }
 
 export function showResources(ui: FlightUi, content: Entity, button: RunButton, state: TharsisState, area: Area, key: Resource, taskPage: number,
-    select: (key: Resource) => void, page: (next: number) => void): void {
+    select: (key: Resource) => void, page: (next: number) => void, change: (action: () => string | null) => void): void {
     const p = ui.palette;
     const actualArea = area === 'rover' && state.tharsis.rover ? 'rover' : 'station';
     const local = localArea(state, actualArea)!;
     const forecast = resourceForecast(state, actualArea);
-    const { passive, use, recovery, daily } = resourceRate(forecast, key);
+    const { passive, use, recovery, automatic, daily } = resourceRate(forecast, key);
     const unit = key === 'oxygen' && actualArea === 'station' ? '%' : '';
-    ui.label(content, [22, 59, 1100, 28], `${actualArea === 'station' ? 'STATION' : 'ROVER'}   ·   SOL ${state.sol} RESOURCE FORECAST`, { size: 14, color: p.cyan });
+    ui.label(content, [22, 59, 475, 28], `${actualArea === 'station' ? 'STATION' : 'ROVER'}   ·   SOL ${state.sol} RESOURCE FORECAST`, { size: 14, color: p.cyan });
+    const command: UpgradeCommand | null = actualArea === 'station' ? key === 'energy' && hasUpgrade(state, 'batteryBank') ? { kind: 'batteryBank' } :
+        key === 'oxygen' && hasUpgrade(state, 'electrolysis') ? { kind: 'electrolysis' } : null : null;
+    const { upgrades } = state.tharsis;
+    if (command) {
+        const reason = upgradeProblem(state, command);
+        const label = command.kind === 'electrolysis' ? 'Run electrolysis' : upgrades.batteryCharged ? 'Discharge 12 Power' : 'Store 12 Power';
+        const status = command.kind === 'electrolysis' ? '4 Water + 3 Power → 12 O₂' :
+            `Battery Bank · ${upgrades.batteryCharged ? '12 Power stored' : 'empty'}`;
+        button('resource-system', content, [894, 60, 258, 36], () => change(() => activateUpgrade(state, command)), {
+            label, disabled: Boolean(reason), tone: 'hero',
+        });
+        ui.label(content, [502, 56, 375, 45], reason ?? status, { size: 14, color: reason ? p.amber : p.cyan, wrap: true });
+    }
     RESOURCE_KEYS.forEach((id, index) => {
         const row = ui.frame(content, [20 + 229 * index, 108, 216, 72], p.ink, id === key ? p.cyan : p.edge);
         button(`resource-detail-${id}`, row, [8, 6, 192, 50], () => select(id), {
@@ -109,14 +132,17 @@ export function showResources(ui: FlightUi, content: Entity, button: RunButton, 
     const climate = key === 'energy' ? round1(forecast.heating + forecast.filterPower) : key === 'oxygen' ? forecast.filterOxygen : 0;
     const rows = [ ['Passive recovery / Sol', passive], ['Routine upkeep / Sol', -(forecast.upkeep[key] - climate)],
         [key === 'energy' ? 'Heating and filtration / Sol' : 'Filtration / Sol', -climate],
-        ['Task consumption / Sol', -(use - forecast.upkeep[key])], ['Tasks finishing this Sol', recovery], ['Projected net this Sol', daily] ] as const;
-    rows.filter((_, index) => index !== 2 || climate > 0).forEach(([label, value], index) => {
-        const y = 101 + index * 35;
+        ['Task consumption / Sol', -(use - forecast.upkeep[key])], ['Tasks finishing this Sol', recovery], ['Automatic recovery this Sol', automatic], ['Projected net this Sol', daily] ] as const;
+    rows.filter((_, index) => (index !== 2 || climate > 0) && (index !== 5 || automatic > 0)).forEach(([label, value], index) => {
+        const y = 100 + index * 31;
         ui.box(budget, [16, y + 30, 434, 1], p.edge);
         ui.label(budget, [18, y, 310, 29], label, { size: 15, color: p.secondary });
         ui.label(budget, [328, y, 116, 29], `${signed(round1(value))}${unit}`, { size: 16, color: value < 0 ? p.bad : value > 0 ? p.good : p.text, center: true });
     });
     ui.label(budget, [18, 324, 430, 58], 'Runway uses current passive recovery and daily draw. Task yields arrive on completion.', { size: 13, color: p.muted, wrap: true, top: true });
+    if (actualArea === 'station' && hasUpgrade(state, 'emergencyStores')) {
+        ui.label(budget, [18, 368, 430, 25], `Emergency Stores · ${upgrades.emergencyStoresUsed ? 'used' : 'sealed and ready'}`, { size: 13, color: p.cyan });
+    }
 
     const tasks = ui.frame(content, [512, 200, 640, 406], p.ink);
     ui.label(tasks, [16, 10, 590, 42], 'Scheduled task contributions', { display: true, size: 24 });

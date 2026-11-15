@@ -38,7 +38,7 @@ export function flightPalette(highContrast: boolean) {
 
 type Tone = 'plain' | 'primary' | 'hero' | 'tile';
 interface ButtonOptions {
-    tone?: Tone; disabled?: boolean; label?: string; labelSize?: number;
+    tone?: Tone; disabled?: boolean; label?: string; labelSize?: number; labelFit?: number;
     /** No hover lift, press sink, hover tick or click blip (for grid cells that other things are drawn over). */
     still?: boolean;
     /** No hover tick: for big hover areas built from buttons (list rows, cards) rather than real buttons. */
@@ -255,7 +255,7 @@ export function makeFlightUi(
         const ring = box(handle.entity, [w - 16, 6, 8, 8], palette.white);
         setNodeDisplayed(world, ring, false);
         const text = opts.label === undefined ? null : label(handle.entity, [8, 2, w - 16, h - 4], opts.label, {
-            display: true, size: opts.labelSize ?? 18, center: true, color: tone === 'primary' ? palette.ink : palette.text,
+            display: true, size: opts.labelSize ?? 18, fit: opts.labelFit, center: true, color: tone === 'primary' ? palette.ink : palette.text,
         });
         controls.push({ entity: handle.entity, ring, disabled: () => disabled, x, y });
 
@@ -326,6 +326,7 @@ export function makeFlightUi(
         }
     }
 
+    const sliders = new Set<Entity>();
     function slider(
         parent: Entity,
         bounds: Bounds,
@@ -334,7 +335,7 @@ export function makeFlightUi(
         opts: { step?: number; disabled?: boolean; fillColor?: Color } = {},
     ) {
         const [x, y, w, h] = bounds;
-        return createSlider({
+        const handle = createSlider({
             world,
             events,
             parent,
@@ -350,6 +351,14 @@ export function makeFlightUi(
             handleVisual: { color: palette.amber },
             onChange,
         });
+        for (const decoration of [handle.fillEntity, handle.handleEntity]) {
+            world.update(decoration, UINode, node => { node.pointerEvents = UIPointerEvents.None; });
+        }
+        const ring = box(handle.entity, [w - 8, -9, 8, 8], palette.white);
+        setNodeDisplayed(world, ring, false);
+        controls.push({ entity: handle.entity, ring, disabled: () => Boolean(opts.disabled), x, y });
+        sliders.add(handle.entity);
+        return handle;
     }
 
     let lastFocused: Entity | null = null;
@@ -362,7 +371,7 @@ export function makeFlightUi(
         const key = (name: string, pad: GamepadButton) => input.isKeyPressed(name) || input.isGamepadButtonPressed(pad);
         const dx = Number(key('ArrowRight', GamepadButton.DpadRight)) - Number(key('ArrowLeft', GamepadButton.DpadLeft));
         const dy = Number(key('ArrowDown', GamepadButton.DpadDown)) - Number(key('ArrowUp', GamepadButton.DpadUp));
-        if (dx || dy) {
+        if ((dx || dy) && (focus.focusedEntity === null || !sliders.has(focus.focusedEntity))) {
             const current = controls.find(control => control.entity === focus.focusedEntity);
             const available = controls.filter(isEnabled);
             if (!current && available.length) focus.focus(available[0]!.entity, true);

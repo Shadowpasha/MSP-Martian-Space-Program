@@ -4,12 +4,6 @@
 const GEMINI_ROUTE = '/api/gemini-plan';
 let geminiModel: string | null = null;
 
-export function getGeminiStatusLabel(): string {
-    return geminiModel ? 'A.R.I.E.S. connected' : 'A.R.I.E.S. unavailable';
-}
-
-export function assistantIsAvailable(): boolean { return geminiModel !== null; }
-
 /**
  * A page served over the web (local playtest or a deployed site). The game asks its own server
  * whether A.R.I.E.S. is available; a plain static host answers with no route and A.R.I.E.S. stays off.
@@ -18,19 +12,25 @@ function isServedPage(): boolean {
     return typeof location !== 'undefined' && (location.protocol === 'http:' || location.protocol === 'https:');
 }
 
-export async function checkGeminiConnection(): Promise<void> {
-    if (!isServedPage()) return;
+export async function checkGeminiConnection(signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return false;
+    if (!isServedPage()) {
+        geminiModel = null;
+        return false;
+    }
+    let model: string | null = null;
     try {
-        const response = await fetch(GEMINI_ROUTE, { cache: 'no-store', signal: AbortSignal.timeout(2_000) });
+        const timeout = AbortSignal.timeout(2_000);
+        const response = await fetch(GEMINI_ROUTE, { cache: 'no-store', signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
         if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
-            const status: { model?: string | null } = await response.json();
-            geminiModel = status.model ?? null;
-            return;
+            const status: { model?: unknown } | null = await response.json();
+            if (typeof status?.model === 'string' && status.model.trim()) model = status.model;
         }
     } catch {
-        // A static export can still use the local task planner.
+        // The run keeps its authored briefings.
     }
-    geminiModel = null;
+    if (!signal?.aborted) geminiModel = model;
+    return Boolean(model) && !signal?.aborted;
 }
 
 export async function requestGemini(systemInstruction: string, input: string, options: {
@@ -38,7 +38,9 @@ export async function requestGemini(systemInstruction: string, input: string, op
     timeout?: number;
     signal?: AbortSignal;
 } = {}): Promise<{ text: string } | { error: string }> {
-    if (!geminiModel) await checkGeminiConnection();
+    if (options.signal?.aborted) return { error: 'Request canceled.' };
+    if (!geminiModel) await checkGeminiConnection(options.signal);
+    if (options.signal?.aborted) return { error: 'Request canceled.' };
     if (!geminiModel) return { error: 'Gemini is unavailable.' };
     try {
         const timeout = AbortSignal.timeout(options.timeout ?? 20_000);
@@ -48,11 +50,13 @@ export async function requestGemini(systemInstruction: string, input: string, op
             signal: options.signal ? AbortSignal.any([timeout, options.signal]) : timeout,
             body: JSON.stringify({ systemInstruction, input, ...(options.kind && { kind: options.kind }) }),
         });
+        if (options.signal?.aborted) return { error: 'Request canceled.' };
         if (!response.headers.get('content-type')?.includes('application/json')) {
             geminiModel = null;
             return { error: 'Local Gemini server is unavailable.' };
         }
         const result: { text?: string; error?: string } = await response.json();
+        if (options.signal?.aborted) return { error: 'Request canceled.' };
         if (!response.ok || typeof result.text !== 'string' || !result.text.trim()) {
             geminiModel = null;
             return { error: result.error || 'Gemini returned an empty response.' };

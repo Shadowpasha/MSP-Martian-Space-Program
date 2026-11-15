@@ -3,6 +3,7 @@
 // food, water and O₂ last. Launch starts the run; Back returns to Cargo Preparation.
 import type { MissionSetupInput } from '../contracts/gameContract';
 import { CARGO_ITEMS, CARGO_COLUMNS, CARGO_ROWS, occupiedCells, packedInventory, type CargoPlacement } from '../data/cargo';
+import { missionDeadline, victoryCriteria } from '../data/missions';
 import { supplyLasts } from './cargoPacker';
 import type { FlightUi } from './flightUi';
 import { stopMusic } from '../audio/soundManager';
@@ -50,7 +51,7 @@ export function showLaunchSummary(
     const sideHolder = ui.group(root, [848, 108, 416, 596]);
     const side = ui.frame(sideHolder, [0, 0, 416, 596]);
     ui.label(side, [16, 10, 384, 34], goal.title, { display: true, size: 24, fit: 16 });
-    ui.label(side, [16, 44, 384, 22], `${setup.planet === 'moon' ? 'Moon' : 'Mars'} · Deadline Sol ${goal.deadlineSol}`, {
+    ui.label(side, [16, 44, 384, 22], `${setup.planet === 'moon' ? 'Moon' : 'Mars'} · Deadline Sol ${missionDeadline(setup)}`, {
         size: 14, color: p.amber,
     });
 
@@ -84,7 +85,7 @@ export function showLaunchSummary(
         });
     });
 
-    ui.label(side, [16, 462, 384, 52], problem ?? 'All set. Ready for launch.', {
+    ui.label(side, [16, 430, 384, 76], problem ?? victoryCriteria(setup), {
         size: 14, wrap: true, color: problem ? p.bad : p.good,
     });
     // Launch: engines rumble and the screen rattles for a moment, then the launch intro

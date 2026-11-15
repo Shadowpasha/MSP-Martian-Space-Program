@@ -24,6 +24,7 @@ import {
     type WeatherType,
 } from '../contracts/gameContract';
 import { normalizeCargo } from '../data/cargo';
+import { missionDeadline } from '../data/missions';
 import { appendLog } from './stateOps';
 import { applyForecast, createTharsis, resolveTharsisSol, type TharsisRun, type TharsisState } from './tharsis';
 import { nextBriefing, type SurveyBriefing } from './tharsisEvents';
@@ -81,9 +82,8 @@ export function createInitialGameState(
     seed = Math.floor(Math.random() * 0x100000000),
 ): OutpostGameState {
     const setup = cloneSetup(inputSetup);
-    const skillModifiers = unlockedSkillIds.length > 0
-        ? computeSkillModifiers(unlockedSkillIds)
-        : { ...DEFAULT_SKILL_MODIFIERS, ...setup.skillModifiers };
+    const upgradeIds = [...new Set([...(Array.isArray(setup.upgradeIds) ? setup.upgradeIds : []), ...unlockedSkillIds])];
+    const skillModifiers = computeSkillModifiers(upgradeIds, { ...DEFAULT_SKILL_MODIFIERS, ...setup.skillModifiers });
 
     const state: OutpostGameState = {
         planet: setup.planet,
@@ -97,7 +97,7 @@ export function createInitialGameState(
         cargo: normalizeCargo(setup.cargo),
         crew: setup.crew.map((c) => ({ ...c, perk: { ...c.perk }, stageAnchor: { ...c.stageAnchor } })),
         skillModifiers,
-        unlockedSkillIds: [...unlockedSkillIds],
+        unlockedSkillIds: upgradeIds,
         goal: {
             ...setup.missionGoal,
             requirements: (setup.missionGoal.requirements ?? []).map((r) => ({ ...r })),
@@ -136,6 +136,12 @@ export function advanceSol(state: OutpostGameState): { advanced: boolean; reason
     return advanceTharsisSol(state);
 }
 
+export function previewEndSol(state: TharsisState): TharsisState {
+    const projected = structuredClone(state);
+    advanceSol(projected);
+    return projected;
+}
+
 export function isTharsis(state: OutpostGameState): state is TharsisState {
     return state.tharsis !== undefined;
 }
@@ -148,7 +154,7 @@ export function continueAfterOutcome(state: TharsisState): void {
 
 export function commitBriefing(state: TharsisState, sol: number, briefing: SurveyBriefing): boolean {
     const run = state.tharsis;
-    if (state.sol !== sol || run.phase !== 'report' || run.briefingCommitted || briefing.area !== run.briefing.area || briefing.source !== 'Gemini') return false;
+    if (run.expedition === 'training' || state.sol !== sol || run.phase !== 'report' || run.briefingCommitted || briefing.area !== run.briefing.area || briefing.source !== 'Gemini') return false;
     if (run.briefing.system === 'storm') run.stormBriefing = run.briefing;
     run.briefing = briefing;
     run.briefingCommitted = true;
@@ -180,7 +186,7 @@ function advanceTharsisSol(state: TharsisState): { advanced: boolean; reason?: s
     recordSol(state, completed);
     run.reportSol = state.sol;
     run.phase = 'report';
-    const deadline = Math.min(state.targetSol, state.goal.deadlineSol);
+    const deadline = missionDeadline(state);
     if (collapse || state.goal.completed || state.sol >= deadline) {
         const { site, surveyHours, dataKind } = expeditionOf(run.expedition);
         const reason = collapse ?? (state.goal.completed ? `The crew docked with ${surveyHours} hours of ${dataKind} from ${site} by Sol ${state.sol}.` :
@@ -195,7 +201,8 @@ function advanceTharsisSol(state: TharsisState): { advanced: boolean; reason?: s
     applyForecast(state, run);
     run.briefing = nextBriefing(state);
     run.outcome = [];
-    run.briefingCommitted = false;
+    run.briefingCommitted = run.expedition === 'training';
+    run.previewedChoice = null;
     run.stormBriefing = null;
     return { advanced: true };
 }
@@ -230,18 +237,19 @@ function finalizeRun(
     const goalBonus = state.goal.completed ? 400 : 0;
     const victoryBonus = outcome === 'victory' ? 500 : 0;
     const score = Math.max(0, state.sol * 40 + state.tasksCompletedCount * 60 + state.perkMatchesCount * 35 + resourceScore + goalBonus + victoryBonus);
-    const researchPointsEarned = Math.max(2, Math.round(score / 180));
+    const training = state.tharsis.expedition === 'training';
+    const researchPointsEarned = training ? outcome === 'victory' ? 3 : 0 : Math.max(2, Math.round(score / 180));
 
     const expedition = expeditionOf(state.tharsis.expedition);
     const lessons: string[] = [];
     if (state.lowEnergyCount >= 2 || state.resources.energy < 20) {
-        lessons.push('Power dipped during the storm — pack an extra Battery Pack or unlock "Dust-Repel Solar Coating".');
+        lessons.push('Power ran low. Pack an extra Battery Pack or store Power before the storm with Battery Bank.');
     }
     if (state.lowFoodCount >= 2 || state.halfRationSols >= 3) {
         lessons.push('Food supplies ran tight — harvest the hydroponics early or unlock "Algae Nutrient Loop".');
     }
     if (state.lowOxygenCount >= 2 || state.resources.oxygen < 30) {
-        lessons.push('Oxygen margins got thin — keep a Repair Kit or Oxygen Tank in reserve, or unlock "Closed-Loop Scrubbers".');
+        lessons.push('Oxygen margins got thin. Keep a Repair Kit or Oxygen Tank in reserve, or use Emergency Electrolysis.');
     }
     if (!state.goal.completed) {
         const { legs, surveyHours } = expedition;

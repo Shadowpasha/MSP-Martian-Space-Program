@@ -17,6 +17,11 @@ export function canAffordCost(resources: ResourcePool, cost: Partial<ResourcePoo
     return resourceEntries(cost).every(([key, amount]) => resources[key] >= (amount ?? 0));
 }
 
+export function shortfalls(stock: ResourcePool, needed: Partial<ResourcePool> | undefined): [keyof ResourcePool, number][] {
+    return resourceEntries(needed).filter(([key, amount]) => stock[key] < amount)
+        .map(([key, amount]) => [key, round1(amount - stock[key])]);
+}
+
 export function spend(resources: ResourcePool, cost: Partial<ResourcePool>): void {
     applyResourceDelta(resources, Object.fromEntries(resourceEntries(cost).map(([key, amount]) => [key, -amount])));
 }

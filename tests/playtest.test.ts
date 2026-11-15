@@ -1,34 +1,42 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AVAILABLE_CREW, DEFAULT_CREW, DEFAULT_MARS_SETUP, SKILL_TREE_UPGRADES, UPGRADE_BRANCHES, computeSkillModifiers } from '../src/contracts/gameContract';
+import { AVAILABLE_CREW, DEFAULT_CREW, DEFAULT_MARS_SETUP, GAMEPLAY_UPGRADES, SKILL_TREE_UPGRADES, UPGRADE_BRANCHES, computeSkillModifiers } from '../src/contracts/gameContract';
 import { packedInventory, placementProblem, rotatedCells, type CargoPlacement } from '../src/data/cargo';
 import { buildLaunchSetup, launchProblem, missionOffers } from '../src/data/missions';
 import { loadProfile, purchaseProblem, purchaseUpgrade, resetUpgrades, spentResearch } from '../src/data/profile';
 import { createInitialGameState, isTharsis } from '../src/simulation/solEngine';
+import { hasUpgrade } from '../src/simulation/tharsisUpgrades';
 
 const sampler: CargoPlacement = { id: 1, item: 'windSampler', x: 0, y: 0, rotation: 0 };
 const drill: CargoPlacement = { id: 4, item: 'iceDrill', x: 5, y: 0, rotation: 0 };
 const water: CargoPlacement = { id: 2, item: 'waterCanisters', x: 2, y: 0, rotation: 0 };
 const tank: CargoPlacement = { id: 3, item: 'oxygenTanks', x: 3, y: 0, rotation: 0 };
 const starterCrew = DEFAULT_CREW.map(member => member.id);
-const playableOffer = missionOffers()[0]!;
+const playableOffer = missionOffers().find(offer => offer.setup?.expedition === 'tharsis')!;
 
-test('the picker offers three expeditions (Easy, Medium, Hard) and three missions coming soon', () => {
+test('the picker offers optional training, three expeditions, and three upcoming missions', () => {
     const offers = missionOffers();
-    assert.equal(offers.length, 6);
+    assert.equal(offers.length, 7);
     assert.deepEqual(offers.map(offer => offer.title), [
-        'Tharsis Ridge Weather Survey', 'Radiation Detective', 'Ice Hunter', 'Shadow Ice', 'Breathe Easy', 'Space Garden',
+        'Tharsis Training Run', 'Tharsis Ridge Weather Survey', 'Radiation Detective', 'Ice Hunter', 'Shadow Ice', 'Breathe Easy', 'Space Garden',
     ]);
-    const playable = offers.filter(offer => offer.setup);
+    const training = offers[0]!;
+    const trainingSetup = buildLaunchSetup(training, [], [])!;
+    assert.equal(training.prepared, 'training');
+    assert.equal(trainingSetup.targetSol, 6);
+    assert.equal(launchProblem(trainingSetup), null);
+    assert.deepEqual(trainingSetup.upgradeIds, [GAMEPLAY_UPGRADES.electrolysis]);
+    const playable = offers.slice(1).filter(offer => offer.setup);
     assert.equal(playable.length, 3);
     assert.deepEqual(playable.map(offer => offer.difficulty), [1, 2, 3]);
     assert.deepEqual(playable.map(offer => offer.setup!.expedition), ['tharsis', 'radiation', 'ice']);
     assert.ok(playable.every(offer => offer.setup!.rules === 'tharsis-expedition'));
-    assert.equal(offers[0]?.setup?.missionGoal.deadlineSol, 16);
-    assert.ok(offers.every(offer => offer.briefing), 'every mission has a NASA briefing for the popup');
-    const ice = buildLaunchSetup(offers[2]!, starterCrew, [drill])!;
+    assert.equal(playableOffer.setup?.missionGoal.deadlineSol, 16);
+    assert.ok(offers.slice(1).every(offer => offer.briefing));
+    const iceOffer = playable.find(offer => offer.setup?.expedition === 'ice')!;
+    const ice = buildLaunchSetup(iceOffer, starterCrew, [drill])!;
     assert.equal(launchProblem(ice), null);
-    assert.match(launchProblem(buildLaunchSetup(offers[2]!, starterCrew, [sampler])!)!, /Ice Drill/);
+    assert.match(launchProblem(buildLaunchSetup(iceOffer, starterCrew, [sampler])!)!, /Ice Drill/);
     // A team manifest without expedition rules still starts as an expedition (the Tharsis survey).
     const external = missionOffers(DEFAULT_MARS_SETUP)[0]!;
     const setup = buildLaunchSetup(external, [], [])!;
@@ -62,9 +70,12 @@ test('crew, cargo and one paid upgrade transfer into the built-in survey', () =>
     assert.match(launchProblem(buildLaunchSetup(playableOffer, crewIds.slice(0, 3), [sampler])!)!, /four crew/);
     const setup = buildLaunchSetup(playableOffer, crewIds, [sampler, water, tank])!;
     assert.equal(launchProblem(setup), null);
-    setup.skillModifiers = computeSkillModifiers(profile.upgradeIds);
+    setup.upgradeIds = [...profile.upgradeIds, 'greywater_reclaimer', 'greywater_reclaimer'];
+    setup.skillModifiers = { ...setup.skillModifiers, waterConsumptionMult: 0.8 };
     const sim = createInitialGameState(setup);
-    assert.equal(sim.skillModifiers.oxygenConsumptionMult, 0.75);
+    assert.ok(isTharsis(sim));
+    assert.equal(hasUpgrade(sim, 'electrolysis'), true);
+    assert.equal(sim.skillModifiers.waterConsumptionMult, 0.68);
     assert.ok(sim.crew.some(member => member.role === 'captain'));
     assert.equal(sim.crew.length, 4);
     assert.equal(sim.cargo.batteryPacks, 0);
@@ -84,7 +95,9 @@ test('each upgrade branch forks and rejoins and purchases debit and unlock toget
         for (const node of nodes) {
             const before = computeSkillModifiers(profile.upgradeIds);
             profile = purchaseUpgrade(profile, node);
-            assert.notDeepEqual(before, computeSkillModifiers(profile.upgradeIds));
+            assert.ok(profile.upgradeIds.includes(node.id));
+            if (node.tier === 2 || node.tier === 3) assert.notDeepEqual(before, computeSkillModifiers(profile.upgradeIds));
+            else assert.deepEqual(before, computeSkillModifiers(profile.upgradeIds));
             assert.equal(purchaseUpgrade(profile, node), profile);
         }
         assert.equal(profile.researchPoints, 0);

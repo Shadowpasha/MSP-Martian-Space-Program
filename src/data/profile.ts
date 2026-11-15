@@ -1,4 +1,4 @@
-import { AVAILABLE_CREW, DEFAULT_CREW, SKILL_TREE_UPGRADES, type SkillUpgradeDef } from '../contracts/gameContract';
+import { AVAILABLE_CREW, DEFAULT_CREW, SKILL_TREE_UPGRADES, type MainLoopResult, type SkillUpgradeDef } from '../contracts/gameContract';
 import { LAUNCH_CREW_SIZE } from './missions';
 
 export interface PlaytestProfile {
@@ -77,4 +77,15 @@ export function awardResearch(profile: PlaytestProfile, runId: string, earned: n
         ...profile, researchPoints: profile.researchPoints + earned,
         awardedRuns: [...profile.awardedRuns, runId],
     };
+}
+
+const TRAINING_CLEAR = 'tharsis-training-first-clear';
+
+export function recordResearch(profile: PlaytestProfile, runId: string, result: MainLoopResult, training: boolean): PlaytestProfile {
+    if (!training) return awardResearch(profile, runId, result.researchPointsEarned);
+    if (result.outcome !== 'victory' || profile.awardedRuns.includes(TRAINING_CLEAR)) {
+        result.researchPointsEarned = 0;
+        return profile;
+    }
+    return awardResearch(profile, TRAINING_CLEAR, result.researchPointsEarned);
 }

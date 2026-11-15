@@ -21,9 +21,13 @@ Set `GEMINI_API_KEY` in an untracked `.env` beside `package.json`, or in the ter
 
 - Open **A.R.I.E.S.** from the station for an open discussion, or select **Discuss procedure** on a work order. Ask for options or describe a tradeoff. For example, ask what equipment can be sacrificed when Materials are low, then decide whether to give up some solar output or preserve it. Review any new or revised task beside the conversation and confirm it before assigning a lead in **Tasks**.
 - **End Sol** starts the next briefing while the report is open. Leave the report open until the drafting indicator clears to receive it, or open the next briefing immediately. Editor Play and static previews use authored briefings. You can select procedures from the work-order screen when the terminal is unavailable.
+- The A.R.I.E.S. badge shows **API configured** when the server reports a model, **API online** after a valid response, and **Local fallback** when the game uses built-in briefings. The briefing header shows the source of that briefing.
 
 ## First mission
 
+- Choose **Play → Tharsis Training Run** for a guided six-Sol flight with a prepared crew and manifest. The first successful return earns three research points.
+- Open **Objectives** in either mission view to check the deadline, rover readiness, data, and station reserves. Select a blocker to see the relevant work orders, supply controls, or other recovery options.
+- Open **Audio** during operations to adjust All Audio, Music, or Sound Effects and skip to the next shuffled track. Volume settings carry across runs.
 - Start in **Crew** to swap specialists. Remove one to free a seat, then add a replacement. Exactly four crew must launch.
 - Open **Upgrade** to spend the three starting research points on a Tier 1 node. Completed missions award research based on their results.
 - Choose **Play → Tharsis Ridge Weather Survey**. In cargo preparation, place the Wind Sampler and any supplies you want. Select an inventory item and then a cell to place it. Select an existing piece to rotate, move, or remove it. Use **Tab**, **arrows**, and **Enter** to navigate. **R**, **M**, and **Delete** are cargo shortcuts.
@@ -37,7 +41,7 @@ Set `GEMINI_API_KEY` in an untracked `.env` beside `package.json`, or in the ter
 
 See [Gameplay rules and UML](docs/GAMEPLAY-UML.md) for mission states, Sol resolution, and the station and rover rules.
 
-`MissionSetupInput` defines the mission, roster, starting conditions and packed quantities. Every mission runs as an expedition (`rules: 'tharsis-expedition'`); `expedition` picks its profile in `src/data/expeditions.ts`: `tharsis` (Easy), `radiation` (Medium, a solar storm) or `ice` (Hard, a long cold drive). A team-provided setup without a profile runs as the Tharsis survey. The other missions in the picker are marked *Coming soon*. The original Sol survival loop was retired. The optional goal fields `minimumReserves` and `requiredEquipment` gate completion. Older manifests can omit water-canister and oxygen-tank counts.
+`MissionSetupInput` defines the mission, roster, starting conditions and packed quantities. Playable profiles in `src/data/expeditions.ts` are `training`, `tharsis`, `radiation`, and `ice`. A team-provided setup without a profile runs as the Tharsis survey. Optional `upgradeIds` grant gameplay unlocks and apply numerical node effects to the manifest's base modifiers at run initialization. The optional goal fields `minimumReserves` and `requiredEquipment` control docking and launch requirements respectively. Older manifests can omit water-canister and oxygen-tank counts.
 
 - `mars-outpost:pending-setup` accepts a team-provided `MissionSetupInput`. Play offers that mission and its prepared cargo and crew. The launch consumes the pending setup.
 - `mars-outpost:skill-upgrades` retains the legacy unlocked-ID list. The current profile lives under `mars-outpost:profile-v1`.

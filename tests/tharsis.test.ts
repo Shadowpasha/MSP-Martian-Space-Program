@@ -51,7 +51,7 @@ test('authored dependencies, assignment, explicit acceptance, and cargo determin
     const drive = ORDER_BY_ID.get('drive-check')!;
     assert.match(acceptWork(state, drive, ['parallel', 'specialist'])!, /one way/);
     assert.equal(acceptWork(state, drive, ['specialist']), null);
-    assert.match(assignWork(state, drive.id, 'crew_medic')!, /eligible/);
+    assert.match(assignWork(state, drive.id, 'crew_medic')!, /matching work role/);
     assert.equal(assignWork(state, drive.id, 'crew_pilot'), null);
     const untrained = workQuote(drive, [], state.crew.find(member => member.role === 'medic')!, state.skillModifiers);
     const specialist = workQuote(drive, ['specialist'], state.crew.find(member => member.role === 'pilot')!, state.skillModifiers);
@@ -76,7 +76,7 @@ test('manifest validation is atomic and changes to the travelers invalidate thei
     assert.equal(loadSlots(load), 13);
     const current = structuredClone({ resources: state.resources, cargo: state.cargo });
     load.cargo.waterCanisters = 1;
-    assert.match(dispatchRover(state, load)!, /insufficient stock/);
+    assert.match(dispatchRover(state, load)!, /0 available at station/);
     load.cargo.waterCanisters = 0;
     load.resources.res = 14;
     load.resources.energy = 56;
@@ -86,7 +86,7 @@ test('manifest validation is atomic and changes to the travelers invalidate thei
     assert.equal(chooseFieldCrew(state, 'crew_engineer'), null);
     assert.equal(tripPlan(state).latest, 11);
     assert.equal(state.tharsis.completed.suits, undefined);
-    assert.match(dispatchRover(state, defaultLoad(state))!, /field crew checks/);
+    assert.match(dispatchRover(state, defaultLoad(state))!, /Certify field suits/);
 });
 
 test('queued hardening waits until the rover is docked again', () => {

@@ -1,10 +1,12 @@
 import type { Entity } from 'esengine';
 import { formatResource, resourceEntries } from '../data/missions';
 import { STATION_EQUIPMENT } from '../data/tharsisEquipment';
-import { TECHNIQUES, WORK_ORDERS, type Technique, type WorkOrder } from '../data/tharsisOrders';
-import { cycleShelter, type TharsisState } from '../simulation/tharsis';
+import { expeditionOrders, TECHNIQUES, type Technique, type WorkOrder } from '../data/tharsisOrders';
+import { cycleShelter, resourceForecast, type TharsisState } from '../simulation/tharsis';
+import { crewAbilityStatus, stationShiftCapacity } from '../simulation/crewAbilities';
 import { LOW_MORALE, moralePace } from '../simulation/tharsisConditions';
-import { acceptWork, assignWork, cancelWork, equipmentBlock, orderBlock, preferredLead, scheduledOrder, stationCrew, workDraftBlock, workQuote } from '../simulation/tharsisWork';
+import { acceptWork, assignWork, assignmentProblem, cancelWork, equipmentBlock, findOrder, missingPrerequisites, orderBlock, preferredLead,
+    quoteForLead, scheduledOrder, stationCrew, workDraftBlock, workLeadProblem } from '../simulation/tharsisWork';
 import type { Bounds, FlightUi } from './flightUi';
 import type { RunButton } from './tharsisFlight';
 
@@ -56,7 +58,8 @@ export function showWorkConsole(options: ConsoleOptions): void {
             return state.rationPolicy === 'half' ? 'Half rations save Food and lower Morale.' : 'Full rations restored.';
         }), { label: state.rationPolicy === 'full' ? 'Full rations' : 'Half rations' });
     }
-    const orders = panel === 'assignments' ? run.work.map(scheduledOrder) : WORK_ORDERS.filter(order => order.bay === panel);
+    const orders = panel === 'assignments' ? run.work.map(job => scheduledOrder(job, run.expedition)) : expeditionOrders(run.expedition).filter(order => order.bay === panel);
+    const held = new Map(resourceForecast(state, 'station').tasks.filter(flow => flow.hold).map(flow => [flow.orderId, flow.hold]));
     const selected = orders.find(order => order.id === options.selected) ?? orders[0];
     if (selected && options.selected !== selected.id) options.chooseDefault(selected.id);
     ui.label(list, [12, 4, 340, 32], panel === 'assignments' ? 'Scheduled shifts' : 'Station work orders', { display: true, size: 22, color: p.amber });
@@ -70,8 +73,10 @@ export function showWorkConsole(options: ConsoleOptions): void {
             tone: selected?.id === order.id ? 'hero' : 'tile',
         });
         ui.label(row.entity, [10, 3, 320, 24], order.title, { display: true, size: 19 });
-        ui.label(row.entity, [10, 27, 320, 16], disabled ? 'Equipment unavailable' : active ? active.leadId ? 'Staffed' : 'Awaiting assignment' : blocker ? blocker === 'Complete' ? 'Complete' : 'Prerequisite required' : 'Ready', {
-            size: 12, color: disabled ? p.bad : active ? p.cyan : blocker === 'Complete' ? p.good : blocker ? p.muted : p.amber,
+        const hold = held.get(order.id);
+        ui.label(row.entity, [10, 27, 320, 16], disabled ? 'Equipment unavailable' : hold ? `Held · ${hold}` :
+            active ? 'Staffed' : blocker ?? 'Ready', {
+            size: 12, fit: 11, color: disabled ? p.bad : hold ? p.amber : active ? p.cyan : blocker === 'Complete' ? p.good : blocker ? p.muted : p.amber,
         });
     });
     if (orders.length > 7) {
@@ -88,9 +93,9 @@ export function showWorkConsole(options: ConsoleOptions): void {
     const block = orderBlock(state, selected);
     const technique = options.methods.get(selected.id);
     const method = job?.method ?? (technique ? [technique] : []);
-    const crew = stationCrew(state).filter(member => !method.includes('specialist') || selected.specialists.includes(member.role));
-    const lead = crew.find(member => member.id === job?.leadId && member.health > 0) ?? preferredLead(crew, selected);
-    const quote = lead && workQuote(selected, method, lead, state.skillModifiers);
+    const crew = stationCrew(state).filter(member => !workLeadProblem(state, selected, method, member));
+    const lead = crew.find(member => member.id === job?.leadId) ?? preferredLead(crew, selected, state);
+    const quote = lead && quoteForLead(state, selected, method, lead);
     const perShift = (cost: Parameters<typeof resourceEntries>[0]) => resourceEntries(cost).map(([key, val]) => formatResource(key, val)).join(' · ') || 'No resource draw';
     ui.label(inspector, [16, 6, 692, 38], selected.title, { display: true, size: 26, color: p.cyan });
     ui.label(inspector, [16, 48, 692, 54], selected.description, { size: 16, wrap: true, top: true });
@@ -105,12 +110,23 @@ export function showWorkConsole(options: ConsoleOptions): void {
         if (selected.yield) ui.label(inspector, [16, 218, 690, 26], `Completion yield  ${perShift(quote.output)}`, { size: 14, color: p.good });
     }
     if (job) {
-        drawAssignments(options, inspector, selected, job.leadId, Boolean(job.method.includes('specialist')));
+        const hold = held.get(selected.id);
+        if (hold) ui.label(inspector, [16, 144, 692, 42], `Held this Sol · ${hold}`, { size: 14, color: p.amber, wrap: true });
+        drawAssignments(options, inspector, selected, job.leadId);
         return;
     }
+    const prerequisite = findOrder(state, missingPrerequisites(state, selected)[0] ?? '');
+    if (prerequisite && prerequisite.bay !== 'custom') {
+        const tab = run.work.some(item => item.orderId === prerequisite.id) ? 'assignments' : prerequisite.bay;
+        button('prerequisite', inspector, [16, 256, 692, 44], () => open(tab, prerequisite.id), {
+            label: `Open prerequisite · ${prerequisite.title}`, tone: 'hero',
+        });
+    } else if (block && selected.id === 'suits' && run.fieldPair.length !== 2) {
+        button('choose-travelers', inspector, [16, 256, 330, 44], () => open('roverChecklist'), { label: 'Choose travelers', tone: 'hero' });
+    }
     if (!block) {
-        const leadOptions = crew.filter(member => member.health > 0).map(member => {
-            const candidate = workQuote(selected, method, member, state.skillModifiers);
+        const leadOptions = crew.map(member => {
+            const candidate = quoteForLead(state, selected, method, member);
             return `${member.name.split(' ')[0]} ${candidate.sols} Sol`;
         });
         ui.label(inspector, [16, 252, 688, 52], `Eligible leads   ${leadOptions.join(' · ')}`, { size: 14, color: p.secondary, wrap: true, top: true });
@@ -119,7 +135,7 @@ export function showWorkConsole(options: ConsoleOptions): void {
         const choices = [null, ...selected.methods];
         const width = Math.min(136, Math.floor(692 / choices.length) - 6);
         choices.forEach((id, index) => {
-            const eligible = id !== 'specialist' || stationCrew(state).some(member => member.health > 0 && selected.specialists.includes(member.role));
+            const eligible = id !== 'specialist' || stationCrew(state).some(member => !workLeadProblem(state, selected, ['specialist'], member));
             button(`method-${id ?? 'standard'}`, inspector, [16 + index * (width + 6), 306, width, 36], () => options.selectMethod(selected.id, id), {
                 label: id ? METHOD_LABELS[id] : 'Standard', labelSize: 15, disabled: !eligible, tone: id === (technique ?? null) ? 'hero' : 'plain',
             });
@@ -137,7 +153,7 @@ export function showWorkConsole(options: ConsoleOptions): void {
         tone: scheduleBlock ? 'plain' : 'primary', disabled: Boolean(scheduleBlock) });
 }
 
-function drawAssignments(options: ConsoleOptions, inspector: Entity, order: WorkOrder, leadId: string | null, restricted: boolean) {
+function drawAssignments(options: ConsoleOptions, inspector: Entity, order: WorkOrder, leadId: string | null) {
     const { ui, state, button, change, open } = options;
     const p = ui.palette;
     const target = ui.frame(inspector, [16, 248, 692, 48], p.raised, p.teal);
@@ -147,8 +163,9 @@ function drawAssignments(options: ConsoleOptions, inspector: Entity, order: Work
     const candidate = state.tharsis.work.find(job => job.orderId === order.id)!;
     const disabled = equipmentBlock(state, order);
     stationCrew(state).forEach((member, index) => {
-        const eligible = !disabled && member.health > 0 && (!restricted || order.specialists.includes(member.role));
-        const quote = workQuote(order, candidate.method, member, state.skillModifiers);
+        const blocker = assignmentProblem(state, order.id, member.id);
+        const eligible = !blocker;
+        const quote = quoteForLead(state, order, candidate.method, member);
         const bounds = [16 + index * 176, 312, 164, 92] as const;
         const control = button(`lead-${member.id}`, inspector, bounds, () => {
             if (!options.dragging(control.entity)) change(() => assignWork(state, order.id, member.id));
@@ -158,8 +175,14 @@ function drawAssignments(options: ConsoleOptions, inspector: Entity, order: Work
         ui.label(control.entity, [57, 8, 102, 24], member.name.split(' ')[0]!, { display: true, size: 19 });
         ui.label(control.entity, [57, 32, 102, 21], `Morale ${member.morale}%`, { size: 12, color: member.morale < LOW_MORALE ? p.bad : p.secondary });
         const penalty = Math.round((1 - moralePace(member.morale)) * 100);
-        const occupied = state.tharsis.work.some(job => job.orderId !== order.id && job.leadId === member.id);
-        ui.label(control.entity, [8, 64, 148, 22], !eligible ? 'Ineligible lead' : `${quote.sols} Sol · ${penalty ? `−${penalty}% pace` : occupied ? 'Reassign' : quote.specialist ? 'Specialist' : 'Backup'}`, { size: 12, color: eligible ? p.amber : p.muted, center: true });
+        const occupied = state.tharsis.work.filter(job => job.leadId === member.id).length;
+        const slots = stationShiftCapacity(state, member);
+        const status = slots === 2 ? `${occupied}/2 shifts` : occupied && leadId !== member.id ? 'Reassign' : quote.specialist ? 'Specialist' : 'Backup';
+        const unavailable = member.role === 'scientist' && (!slots || slots === 2) ? crewAbilityStatus(state, member) : blocker;
+        ui.label(control.entity, [6, 60, 152, 30], eligible ? `${quote.sols} Sol · ${penalty ? `−${penalty}% pace` : status}` :
+            (slots === 2 ? '2/2 shifts assigned' : unavailable ?? 'Unavailable'), {
+            size: 12, fit: 11, color: eligible ? p.amber : p.muted, center: true, wrap: true,
+        });
     });
     button('unassign', inspector, [16, 420, 220, 40], () => change(() => assignWork(state, order.id, null)), { label: 'Unassign lead', disabled: !leadId });
     if (!candidate.progress && !disabled) button('discuss-scheduled', inspector, [246, 420, 232, 40], () => open('aries', order.id), { label: 'Discuss revision' });

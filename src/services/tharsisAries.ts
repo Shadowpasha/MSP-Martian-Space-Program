@@ -1,6 +1,7 @@
 import { expeditionOf } from '../data/expeditions';
 import { EQUIPMENT_IDS, STATION_EQUIPMENT } from '../data/tharsisEquipment';
-import { TECHNIQUES, WORK_ORDERS, type Technique } from '../data/tharsisOrders';
+import { expeditionOrders, TECHNIQUES, type Technique } from '../data/tharsisOrders';
+import { missionDeadline } from '../data/missions';
 import { localArea, localBudget, stormDay, type TharsisState } from '../simulation/tharsis';
 import { allowedEventCargo, allowedPositiveEffects, availableEffectIds, EVENT_COMMITMENT_IDS, EVENT_SYSTEMS, validateBriefing } from '../simulation/tharsisEvents';
 import { customDraftBlock, findOrder, methodProblem, orderBlock, scheduledOrder, stationCrew, workDraftBlock } from '../simulation/tharsisWork';
@@ -13,6 +14,7 @@ function parse(response: Awaited<ReturnType<typeof requestGemini>>): unknown {
 }
 
 export async function draftSurveyBriefing(state: TharsisState, signal?: AbortSignal) {
+    if (state.tharsis.expedition === 'training') return null;
     const { area } = state.tharsis.briefing;
     const local = localArea(state, area);
     if (!local) return null;
@@ -31,7 +33,7 @@ export async function draftSurveyBriefing(state: TharsisState, signal?: AbortSig
     ].join('\n');
     const systems = EVENT_SYSTEMS[area].filter(system => !state.tharsis.recentSystems.slice(-2).includes(system));
     const input = JSON.stringify({
-        mission: state.goal.title, seed: state.tharsis.seed, briefingSol: state.sol, lastSol: state.tharsis.reportSol, deadline: state.goal.deadlineSol,
+        mission: state.goal.title, seed: state.tharsis.seed, briefingSol: state.sol, lastSol: state.tharsis.reportSol, deadline: missionDeadline(state),
         difficulty: expedition.id, hazard: expedition.hazard.kind === 'solar' ? 'solar particle storm' : 'regional dust storm', area,
         conditions: local.conditions, stormDay: stormDay(state), dailyBudget: localBudget(state, area),
         resources: local.resources, cargo: local.cargo, crew: local.crew.map(({ role, health, stamina }) => ({ role, health, stamina })),
@@ -87,6 +89,7 @@ function readReply(raw: unknown, state: TharsisState): DiscussionReply | null {
 }
 
 export async function discussWork(state: TharsisState, topic: string | null, history: readonly DiscussionMessage[], currentDraft: TaskDraft | null, signal?: AbortSignal): Promise<DiscussionReply | null> {
+    if (state.tharsis.expedition === 'training') return null;
     const systemInstruction = [
         'You are A.R.I.E.S., the crew’s operations partner at an isolated Mars station. Brainstorm with the crew in natural language. Ask one useful follow-up when a tradeoff or priority is unclear. Compare alternatives or explain why something is impractical. A conversation-only response with only message is welcome. Never mention the provider, a simulated mode, or any schema.',
         'When a procedure is specific enough to review, optionally include one draft while continuing the discussion. The player may keep asking and revise the draft before pressing Schedule. A draft is never approval. Never claim you scheduled work or changed the station. Gains require the scheduled crew to finish the job. An equipment limit is a cap, and the quote will show the actual yield. Only request kind clear when the player asks to withdraw the proposal.',
@@ -96,16 +99,16 @@ export async function discussWork(state: TharsisState, topic: string | null, his
         'Keep each reply under 640 characters. Explain the idea, risk, or actual question. The review panel shows the quoted numbers, so there is no need to format your chat as a task form.',
     ].join('\n');
     const input = JSON.stringify({
-        sol: state.sol, deadline: state.goal.deadlineSol, conditions: state.conditions, dailyBudget: localBudget(state, 'station'), resources: state.resources, cargo: state.cargo,
+        sol: state.sol, deadline: missionDeadline(state), conditions: state.conditions, dailyBudget: localBudget(state, 'station'), resources: state.resources, cargo: state.cargo,
         equipment: EQUIPMENT_IDS.map(id => ({ id, ...STATION_EQUIPMENT[id], state: state.tharsis.disabledEquipment[id] ? 'decommissioned' :
             state.tharsis.work.some(job => job.custom?.decommission === id) ? 'salvage scheduled' : 'available' })),
         crew: stationCrew(state).map(({ name, role, health, morale, id }) => ({ name, role, health, morale, dutySols: state.tharsis.dutyStreak[id] ?? 0,
             task: state.tharsis.work.find(job => job.leadId === id)?.orderId })),
-        workOrders: WORK_ORDERS.filter(order => !state.tharsis.completed[order.id] || order.yield).map(order => ({
+        workOrders: expeditionOrders(state.tharsis.expedition).filter(order => !state.tharsis.completed[order.id] || order.yield).map(order => ({
             id: order.id, title: order.title, shifts: order.shifts, cost: order.cost, needs: order.needs, methods: order.methods, specialists: order.specialists,
             output: order.yield, status: orderBlock(state, order) ?? 'ready',
         })),
-        scheduled: state.tharsis.work.map(job => ({ id: job.orderId, title: scheduledOrder(job).title, started: job.progress > 0, method: job.method,
+        scheduled: state.tharsis.work.map(job => ({ id: job.orderId, title: scheduledOrder(job, state.tharsis.expedition).title, started: job.progress > 0, method: job.method,
             ...(job.custom && { task: job.custom }) })),
         techniques: TECHNIQUES, topic, currentDraft, recentConversation: history.slice(-8).map((entry, index, recent) => ({
             speaker: entry.speaker, text: index < recent.length - 2 ? entry.text.slice(0, 240) : entry.text,

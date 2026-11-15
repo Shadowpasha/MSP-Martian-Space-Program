@@ -1,8 +1,14 @@
-The audio files directly in this directory are licensed under CC0 1.0 Universal (Public Domain):
+The following audio files are licensed under CC0 1.0 Universal (Public Domain):
 
 - bgm_menu.ogg: "Another Space Background Track (Observing The Star)" via OpenGameArt.org (CC0)
 - bgm_game.ogg: "Crimson Space Station Background Ambient Music 1" via OpenGameArt.org (CC0)
 - sfx_*.ogg: Kenney "Interface Sounds" pack via OpenGameArt.org / kenney.nl (CC0 1.0)
+
+The mission/ soundtrack is 8-bit Space Music © 2024 by Kyra van Meijl,
+licensed under Creative Commons Attribution 4.0 International.
+Source: https://kyrasvoice.itch.io/8-bit-space-music
+License: https://creativecommons.org/licenses/by/4.0/
+The original recordings were converted to Ogg Vorbis.
 
 The files in ui/ are original: generated in code by scripts/art/sfx.py for this project
 (no samples or third-party files). Written with Claude (Anthropic's AI assistant).

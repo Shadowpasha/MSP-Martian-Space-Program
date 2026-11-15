@@ -4,13 +4,15 @@ import {
     type CrewMember, type MissionRequirement, type SkillUpgradeDef, type TaskCategory, type UpgradeBranch,
 } from '../contracts/gameContract';
 import { CARGO_BY_ID, normalizeCargo } from '../data/cargo';
-import { LAUNCH_CREW_SIZE, type MissionOffer } from '../data/missions';
+import { CREW_ABILITIES } from '../data/crewAbilities';
+import { LAUNCH_CREW_SIZE, missionDeadline, victoryCriteria, type MissionOffer } from '../data/missions';
 import { purchaseProblem, type PlaytestProfile } from '../data/profile';
 import { MENU_BACKGROUND, SIDEBAR_BACKGROUND, type Bounds, type FlightUi, type IconName } from './flightUi';
 import { play, vibrate } from './feedback';
 import { burst } from './fx';
 import { easeOutBack, makeMotion, type Motion } from './motion';
 import { makeAbsBox } from './theme';
+import { showVolumeControls, type VolumeField } from './audioSettings';
 
 export type Page = 'menu' | 'crew' | 'upgrade' | 'settings' | 'mission' | 'cargo' | 'review' | 'quit' | 'exit' | 'run';
 type Navigate = (page: Page) => void;
@@ -332,14 +334,16 @@ export function showCrew(
     const bio = ui.label(inspector, [16, 240, 332, 70], '', { wrap: true, top: true, color: p.secondary, size: 14 });
     // These are real astronauts: every bio names where its facts come from.
     const source = ui.label(inspector, [16, 309, 332, 18], '', { size: 12, color: p.muted });
-    const perkCard = ui.frame(inspector, [12, 330, 340, 136], p.well);
-    const perkName = ui.label(perkCard, [12, 6, 308, 26], '', { display: true, size: 20, color: p.good });
-    const focus = ui.label(perkCard, [12, 32, 308, 22], '', { size: 14, color: p.amber });
+    const perkCard = ui.frame(inspector, [12, 330, 340, 110], p.well);
+    const perkName = ui.label(perkCard, [12, 2, 308, 24], '', { display: true, size: 19, color: p.good });
+    const focus = ui.label(perkCard, [12, 27, 308, 18], '', { size: 13, color: p.amber });
     const perkRows = perks(selected).map((_, index) => {
-        ui.icon(perkCard, 12, 60 + index * 22, 18, 'check', p.good);
-        return ui.label(perkCard, [38, 58 + index * 22, 282, 22], '', { size: 14, color: p.text });
+        ui.icon(perkCard, 12, 48 + index * 18, 16, 'check', p.good);
+        return ui.label(perkCard, [38, 46 + index * 18, 282, 18], '', { size: 13, color: p.text });
     });
-    const feedback = ui.label(inspector, [16, 478, 332, 44], '', { size: 14, color: p.secondary, wrap: true, top: true });
+    const abilityCard = ui.frame(inspector, [12, 446, 340, 78], p.well, p.teal);
+    const abilityName = ui.label(abilityCard, [12, 3, 316, 23], '', { display: true, size: 18, color: p.cyan });
+    const abilityText = ui.label(abilityCard, [12, 26, 316, 46], '', { size: 13, color: p.text, wrap: true, top: true });
     // One action per state: Add (seat open), Remove (on the crew), or a plain "Crew is full" note.
     const add = ui.button(inspector, [16, 532, 332, 44], () => {
         if (assigned.includes(selected.id) || assigned.length >= LAUNCH_CREW_SIZE) return;
@@ -410,10 +414,8 @@ export function showCrew(
         ui.setText(perkName, selected.perk.title);
         ui.setText(focus, perkScope(selected));
         perks(selected).forEach((line, index) => ui.setText(perkRows[index]!, line));
-        ui.setText(feedback, onCrew
-            ? `${selected.name.split(' ')[0]} is on the crew.`
-            : full ? 'All 4 seats are taken. Remove someone first to swap.' : `${open} seat${open === 1 ? '' : 's'} left.`);
-        ui.textColor(feedback, onCrew ? p.good : full ? p.secondary : p.amber);
+        ui.setText(abilityName, CREW_ABILITIES[selected.role].name);
+        ui.setText(abilityText, CREW_ABILITIES[selected.role].description);
         ui.show(add.entity, !onCrew && !full);
         add.setDisabled(onCrew || full);
         ui.show(remove.entity, onCrew);
@@ -669,17 +671,15 @@ export function showMissions(
         if (offer.difficulty) difficultyBar(ui, motion, card, 16, 278, offer.difficulty, cardDelay + 320);
         if (offer.setup) {
             const { missionGoal: goal } = offer.setup;
-            ui.label(card, [16, 304, 296, 24], `Deadline · Sol ${goal.deadlineSol}`, { size: 15, color: p.amber });
-            // Everything the mission asks for: the cargo to pack first (checked at launch), then the
-            // prep steps the crew finish on the outpost before the goal task can win.
-            ui.label(card, [16, 336, 296, 24], 'Requirements', { size: 14, color: p.secondary });
+            ui.label(card, [16, 304, 296, 24], `Deadline · Sol ${missionDeadline(offer.setup)}`, { size: 15, color: p.amber });
+            ui.label(card, [16, 333, 296, 54], victoryCriteria(offer.setup), { size: 13, wrap: true, top: true, color: p.secondary });
             const kit = Object.entries(goal.requiredEquipment ?? {}).filter(([, count]) => (count ?? 0) > 0) as [IconName, number][];
             const rows: Array<[IconName, string, boolean]> = [
-                ...kit.map(([id, count]): [IconName, string, boolean] => [id, `Pack ${CARGO_BY_ID[id as keyof typeof CARGO_BY_ID].name} × ${count}`, true]),
+                ...kit.map(([id, count]): [IconName, string, boolean] => [id, `${offer.prepared ? 'Aboard' : 'Pack'} · ${CARGO_BY_ID[id as keyof typeof CARGO_BY_ID].name} × ${count}`, true]),
                 ...goal.requirements.map((r): [IconName, string, boolean] => [REQUIREMENT_ICONS[r.kind] ?? 'check', requirementText(r), false]),
             ];
-            rows.forEach(([icon, text, cargo], row) => {
-                const y = 362 + row * 26;
+            rows.slice(0, 5).forEach(([icon, text, cargo], row) => {
+                const y = 396 + row * 24;
                 ui.icon(card, 16, y + 2, 20, icon, cargo ? p.amber : p.secondary);
                 ui.label(card, [44, y, 268, 24], text, { size: 14, color: cargo ? p.text : p.secondary });
             });
@@ -690,7 +690,7 @@ export function showMissions(
         }
         // Selecting a mission opens its briefing popup first; "Prepare Cargo" there continues.
         const button = ui.button(card, [16, 532, 296, 44], () => (offer.briefing ? openBriefing(offer) : onChoose(offer)), {
-            label: active ? 'Select Mission' : 'Coming soon', disabled: !active, tone: active ? 'primary' : 'plain',
+            label: offer.prepared === 'training' ? 'Open Training' : active ? 'Select Mission' : 'Coming soon', disabled: !active, tone: active ? 'primary' : 'plain',
         });
         if (active) selectButtons.push(button);
     });
@@ -753,12 +753,14 @@ export function showPreparedManifest(ui: FlightUi, offer: MissionOffer, problem:
     const summary = ui.frame(root, [848, 108, 416, 596]);
     const counts = normalizeCargo(offer.setup.cargo);
     ui.label(bay, [20, 16, 520, 40], 'Prepared Cargo', { display: true, size: 28 });
-    Object.values(CARGO_BY_ID).forEach((item, index) => {
-        ui.icon(bay, 24, 72 + index * 55, 24, item.id, p.amber);
-        ui.label(bay, [64, 68 + index * 55, 476, 32], `${item.name} × ${counts[item.id]}`, { size: 18 });
+    Object.values(CARGO_BY_ID).filter(item => counts[item.id] > 0).forEach((item, index) => {
+        ui.icon(bay, 24, 72 + index * 46, 24, item.id, p.amber);
+        ui.label(bay, [64, 68 + index * 46, 476, 32], `${item.name} × ${counts[item.id]}`, { size: 18 });
     });
     ui.label(summary, [20, 16, 368, 40], 'Launch Crew', { display: true, size: 28 });
     ui.label(summary, [20, 76, 368, 248], offer.setup.crew.map(member => `${member.name} · ${member.role}`).join('\n\n'), { wrap: true, top: true });
+    ui.label(summary, [20, 322, 368, 90], victoryCriteria(offer.setup), { size: 15, wrap: true, top: true, color: p.cyan });
+    if (offer.prepared === 'training') ui.label(summary, [20, 411, 368, 30], 'Emergency Electrolysis installed', { size: 14, color: p.amber });
     ui.label(summary, [20, 444, 368, 64], problem ?? 'Ready for launch.', { wrap: true, color: problem ? p.bad : p.good });
     ui.button(summary, [20, 524, 368, 48], onLaunch, { label: 'Launch Mission', tone: 'primary', disabled: Boolean(problem) });
 }
@@ -787,42 +789,7 @@ export function showSettings(
 
     ui.box(panel, [24, 286, 936, 2], p.edge);
 
-    let lastSfxSample = 0;
-    const volumeRows = [
-        { field: 'masterVolume', title: 'Master Volume', desc: 'Overall volume across music and sound effects.', fill: p.amber },
-        { field: 'musicVolume', title: 'Music Volume', desc: 'Ambient menu and Mars station background music.', fill: p.cyan },
-        { field: 'sfxVolume', title: 'SFX Volume', desc: 'Button clicks, crew drops, and event alert cues.', fill: p.good },
-    ] as const;
-
-    volumeRows.forEach((row, index) => {
-        const y = 304 + index * 88;
-        ui.label(panel, [24, y, 360, 34], row.title, { display: true, size: 24 });
-        ui.label(panel, [24, y + 34, 460, 24], row.desc, { color: p.secondary, size: 14 });
-        const pctLabel = ui.label(panel, [896, y + 14, 72, 32], `${Math.round(profile[row.field] * 100)}%`, {
-            display: true,
-            size: 20,
-            color: profile.soundEnabled ? p.amber : p.muted,
-            center: true,
-        });
-        ui.slider(
-            panel,
-            [520, y + 18, 360, 24],
-            profile[row.field],
-            (next) => {
-                const rounded = Math.round(next * 20) / 20;
-                ui.setText(pctLabel, `${Math.round(rounded * 100)}%`);
-                onVolume?.(row.field, rounded);
-                if (row.field === 'sfxVolume') {
-                    const now = Date.now();
-                    if (now - lastSfxSample > 140) {
-                        lastSfxSample = now;
-                        play('blip');
-                    }
-                }
-            },
-            { disabled: !profile.soundEnabled, fillColor: row.fill },
-        );
-    });
+    showVolumeControls(ui, panel, 304, profile, (field: VolumeField, value) => onVolume?.(field, value));
 }
 
 export function showQuit(ui: FlightUi, navigate: Navigate): void {

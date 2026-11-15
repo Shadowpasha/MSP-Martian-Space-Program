@@ -6,11 +6,22 @@ import { TECHNIQUES } from '../data/tharsisOrders';
 import { draftProblem, type DiscussionMessage, type TaskDraft } from '../services/tharsisAries';
 import type { TharsisState } from '../simulation/tharsis';
 import { customWorkOrder } from '../simulation/tharsisCustom';
-import { findOrder, preferredLead, scheduledOrder, stationCrew, workQuote } from '../simulation/tharsisWork';
-import type { FlightUi } from './flightUi';
+import { findOrder, preferredLead, quoteForLead, scheduledOrder, stationCrew, workLeadProblem } from '../simulation/tharsisWork';
+import type { Bounds, FlightUi } from './flightUi';
 import type { RunButton } from './tharsisFlight';
 
-export type TerminalStatus = 'checking' | 'connected' | 'unavailable';
+export type TerminalStatus = 'checking' | 'configured' | 'online' | 'fallback';
+
+export function showAriesBadge(ui: FlightUi, parent: Entity, bounds: Bounds, status: TerminalStatus): void {
+    const p = ui.palette;
+    const color = status === 'online' ? p.good : status === 'fallback' ? p.amber : p.cyan;
+    const label = { online: 'API online', configured: 'API configured', checking: 'Checking API', fallback: 'Local fallback' }[status];
+    const badge = ui.frame(parent, bounds, p.ink, color);
+    const innerHeight = bounds[3] - 8;
+    const iconSize = Math.min(16, innerHeight);
+    ui.icon(badge, 6, (innerHeight - iconSize) / 2, iconSize, status === 'online' ? 'check' : status === 'fallback' ? 'settings' : 'circuit', color);
+    ui.label(badge, [14 + iconSize, 0, bounds[2] - 24 - iconSize, innerHeight], label, { size: 12, fit: 11, color });
+}
 
 interface TerminalOptions {
     ui: FlightUi;
@@ -33,6 +44,9 @@ interface TerminalOptions {
     onAccept: () => void;
     onDiscard: () => void;
     onQueue: () => void;
+    onRetry: () => void;
+    onObjectives: () => void;
+    onWorkOrders: () => void;
 }
 
 function wrapLines(text: string, width: number): string[] {
@@ -68,14 +82,27 @@ function transcriptRows(history: readonly DiscussionMessage[]): TranscriptRow[] 
 
 const resources = (pool: Partial<ResourcePool>, sign: string) => resourceEntries(pool).map(([key, value]) => `${sign}${formatResource(key, value)}`).join('  ·  ');
 
-export function showTerminal(options: TerminalOptions): Entity {
+export function showTerminal(options: TerminalOptions): Entity | null {
     const { ui, state, content, button, status } = options;
     const p = ui.palette;
     const topic = options.topic && findOrder(state, options.topic)?.title;
-    const statusLabel = status === 'connected' ? 'A.R.I.E.S. CONNECTED' : status === 'checking' ? 'OPENING UPLINK…' : 'A.R.I.E.S. UNAVAILABLE';
-    ui.box(content, [325, 30, 8, 8], status === 'connected' ? p.good : p.amber);
-    ui.label(content, [343, 14, 360, 42], statusLabel, { size: 14, color: status === 'connected' ? p.good : p.amber });
+    const training = state.tharsis.expedition === 'training';
+    showAriesBadge(ui, content, [352, 18, 167, 29], status);
     ui.label(content, [24, 61, 698, 24], topic ? `TOPIC  /  ${topic}` : 'STATION OPERATIONS  /  OPEN DISCUSSION', { size: 14, color: p.cyan });
+
+    if (status === 'fallback') {
+        const fallback = ui.frame(content, [20, 96, 1130, 166], p.ink, p.teal);
+        ui.label(fallback, [16, 10, 1088, 37], training ? 'Training uses authored briefings' : 'The mission is using local briefings', {
+            display: true, size: 26,
+        });
+        ui.label(fallback, [16, 53, 1088, 40], training
+            ? 'Use the guide, objectives, and built-in work orders to plan the run.'
+            : 'Objectives and built-in work orders are available. Retry the API to resume live discussions.', { size: 16, color: p.secondary, wrap: true });
+        button('aries-objectives', fallback, [16, 107, 205, 42], options.onObjectives, { label: 'Objectives', tone: 'hero' });
+        button('aries-work', fallback, [235, 107, 205, 42], options.onWorkOrders, { label: 'Work Orders' });
+        if (!training) button('aries-retry', fallback, [453, 107, 205, 42], options.onRetry, { label: 'Retry API' });
+        return null;
+    }
 
     const terminal = ui.frame(content, [20, 96, 708, 478], p.ink, p.teal);
     const rows = transcriptRows(options.history);
@@ -124,12 +151,12 @@ function drawTaskReview(options: TerminalOptions): void {
         ui.label(review, [14, 44, 364, 74], 'A task will appear here when the discussion has a procedure ready to review.', { wrap: true, top: true, color: p.secondary });
     } else {
         const method = draft.kind === 'procedure' ? draft.method : [];
-        const crew = stationCrew(state).filter(member => !method.includes('specialist') || order.specialists.includes(member.role));
+        const crew = stationCrew(state).filter(member => !workLeadProblem(state, order, method, member));
         const lead = crew.find(member => member.id === draft.leadId && member.health > 0) ??
-            crew.find(member => member.id === active?.leadId && member.health > 0) ?? preferredLead(crew, order);
-        const quote = lead && workQuote(order, method, lead, state.skillModifiers);
-        const existing = active ? scheduledOrder(active) : draft.kind === 'procedure' ? order : null;
-        const previous = lead && existing && workQuote(existing, active?.method ?? [], lead, state.skillModifiers);
+            crew.find(member => member.id === active?.leadId && member.health > 0) ?? preferredLead(crew, order, state);
+        const quote = lead && quoteForLead(state, order, method, lead);
+        const existing = active ? scheduledOrder(active, state.tharsis.expedition) : draft.kind === 'procedure' ? order : null;
+        const previous = lead && existing && quoteForLead(state, existing, active?.method ?? [], lead);
         const reason = draftProblem(state, draft);
         const detail = method.length ? method.map(id => TECHNIQUES[id]).join(' ') : order.description;
         ui.label(review, [14, 37, 370, 60], order.title, { display: true, size: 24, top: true, wrap: true });
@@ -159,7 +186,7 @@ function drawTaskReview(options: TerminalOptions): void {
     button('review-queue', queue, [239, 6, 145, 31], options.onQueue, { label: 'Open queue', labelSize: 15 });
     if (!jobs.length) ui.label(queue, [14, 46, 368, 28], 'No tasks scheduled', { size: 14, color: p.muted });
     jobs.slice(-3).forEach((job, index) => {
-        const title = scheduledOrder(job).title;
+        const title = scheduledOrder(job, state.tharsis.expedition).title;
         const lead = state.crew.find(member => member.id === job.leadId);
         ui.label(queue, [14, 43 + index * 35, 370, 19], title, { size: 14 });
         ui.label(queue, [14, 61 + index * 35, 370, 16], lead ? `Lead  ${lead.name.split(' ')[0]}` : 'Awaiting assignment', { size: 12, color: p.secondary });

@@ -1,7 +1,7 @@
 import { EXPEDITIONS, expeditionOf, type Expedition } from '../data/expeditions';
 import type { CargoItemId, ResourcePool } from '../contracts/gameContract';
 import { CARGO_BY_ID } from '../data/cargo';
-import { formatResource, resourceEntries } from '../data/missions';
+import { formatResource, missionDeadline, resourceEntries } from '../data/missions';
 import { appendLog, applyResourceDelta, canAffordCost, clamp, resourceChanges, round1, spend } from './stateOps';
 import { changeAreaMorale, localArea, stormDay, type Area, type TharsisState } from './tharsis';
 import { ariesText } from './tharsisCustom';
@@ -161,7 +161,7 @@ const ROVER_EVENTS: readonly LocalScenario[] = [
 
 export function authoredBriefing(
     sol: number, area: Area, seed: number, storm: 'onset' | 'peak' | 'clearing' | null,
-    expedition: Expedition = EXPEDITIONS.tharsis, deadline = 16,
+    expedition: Expedition = EXPEDITIONS.tharsis, deadline = 16, atSurveySite = false,
 ): SurveyBriefing {
     if (sol === 1) return {
         title: `${expedition.region} flight briefing`, system: 'mission control', area, source: 'Mission control',
@@ -171,6 +171,7 @@ export function authoredBriefing(
             choice('Repeat the full power test', 'Run the lander’s full-load test one more time.', 'The second test found no new fault and used station power.', 'power_loss', 'power'),
         ],
     };
+    if (expedition.id === 'training') return trainingBriefing(sol, area, atSurveySite);
     if (storm && expedition.hazard.kind === 'solar') {
         const title = storm === 'onset' ? 'Solar particle storm' : storm === 'peak' ? 'Storm at peak flux' : 'Last Sol of the storm';
         const observation = area === 'rover'
@@ -198,11 +199,49 @@ export function authoredBriefing(
     return { ...scenario, choices: [...scenario.choices.slice(rotation), ...scenario.choices.slice(0, rotation)], area, source: 'Local' };
 }
 
+function trainingBriefing(sol: number, area: Area, atSurveySite: boolean): SurveyBriefing {
+    const source = 'Mission control';
+    if (area === 'rover') {
+        if (atSurveySite) return {
+            title: 'Intermittent instrument signal', system: 'field instrument', area, source,
+            observation: 'The logger is recording, but the relay link flickers whenever the connector moves.',
+            choices: [
+                choice('Re-seat the relay connector', 'Keep the logger running while checking the relay connection.', 'The link is steady. The logger can keep sampling.', 'none'),
+                choice('Cold reboot the logger', 'Disconnect the instrument and reset its acquisition system.', 'The logger needs the rest of this Sol to restart.', 'field_reset'),
+            ],
+        };
+        return {
+            title: 'Routine rover contact', system: 'route communications', area, source,
+            observation: 'Mission control confirms the route and your next check-in. The primary radio is working.',
+            choices: [
+                choice('Acknowledge on the primary radio', 'Keep the backup set in reserve.', 'Mission control received the check-in.', 'none'),
+                choice('Test the backup transmitter', 'Power the spare radio and repeat the check-in.', 'The spare test drained the rover battery without improving reception.', 'power_loss'),
+            ],
+        };
+    }
+    if (sol === 3) return {
+        title: 'Oxygen reserve check', system: 'oxygen generator', area, source,
+        observation: 'Cabin pressure is steady. The departure load and station upkeep will draw on the same oxygen stock.',
+        choices: [
+            choice('Confirm pressure and check reserves', 'Review usable oxygen and the planned rover load.', 'The readings agree. Use the station forecast to prepare for docking.', 'none'),
+            choice('Vent and retest the line', 'Purge atmosphere to repeat the pressure measurement.', 'The pressure was already stable. The retest used oxygen.', 'oxygen_loss'),
+        ],
+    };
+    return {
+        title: 'Station systems check', system: 'solar power', area, source,
+        observation: 'The station is operating normally. Check the remaining mission objectives before scheduling work.',
+        choices: [
+            choice('Review the shift log', 'Confirm the last checks and keep the station at normal load.', 'The logged measurements are in range.', 'none'),
+            choice('Run full-load diagnostics', 'Power all test circuits to confirm the same readings.', 'The diagnostics agreed with the log and used reserve power.', 'power_loss', 'power'),
+        ],
+    };
+}
+
 export function nextBriefing(state: TharsisState): SurveyBriefing {
     const day = stormDay(state);
     return authoredBriefing(state.sol, state.tharsis.rover ? 'rover' : 'station', state.tharsis.seed,
         day === 1 ? 'onset' : day === 2 ? 'peak' : day === 3 ? 'clearing' : null,
-        expeditionOf(state.tharsis.expedition), state.goal.deadlineSol);
+        expeditionOf(state.tharsis.expedition), missionDeadline(state), state.tharsis.rover?.phase === 'site');
 }
 
 export function commitmentLabel(choice: SurveyChoice): string {
@@ -269,12 +308,32 @@ export function allowedPositiveEffects(system: string): readonly string[] {
     return POSITIVE_BANDS[system] ?? [];
 }
 
-export function resolveBriefing(state: TharsisState, index: number): string | null {
+export function captainCanPreview(state: TharsisState): boolean {
+    return state.tharsis.phase === 'briefing' && Boolean(localArea(state, state.tharsis.briefing.area)?.crew
+        .some(member => member.role === 'captain' && member.health > 0));
+}
+
+export function selectBriefingPreview(state: TharsisState, index: number): string | null {
+    if (!captainCanPreview(state)) return 'A living Captain must be at this briefing location.';
     const run = state.tharsis;
+    if (run.previewedChoice !== null) return 'The Captain has previewed one response this briefing.';
     const choice = run.briefing.choices[index];
-    if (run.phase !== 'briefing' || !choice) return 'No briefing choice is pending.';
+    if (!choice) return 'Choose a briefing response.';
     const blocker = choiceBlock(state, choice);
     if (blocker) return blocker;
+    run.previewedChoice = index;
+    return null;
+}
+
+export function briefingPreview(state: TharsisState): { choice: SurveyChoice; outcome: readonly string[] } | null {
+    const index = state.tharsis.previewedChoice;
+    if (index === null || state.tharsis.phase !== 'briefing') return null;
+    const choice = state.tharsis.briefing.choices[index]!;
+    return { choice, outcome: applyBriefingChoice(structuredClone(state), choice) };
+}
+
+function applyBriefingChoice(state: TharsisState, choice: SurveyChoice): string[] {
+    const run = state.tharsis;
     const { resources, conditions, cargo, crew } = localArea(state, run.briefing.area)!;
     const before = { ...resources };
     const moraleBefore = conditions.morale;
@@ -294,7 +353,16 @@ export function resolveBriefing(state: TharsisState, index: number): string | nu
     const signed = (delta: number) => `${delta > 0 ? '+' : ''}${delta}`;
     const changes = [measured, morale ? `${signed(morale)} Morale` : '', dose ? `${signed(dose)} mSv` : '', choice.cargo ? `Used ${CARGO_BY_ID[choice.cargo].name}` : '',
         run.rover?.interrupted ? 'Field collection unavailable this Sol' : ''].filter(Boolean);
-    run.outcome = [choice.result, changes.join(' · ') || 'No measured change in supplies or conditions.'];
+    return [choice.result, changes.join(' · ') || 'No measured change in supplies or conditions.'];
+}
+
+export function resolveBriefing(state: TharsisState, index: number): string | null {
+    const run = state.tharsis;
+    const choice = run.briefing.choices[index];
+    if (run.phase !== 'briefing' || !choice) return 'No briefing choice is pending.';
+    const blocker = choiceBlock(state, choice);
+    if (blocker) return blocker;
+    run.outcome = applyBriefingChoice(state, choice);
     run.phase = 'outcome';
     run.briefingCommitted = true;
     state.lastEventTitle = run.briefing.title;

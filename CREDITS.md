@@ -25,6 +25,7 @@ A.R.I.E.S. (the expedition briefings and work-order assistant) can use **Google 
 |---|---|---|
 | `assets/audio/bgm_menu.ogg` | "Another Space Background Track (Observing The Star)", OpenGameArt.org | CC0 1.0 |
 | `assets/audio/bgm_game.ogg` | "Crimson Space Station Background Ambient Music 1", OpenGameArt.org | CC0 1.0 |
+| `assets/audio/mission/*.ogg` | [8-bit Space Music](https://kyrasvoice.itch.io/8-bit-space-music) © 2024 Kyra van Meijl. Eight tracks converted to Ogg Vorbis. | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | `assets/audio/sfx_*.ogg` | Kenney, "Interface Sounds" pack (kenney.nl / OpenGameArt.org) | CC0 1.0 |
 | `assets/audio/ui/*.wav` | Original. Generated in code by `scripts/art/sfx.py` (no samples or third-party files) | Made for this project |
 
