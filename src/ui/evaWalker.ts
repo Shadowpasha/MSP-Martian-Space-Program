@@ -29,9 +29,11 @@ const HOP_MS = [160, 140, 140, 300, 360, 360, 300, 220] as const;
 const AIR = [3, 4, 5, 6] as const;
 const LIFT = 7;
 const DRIFT = 45;
-/** Boarding is the same hop, quicker and longer, so it fits before the Sol ends. */
-const BOARD_SPEED = 1.6;
-const BOARD_DRIFT = 90;
+/** Boarding is the same size of hop, just quicker, so it fits before the Sol ends. */
+const BOARD_SPEED = 2;
+const BOARD_DRIFT = 60;
+/** Where he heads after hopping out of the rover: the near edge of his patch. */
+const HOME_X = AREA[1] - 20;
 /** Fading up into the door, or down out of it. */
 const DOOR_MS = 520;
 
@@ -62,6 +64,8 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
     let speed = 1;
     let waitUntil = 0;
     let onBoarded: (() => void) | null = null;
+    /** Just out of the rover: still hopping over to his patch, one ordinary hop at a time. */
+    let leaving = false;
 
     const draw = (lift: number, frame: number, alpha = 1) => {
         motion.set(sprite, Math.round(x - HEAD_X), Math.round(GROUND_Y - FEET_Y - lift));
@@ -123,6 +127,7 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
         board(done) {
             if (mode === 'gone' || mode === 'board' || mode === 'enter' || motion.reducedMotion) return false;
             onBoarded = done;
+            leaving = false;
             mode = 'board';
             facing = DOOR_X >= x ? 1 : -1;
             startHop(Date.now(), Math.min(BOARD_DRIFT, Math.abs(DOOR_X - x)), BOARD_SPEED);
@@ -138,9 +143,10 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
                 draw(Math.round(DOOR_RISE * k), k > 0.15 ? 4 : 7, 1 - k);
                 if (t < 1) return;
                 if (mode === 'emerge') {
-                    // Away from the door, into the patch where he passes the time.
+                    // Away from the door, over to the patch where he passes the time.
                     facing = -1;
-                    startHop(now, x - (AREA[1] - 20), 1);
+                    leaving = true;
+                    startHop(now, Math.min(DRIFT, x - HOME_X), 1);
                 } else {
                     mode = 'gone';
                     ui.show(sprite, false);
@@ -180,6 +186,13 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
                     facing = left > 0 ? 1 : -1;
                     startHop(now, Math.min(BOARD_DRIFT, Math.abs(left)), BOARD_SPEED);
                     return;
+                }
+                if (leaving) {
+                    if (x - HOME_X > 1) {
+                        startHop(now, Math.min(DRIFT, x - HOME_X), 1);
+                        return;
+                    }
+                    leaving = false;
                 }
                 rest(now, 1800, 4200);
                 return;
