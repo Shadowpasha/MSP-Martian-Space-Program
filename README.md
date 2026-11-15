@@ -21,7 +21,7 @@
 
 | Mission Selection | Launch to Mars |
 | :---: | :---: |
-| ![Mission Selection](docs/screenshots/mission-select.jpg) | ![Launch, cruise and landing](docs/gifs/launch.gif) |
+| <img src="docs/screenshots/mission-select.jpg" alt="Mission Selection" width="100%"> | <img src="docs/gifs/launch.gif" alt="Launch, cruise and landing" width="100%"> |
 
 ## How It Plays
 
@@ -29,7 +29,7 @@
 
 | Edit Crew | Launch Summary |
 | :---: | :---: |
-| ![Crew Selection](docs/screenshots/crew-select.jpg) | ![Launch Summary](docs/screenshots/launch-summary.jpg) |
+| <img src="docs/screenshots/crew-select.jpg" alt="Crew Selection" width="100%"> | <img src="docs/screenshots/launch-summary.jpg" alt="Launch Summary" width="100%"> |
 
 **2. Pack the rover.** Fit the instrument, food, water and oxygen into a 6×4 cargo grid.
 
@@ -41,7 +41,7 @@
 
 | Morning Briefing | End of Sol Report |
 | :---: | :---: |
-| ![Morning Briefing](docs/screenshots/morning-briefing.jpg) | ![End of Sol crew report](docs/gifs/endsol.gif) |
+| <img src="docs/screenshots/morning-briefing.jpg" alt="Morning Briefing" width="100%"> | <img src="docs/gifs/endsol.gif" alt="End of Sol crew report" width="100%"> |
 
 **4. Upgrade.** Spend research points on power, survival, operations and crew upgrades.
 
