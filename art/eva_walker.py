@@ -30,12 +30,16 @@ HOP = os.path.join(HERE, 'eva_walker', 'hop_atlas.png')
 WALK = os.path.join(HERE, 'menu_crew_walk')
 HEAD_ROWS = 11      # rows of a frame from the top of the head down to the chin
 # One hop for the preview, as (hop frame, ms); src/ui/evaWalker.ts uses the same. The sheet's own order
-# (stand, stand, take-off, three tucks, two crouches) has no wind-up and tucks while still rising,
-# so it is replayed as a jump: crouch, take off straight, tuck, float at the top, tuck, legs straight,
-# land in the crouch, stand. HOP_AIR: the steps off the ground (inclusive); HOP_LIFT: extra float
+# (stand, half crouch, take-off, three tucks, two crouches) has no wind-up and tucks while still
+# rising, so it is replayed as a jump: half crouch, crouch, take off, tuck, float at the top, tuck
+# coming down, land in the crouch, half crouch, stand. HOP_AIR: the steps off the ground (inclusive); HOP_LIFT: extra float
 # at the top (screen px); HOP_DRIFT: how far one hop carries him.
-HOP_SEQ = [(7, 260), (2, 150), (3, 260), (4, 460), (5, 260), (2, 200), (6, 200), (7, 240), (1, 180)]
-HOP_AIR = (1, 5)
+# (frame, ms, sink): sink lowers the coming-down tuck to the ground, as the in-between pose going into
+# and getting out of the crouch.
+HOP_SEQ = [(1, 140, 0), (5, 140, 8), (7, 240, 0), (2, 150, 0), (3, 260, 0), (4, 460, 0), (5, 300, 0), (6, 220, 0), (7, 260, 0), (5, 160, 8), (1, 180, 0)]
+HOP_AIR = (3, 6)
+# Sheet frames with his feet on the ground: standing (0), half crouch (1), crouches (6, 7).
+HOP_GROUNDED = (0, 1, 6, 7)
 HOP_LIFT = 7
 HOP_DRIFT = 45
 
@@ -107,9 +111,12 @@ def main():
         atlas.paste(c.transpose(Image.FLIP_LEFT_RIGHT), (i * CELL_W, CELL_H))
     # The hop rises and lands within its frames: keep that (one vertical offset, from the standing
     # first frame), but centre every frame on its head so it hops in place; the game moves him along.
+    # Frames with his feet on the ground stand exactly on the ground line; the airborne ones keep
+    # their own height above it (measured from the standing first frame).
     _, dy = anchor(hop[0])
     for i, f in enumerate(hop):
-        c = cell(f, anchor(f)[0], dy)
+        ax, ay = anchor(f)
+        c = cell(f, ax, ay if i in HOP_GROUNDED else dy)
         atlas.paste(c, (i * CELL_W, CELL_H * 2))
         atlas.paste(c.transpose(Image.FLIP_LEFT_RIGHT), (i * CELL_W, CELL_H * 3))
     atlas.save(OUT)
@@ -124,12 +131,12 @@ def main():
         frames, durations, x = [], [], 40.0
         # Like the game: hop, stand about, hop, turn round, stand, hop back.
         air_steps = HOP_AIR[1] - HOP_AIR[0] + 1
-        hop_right = [(2, frame, ms, step) for step, (frame, ms) in enumerate(HOP_SEQ)]
-        hop_left = [(3, frame, ms, step) for step, (frame, ms) in enumerate(HOP_SEQ)]
-        stand = lambda row, ms: [(row, 0, ms, -1)]
-        for row, col, ms, step in hop_right + stand(2, 4000) + hop_right + stand(2, 2500) + stand(3, 3000) + hop_left + hop_left + stand(3, 3000):
+        hop_right = [(2, frame, ms, step, sink) for step, (frame, ms, sink) in enumerate(HOP_SEQ)]
+        hop_left = [(3, frame, ms, step, sink) for step, (frame, ms, sink) in enumerate(HOP_SEQ)]
+        stand = lambda row, ms: [(row, 0, ms, -1, 0)]
+        for row, col, ms, step, sink in hop_right + stand(2, 4000) + hop_right + stand(2, 2500) + stand(3, 3000) + hop_left + hop_left + stand(3, 3000):
             shot = site.copy()
-            lift = 0
+            lift = -sink
             if HOP_AIR[0] <= step <= HOP_AIR[1]:
                 along = (step - HOP_AIR[0] + 0.5) / air_steps
                 x += (HOP_DRIFT if row == 2 else -HOP_DRIFT) / air_steps

@@ -23,18 +23,23 @@ const AREA = [470, 610] as const;
 /** The rover's door: where he hops up to (head centre x) and how far up the sill is. */
 const DOOR_X = 808;
 const DOOR_RISE = 56;
+/** How far the coming-down tuck (frame 5) sits above the ground in its cell (screen px): lowered by
+ * this, it stands on the ground. */
+const SINK = 8;
 /**
  * One hop, as [atlas frame, ms] (the same as art/eva_walker.py's preview). The Sprite AI sheet runs
- * stand, stand, take-off, three tucked frames, then two crouches; played in that order there is no
- * wind-up, the knees tuck while he is still rising, and he pops up out of the crouch. So the
- * frames are replayed as a jump: crouch to wind up, take off straight, tuck, float longest at the
- * top, tuck, legs straight again to land, crouch to absorb it, stand.
+ * stand, half crouch, take-off, three tucked frames, then two crouches; played in that order there
+ * is no wind-up, the knees tuck while he is still rising, and he pops up out of the crouch. So the
+ * frames are replayed as a jump: half crouch and crouch to wind up, take off straight, tuck, float
+ * longest at the top, tuck coming down, land straight into the crouch, half crouch, stand.
+ * The coming-down tuck (frame 5) also stands in, lowered to the ground, as the in-between pose
+ * going down into the crouch and getting up out of it, so he never drops or pops a whole crouch at once.
  */
-const HOP: ReadonlyArray<readonly [frame: number, ms: number]> = [
-    [7, 260], [2, 150], [3, 260], [4, 460], [5, 260], [2, 200], [6, 200], [7, 240], [1, 180],
+const HOP: ReadonlyArray<readonly [frame: number, ms: number, sink?: number]> = [
+    [1, 140], [5, 140, SINK], [7, 240], [2, 150], [3, 260], [4, 460], [5, 300], [6, 220], [7, 260], [5, 160, SINK], [1, 180],
 ];
-/** The steps of HOP he is off the ground for (take-off to legs straight again), inclusive. */
-const AIR = [1, 5] as const;
+/** The steps of HOP he is off the ground for (take-off to the last tuck), inclusive. */
+const AIR = [3, 6] as const;
 const LIFT = 7;
 const DRIFT = 45;
 /** Boarding is the same size of hop, just quicker, so it fits before the Sol ends. */
@@ -95,12 +100,13 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
 
     /** Where the hop is `ms` in: the frame, how far along, how high. Null once it has landed. */
     function hopAt(ms: number): { frame: number; along: number; lift: number } | null {
+        // lift: screen px above the ground (negative lowers a frame, see SINK).
         let t = ms * speed;
         const airStart = HOP.slice(0, AIR[0]).reduce((sum, [, ms]) => sum + ms, 0);
         const airLength = HOP.slice(AIR[0], AIR[1] + 1).reduce((sum, [, ms]) => sum + ms, 0);
         const air = Math.min(1, Math.max(0, (t - airStart) / airLength));
-        for (const [frame, ms] of HOP) {
-            if (t < ms) return { frame, along: air, lift: Math.round(Math.sin(Math.PI * air) * LIFT) };
+        for (const [frame, ms, sink] of HOP) {
+            if (t < ms) return { frame, along: air, lift: Math.round(Math.sin(Math.PI * air) * LIFT) - (sink ?? 0) };
             t -= ms;
         }
         return null;
