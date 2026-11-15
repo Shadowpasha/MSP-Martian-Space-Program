@@ -508,19 +508,19 @@ test('consecutive shifts lower individual Morale and a rest Sol restores it', ()
 });
 
 test('the resource forecast counts the final fractional shift as finishing this Sol', () => {
-    const crew = DEFAULT_CREW.map(member => member.role === 'engineer' ? { ...member, morale: 47 } : member);
+    const crew = DEFAULT_CREW.map(member => member.role === 'medic' ? { ...member, morale: 47 } : member);
     const state = survey(0, crew);
     plan(state);
-    const water = ORDER_BY_ID.get('water')!;
-    assert.equal(acceptWork(state, water, ['conserve']), null);
-    assert.equal(assignWork(state, water.id, 'crew_engineer'), null);
+    const spares = ORDER_BY_ID.get('spares')!;
+    assert.equal(acceptWork(state, spares, ['conserve']), null);
+    assert.equal(assignWork(state, spares.id, 'crew_medic'), null);
     for (let i = 0; i < 4; i++) step(state);
     assert.equal(state.tharsis.work[0]?.progress, 2.8);
     const flow = resourceForecast(state, 'station').tasks[0];
     assert.equal(flow?.remaining, 1);
-    assert.equal(flow?.yield?.water, 19);
+    assert.equal(flow?.yield?.res, 9);
     step(state);
-    assert.ok(state.lastSolReport.includes('Clean recycled water complete · Kalpana · +19 Water.'));
+    assert.ok(state.lastSolReport.includes('Gather spare parts complete · Bernard · +9 Materials.'));
 });
 
 test('a live briefing can accompany authored storm warnings without replacing the storm', async t => {

@@ -49,7 +49,7 @@ function shiftsRemaining(shifts: number, rate: number, progress = 0): number {
 
 export function workQuote(order: WorkOrder, method: readonly Technique[], lead: CrewMember, mods: SkillTreeModifiers, additionalRole?: CrewRole) {
     const specialist = order.specialists.includes(lead.role) || Boolean(additionalRole && order.specialists.includes(additionalRole));
-    const perk = lead.perk.bonusCategory === order.category;
+    const perk = lead.perk.bonusCategory === order.category || (lead.perk.bonusCategory === 'GOAL' && specialist);
     const parallel = method.includes('parallel');
     const specialistCheck = method.includes('specialist');
     const recycle = method.includes('recycle');

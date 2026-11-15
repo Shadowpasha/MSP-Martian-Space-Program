@@ -189,7 +189,7 @@ export function fieldReturnEstimate(state: TharsisState, useKnownStorm = stormWi
     let recorderReady = hasUpgrade(state, 'recorder') && !run.upgrades.recorderUsed;
     while (outbound > 0 || samples < requiredSamples || inbound > 0) {
         const day = hazardDay(knownStormStart, sol);
-        const { dose, restricted } = roverBudget(state, forecast(run, sol, knownStormStart), day, false, overrideTravel(state, sol));
+        const { dose, restricted } = roverBudget(state, forecast(run, sol, knownStormStart), day, false, overrideTravel(state, sol), radiation);
         radiation = radiationAfterDose(radiation, dose);
         if (radiation >= 100) return null;
         const sampling = outbound === 0 && samples < requiredSamples;
@@ -367,8 +367,11 @@ function degradeArea(state: TharsisState, crew: CrewMember[], conditions: Condit
     report.push(`${area} crew · ${reasons} · −${health} HP and −${loss} Morale per living crew member.`);
 }
 
-function doseChange(state: TharsisState, day: number, base: number, recovery: number): number {
-    if (!day) return -recovery;
+function doseChange(state: TharsisState, day: number, base: number, recovery: number, current: number, floor: number): number {
+    if (!day) {
+        if (current > floor) return -round1(Math.min(recovery, current - floor));
+        return current < floor ? round1(Math.min(0.5, floor - current)) : 0;
+    }
     const peak = day === 2 ? 1.4 : day === 3 ? 0.9 : 1;
     return round1(base * peak * expeditionFor(state).hazard.exposure * (1 - state.skillModifiers.radiationShielding));
 }
@@ -400,7 +403,7 @@ function stationBudget(state: TharsisState): DailyBudget {
     const oxygen = round1((2 + count * 0.5) * mods.oxygenConsumptionMult + filterOxygen);
     const food = count * (state.rationPolicy === 'full' ? 1 : 0.5) * mods.foodConsumptionMult;
     const shielded = Boolean(completed.shield);
-    const dose = doseChange(state, day, shelter === 'off' ? 25 : shelter === 'essential' ? shielded ? 4 : 12 : shielded ? 2 : 5, 3);
+    const dose = doseChange(state, day, shelter === 'off' ? 25 : shelter === 'essential' ? shielded ? 4 : 12 : shielded ? 2 : 5, 3, conditions.radiation, shielded ? 8 : 12);
     const upkeep = { energy, oxygen, food: round1(food), water: round1(count * 0.9 * mods.waterConsumptionMult), res: 0 };
     return { passive: { ...EMPTY_POOLS, energy: round1(solar) }, upkeep, heating, filterPower, filterOxygen, dose };
 }
@@ -409,7 +412,14 @@ function overrideTravel(state: TharsisState, sol = state.sol): boolean {
     return state.tharsis.abilities.stormOverrideSol === sol && state.tharsis.rover?.phase !== 'site';
 }
 
-function roverBudget(state: TharsisState, weather: WeatherForecast, day: number, resting: boolean, override = false): DailyBudget & { restricted: boolean } {
+function roverBudget(
+    state: TharsisState,
+    weather: WeatherForecast,
+    day: number,
+    resting: boolean,
+    override = false,
+    currentRadiation = state.tharsis.rover?.conditions.radiation ?? state.conditions.radiation,
+): DailyBudget & { restricted: boolean } {
     const hardened = Boolean(state.tharsis.completed.harden);
     const restricted = day > 0 && !hardened && !override;
     const clearHeat = heatingPower(expeditionFor(state).temperature.clear);
@@ -421,7 +431,7 @@ function roverBudget(state: TharsisState, weather: WeatherForecast, day: number,
     const filterOxygen = dust ? day === 2 ? 3 : 2 : haze ? 1 : 0;
     const monitoring = weather.weather === 'Solar Flare' && hardened ? 1 : 0;
     const energy = (restricted || resting ? 2 : ROVER_UPKEEP.energy) + heating + filterPower + monitoring;
-    const dose = doseChange(state, day, hardened ? 5 : dust ? 22 : 25, 2);
+    const dose = doseChange(state, day, hardened ? 5 : dust ? 22 : 25, 2, currentRadiation, hardened ? 10 : 14);
     const upkeep = { ...ROVER_UPKEEP, energy, oxygen: ROVER_UPKEEP.oxygen + filterOxygen };
     return { passive: { ...EMPTY_POOLS }, upkeep, heating, filterPower, filterOxygen, dose, restricted };
 }

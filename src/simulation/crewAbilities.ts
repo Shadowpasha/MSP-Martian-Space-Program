@@ -119,9 +119,9 @@ export function activateCrewAbility(state: TharsisState, area: Area, memberId: s
 
 export function harvestTray(state: TharsisState, report: string[]): void {
     if (state.tharsis.abilities.trayHarvestSol !== state.sol) return;
-    applyResourceDelta(state.resources, { food: 18 });
+    applyResourceDelta(state.resources, { food: 12 });
     state.tharsis.abilities.trayHarvestSol = null;
-    report.push('Germination Tray harvested · +18 station Food.');
+    report.push('Germination Tray harvested · +12 station Food.');
 }
 
 export function startRecovery(state: TharsisState, report: string[]): void {

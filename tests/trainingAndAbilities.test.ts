@@ -67,10 +67,10 @@ test('Double Shift works on three Sols, preserves unfinished work, and blocks th
     assert.equal(activateCrewAbility(state, 'station', scientist.id), null);
     assert.match(activateCrewAbility(state, 'station', scientist.id)!, /Double Shift through Sol 3/);
     assert.match(chooseFieldCrew(state, scientist.id)!, /field duty on Sol 7/);
-    staff(state, 'greens', scientist.id, ['conserve']);
+    staff(state, 'spares', scientist.id, ['conserve']);
     staff(state, 'water', scientist.id);
-    assert.equal(acceptWork(state, findOrder(state, 'spares')!, []), null);
-    assert.match(assignWork(state, 'spares', scientist.id)!, /slots are full/);
+    assert.equal(acceptWork(state, findOrder(state, 'greens')!, []), null);
+    assert.match(assignWork(state, 'greens', scientist.id)!, /slots are full/);
     // Unstaffed scheduled tasks auto-assign an available station lead on End Sol.
     assert.equal(resourceForecast(state, 'station').tasks.filter(flow => !flow.hold).length, 3);
     const projected = previewEndSol(state);
@@ -84,15 +84,15 @@ test('Double Shift works on three Sols, preserves unfinished work, and blocks th
         assert.equal(stationShiftCapacity(state, scientist), 2);
         advanceSol(state);
     }
-    const unfinished = state.tharsis.work.find(job => job.orderId === 'greens')!;
+    const unfinished = state.tharsis.work.find(job => job.orderId === 'spares')!;
     assert.equal(unfinished.leadId, null);
     assert.equal(unfinished.progress, 2.4);
     for (const sol of [4, 5, 6]) {
         plan(state);
         assert.equal(state.sol, sol);
         assert.equal(stationShiftCapacity(state, scientist), 0);
-        if (!state.tharsis.work.some(job => job.orderId === 'greens')) assert.equal(acceptWork(state, findOrder(state, 'greens')!, ['conserve']), null);
-        assert.match(assignWork(state, 'greens', scientist.id)!, /recovery through Sol 6/);
+        if (!state.tharsis.work.some(job => job.orderId === 'spares')) assert.equal(acceptWork(state, findOrder(state, 'spares')!, ['conserve']), null);
+        assert.match(assignWork(state, 'spares', scientist.id)!, /recovery through Sol 6/);
         assert.match(chooseFieldCrew(state, scientist.id)!, /Recovering/);
         advanceSol(state);
     }
@@ -118,7 +118,7 @@ test('fabrication and planting pay once and the tray harvest appears in the reso
         advanceSol(state);
         plan(state);
     }
-    assert.equal(resourceForecast(state, 'station').recovery.food, 18);
+    assert.equal(resourceForecast(state, 'station').recovery.food, 12);
     advanceSol(state);
     assert.match(state.lastSolReport.join(' '), /Germination Tray harvested/);
     assert.equal(state.tharsis.abilities.trayHarvestSol, null);
@@ -252,7 +252,7 @@ test('following the tutorial guide wins in six Sols and grants research once', (
     plan(state);
     staff(state, 'suits', 'crew_captain');
     const status = assessMission(state, defaultLoad(state));
-    assert.equal(status.dockReserves?.oxygen, 15);
+    assert.equal(status.dockReserves?.oxygen, 15.1);
     assert.equal(activateUpgrade(state, { kind: 'electrolysis' }), null);
     advanceSol(state);
     plan(state);
@@ -264,7 +264,7 @@ test('following the tutorial guide wins in six Sols and grants research once', (
         advanceSol(state);
         if (sol < 6) plan(state);
     }
-    assert.deepEqual([state.result?.outcome, state.result?.solReached, state.result?.finalResources.oxygen], ['victory', 6, 27]);
+    assert.deepEqual([state.result?.outcome, state.result?.solReached, state.result?.finalResources.oxygen], ['victory', 6, 27.1]);
     assert.ok(state.timeline.every(entry => entry.weather === 'Clear'));
     const result = state.result!;
     const profile = recordResearch(loadProfile(null, [], false), 'first-flight', result, true);
