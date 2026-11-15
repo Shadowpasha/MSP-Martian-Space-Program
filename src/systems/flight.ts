@@ -167,7 +167,7 @@ export const flightSystem = defineSystem(
                     justUnlocked = null;
                     break;
                 case 'mission':
-                    showShell(ui, page, 'Mission Selection', 'Pick a job for your crew.', 'mars', navigate);
+                    showShell(ui, page, 'Mission Selection', 'Pick a job for your crew. A Sol is one day on Mars: 24 hours 39 minutes.', 'mars', navigate);
                     surfaceTick = showMissions(ui, missionOffers(readPendingSetup()), selectMission, missionPage, next => { missionPage = next; navigate('mission'); });
                     break;
                 case 'cargo': {
