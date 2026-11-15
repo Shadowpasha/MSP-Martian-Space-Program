@@ -74,7 +74,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     const conversations = new Map<string | null, { messages: DiscussionMessage[]; draft: TaskDraft | null }>();
     const methods = new Map<string, Technique>();
     let chatPage = 0;
-    let terminalStatus: TerminalStatus = training ? 'fallback' : 'checking';
+    let terminalStatus: TerminalStatus = 'checking';
     let apiProbe: AbortController | null = null;
     let draftNotice = '';
     let prompt = '';
@@ -103,7 +103,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     });
 
     function probeAries() {
-        if (training || apiProbe) return;
+        if (apiProbe) return;
         const operation = new AbortController();
         apiProbe = operation;
         terminalStatus = 'checking';
@@ -172,7 +172,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
 
     function submit(value: string) {
         const text = value.trim().slice(0, 480);
-        if (!text || ask || training || terminalStatus === 'fallback') return;
+        if (!text || ask || terminalStatus === 'fallback') return;
         const room = conversation();
         const requestedTopic = topic;
         const operation = new AbortController();

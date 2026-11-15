@@ -88,7 +88,7 @@ export function showTerminal(options: TerminalOptions): Entity | null {
     const topic = options.topic && findOrder(state, options.topic)?.title;
     const training = state.tharsis.expedition === 'training';
     showAriesBadge(ui, content, [352, 18, 167, 29], status);
-    ui.label(content, [24, 61, 698, 24], topic ? `TOPIC  /  ${topic}` : 'STATION OPERATIONS  /  OPEN DISCUSSION', { size: 14, color: p.cyan });
+    ui.label(content, [24, 61, 698, 24], topic ? `TOPIC  /  ${topic}` : training ? 'TRAINING GUIDANCE  /  AUTHORED BRIEFINGS' : 'STATION OPERATIONS  /  OPEN DISCUSSION', { size: 14, color: p.cyan });
 
     if (status === 'fallback') {
         const fallback = ui.frame(content, [20, 96, 1130, 166], p.ink, p.teal);
@@ -96,11 +96,11 @@ export function showTerminal(options: TerminalOptions): Entity | null {
             display: true, size: 26,
         });
         ui.label(fallback, [16, 53, 1088, 40], training
-            ? 'Use the guide, objectives, and built-in work orders to plan the run.'
+            ? 'The guide, objectives, and built-in work orders are available. Retry the API to check for live guidance.'
             : 'Objectives and built-in work orders are available. Retry the API to resume live discussions.', { size: 16, color: p.secondary, wrap: true });
         button('aries-objectives', fallback, [16, 107, 205, 42], options.onObjectives, { label: 'Objectives', tone: 'hero' });
         button('aries-work', fallback, [235, 107, 205, 42], options.onWorkOrders, { label: 'Work Orders' });
-        if (!training) button('aries-retry', fallback, [453, 107, 205, 42], options.onRetry, { label: 'Retry API' });
+        button('aries-retry', fallback, [453, 107, 205, 42], options.onRetry, { label: 'Retry API' });
         return null;
     }
 
@@ -117,8 +117,9 @@ export function showTerminal(options: TerminalOptions): Entity | null {
             color: row.speaker === 'crew' ? p.amber : row.speaker === 'aries' ? p.cyan : p.text });
     });
     if (!options.history.length) {
-        const greeting = topic ? 'Tell me what you want to change about this task. We can compare time, crew, and supplies.' :
-            'What is holding up the mission? We can work through a shortage or design a new station task.';
+        const greeting = training ? 'Ask me for help with a work order, a resource shortage, or the next step in the training run.' :
+            topic ? 'Tell me what you want to change about this task. We can compare time, crew, and supplies.' :
+                'What is holding up the mission? We can work through a shortage or design a new station task.';
         ui.label(terminal, [18, 49, 650, 68], greeting, { size: 17, color: p.secondary, wrap: true, top: true });
     }
     if (options.pending) ui.label(terminal, [16, 432, 265, 30], 'A.R.I.E.S. is responding…', { size: 13, color: p.cyan });
@@ -134,7 +135,14 @@ export function showTerminal(options: TerminalOptions): Entity | null {
         onChange: options.onInput, onSubmit: options.onSubmit,
     });
     button('send', content, [586, 589, 142, 48], () => options.onSubmit(field.getValue()), { label: 'Send', tone: 'hero', disabled: options.pending });
-    drawTaskReview(options);
+    if (training) {
+        const guide = ui.frame(content, [748, 96, 404, 188], p.ink, p.teal);
+        ui.label(guide, [14, 10, 370, 28], 'Training guidance', { display: true, size: 22 });
+        ui.label(guide, [14, 51, 370, 64], 'Use the mission consoles to review objectives, schedule work, and assign leads.',
+            { size: 15, color: p.secondary, wrap: true, top: true });
+        button('aries-objectives', guide, [14, 127, 177, 40], options.onObjectives, { label: 'Objectives', tone: 'hero' });
+        button('aries-work', guide, [204, 127, 177, 40], options.onWorkOrders, { label: 'Work Orders' });
+    } else drawTaskReview(options);
     return field.entity;
 }
 

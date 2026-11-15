@@ -21,7 +21,8 @@ Set `GEMINI_API_KEY` in an untracked `.env` beside `package.json`, or in the ter
 
 - Open **A.R.I.E.S.** from the station for an open discussion, or select **Discuss procedure** on a work order. Ask for options or describe a tradeoff. For example, ask what equipment can be sacrificed when Materials are low, then decide whether to give up some solar output or preserve it. Review any new or revised task beside the conversation and confirm it before assigning a lead in **Tasks**.
 - **End Sol** starts the next briefing while the report is open. Leave the report open until the drafting indicator clears to receive it, or open the next briefing immediately. Editor Play and static previews use authored briefings. You can select procedures from the work-order screen when the terminal is unavailable.
-- The A.R.I.E.S. badge shows **API configured** when the server reports a model, **API online** after a valid response, and **Local fallback** when the game uses built-in briefings. The briefing header shows the source of that briefing.
+- The A.R.I.E.S. badge shows **API configured** when the server reports a model, **API online** after a valid response, and **Local fallback** when live requests fail or are unavailable. The briefing header shows the source of that briefing.
+- **Tharsis Training Run** uses scripted briefings. Its A.R.I.E.S. terminal offers live mission guidance when the API is available.
 
 ## First mission
 

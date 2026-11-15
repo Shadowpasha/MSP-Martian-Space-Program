@@ -66,7 +66,7 @@ function readReply(raw: unknown, state: TharsisState): DiscussionReply | null {
     const value = raw as Record<string, unknown>;
     const message = ariesText(value.message, 640);
     if (!message) return null;
-    if (!value.draft || typeof value.draft !== 'object') return { message };
+    if (state.tharsis.expedition === 'training' || !value.draft || typeof value.draft !== 'object') return { message };
     const suggestion = value.draft as Record<string, unknown>;
     if (suggestion.kind === 'clear') return { message, draft: null };
     const leadId = stationCrew(state).find(member => member.role === suggestion.leadRole && member.health > 0)?.id;
@@ -89,17 +89,23 @@ function readReply(raw: unknown, state: TharsisState): DiscussionReply | null {
 }
 
 export async function discussWork(state: TharsisState, topic: string | null, history: readonly DiscussionMessage[], currentDraft: TaskDraft | null, signal?: AbortSignal): Promise<DiscussionReply | null> {
-    if (state.tharsis.expedition === 'training') return null;
-    const systemInstruction = [
+    const training = state.tharsis.expedition === 'training';
+    const systemInstruction = (training ? [
+        'You are A.R.I.E.S., the crew’s guide during the six-Sol Tharsis Training Run. Use the mission progress and work orders provided to answer the player’s question.',
+        'Suggest one practical next step the player can take in the existing consoles. Use the actual prerequisites, supplies, and deadline. Return only a concise JSON message field.',
+    ] : [
         'You are A.R.I.E.S., the crew’s operations partner at an isolated Mars station. Brainstorm with the crew in natural language. Ask one useful follow-up when a tradeoff or priority is unclear. Compare alternatives or explain why something is impractical. A conversation-only response with only message is welcome. Never mention the provider, a simulated mode, or any schema.',
         'When a procedure is specific enough to review, optionally include one draft while continuing the discussion. The player may keep asking and revise the draft before pressing Schedule. A draft is never approval. Never claim you scheduled work or changed the station. Gains require the scheduled crew to finish the job. An equipment limit is a cap, and the quote will show the actual yield. Only request kind clear when the player asks to withdraw the proposal.',
         'For a listed work order use kind procedure, its orderId, and zero to two available technique IDs. Specialist and parallel are mutually exclusive. An order already underway cannot be revised. Earlier suggestions matter if the player asks to change them. Include leadRole when a specific station specialist is appropriate. Return concise valid JSON with only the relevant fields for the chosen draft kind.',
         'Invent custom maintenance, conversion, salvage, or other station work if it fits equipment, weather, stock, and crew. Provide a short specific title (44 characters), description (180), category ENG/BIO/NAV/MED/SCI, and 1–4 shifts. Cost is per shift and output is delivered on completion. Use positive integers and only energy, food, water, oxygen, res. Cost at least one resource and up to three. Max per shift in key order 8/4/4/5/4. Output up to two different resources and never one it costs. Ordinary output max per shift 12/9/10/12/4 with a combined budget of 125% of one maximum. Set exterior for EVA. Custom work cannot complete required dispatch checks or touch mission equipment, the field team, or profile upgrades.',
         'If the crew is willing to sacrifice station equipment, use kind custom with task.decommission set to an available equipment ID and task.output set to materials only (res, 4 up to its maxMaterials). Speak plainly about the permanent loss and offer an alternative if the player is undecided. When revising a scheduled custom task include its reviseId. For changes to an unscheduled draft omit reviseId.',
         'Keep each reply under 640 characters. Explain the idea, risk, or actual question. The review panel shows the quoted numbers, so there is no need to format your chat as a task form.',
-    ].join('\n');
+    ]).join('\n');
     const input = JSON.stringify({
         sol: state.sol, deadline: missionDeadline(state), conditions: state.conditions, dailyBudget: localBudget(state, 'station'), resources: state.resources, cargo: state.cargo,
+        ...(training && { mission: state.goal.title, requiredHours: expeditionOf('training').surveyHours, recordedHours: state.tharsis.hours,
+            roverPhase: state.tharsis.rover?.phase ?? 'docked', fieldPair: state.tharsis.fieldPair, returnedWithData: state.tharsis.returnedWithData,
+            completedWork: Object.keys(state.tharsis.completed), minimumReserves: state.goal.minimumReserves }),
         equipment: EQUIPMENT_IDS.map(id => ({ id, ...STATION_EQUIPMENT[id], state: state.tharsis.disabledEquipment[id] ? 'decommissioned' :
             state.tharsis.work.some(job => job.custom?.decommission === id) ? 'salvage scheduled' : 'available' })),
         crew: stationCrew(state).map(({ name, role, health, morale, id }) => ({ name, role, health, morale, dutySols: state.tharsis.dutyStreak[id] ?? 0,
