@@ -23,6 +23,7 @@ import { type FlightUi } from './flightUi';
 import { play } from './feedback';
 import { burst } from './fx';
 import { easeOutBack, makeMotion } from './motion';
+import { tutorial } from './tutorial';
 
 const CARGO_COLORS: Record<CargoItemId, number> = {
     windSampler: 0xd39e55, repairKits: 0xcc745e, batteryPacks: 0xe1bd65, medkits: 0xcf7c8c,
@@ -139,6 +140,7 @@ export function showCargoPacker(
     const empty = ui.button(bay, [152, 460, 124, 44], emptyBay, { label: 'Empty Bay', labelSize: 16, labelFit: 12 });
     const cancel = ui.button(bay, [284, 460, 132, 44], cancelHeld, { label: 'Put Back (Esc)', labelSize: 16, labelFit: 12 });
     const autoFill = ui.button(bay, [424, 460, 124, 44], autoFillBay, { label: 'Auto Fill', tone: 'primary', labelSize: 16, labelFit: 12 });
+    tutorial.targets.set('cargo-autofill', autoFill.entity);
     ui.label(bay, [20, 516, 528, 28], 'Click a packed item to take it out. Drag it to move it.', { size: 14, color: p.muted });
 
     // ---- Inventory: tabbed by kind, so items are quick to find ----
@@ -150,6 +152,7 @@ export function showCargoPacker(
         const button = ui.button(inventory, [16 + index * 97, 50, 92, 36], () => { tab = name; refresh(); }, { label: name });
         // Amber marker: this tab still holds required equipment that is not packed yet.
         const marker = ui.box(button.entity, [84, 2, 6, 6], p.amber);
+        tutorial.targets.set(`cargo-tab-${name}`, button.entity);
         return { name, button, marker };
     });
     const ROW = 70;
@@ -172,6 +175,7 @@ export function showCargoPacker(
         const shape = ui.box(button.entity, [SHAPE_X, 6, SHAPE_BOX, SHAPE_BOX]);
         const stock = ui.label(button.entity, [320, 0, 60, ROW - 6], '', { size: 13, color: p.amber, center: true });
         ui.on(button.entity, 'press', () => pick(item.id, false));
+        tutorial.targets.set(`cargo-item-${item.id}`, button.entity);
         return { item, button, stock, need, tag, tagText, shape, shapeLayer: null as Entity | null, shapeRotation: -1 };
     });
 
@@ -214,6 +218,7 @@ export function showCargoPacker(
     // The checklist: which NEEDED items are still missing, or that everything is ready.
     const validation = ui.label(inventory, [16, 484, 384, 36], '', { size: 14, wrap: true });
     const launch = ui.button(inventory, [16, 528, 384, 48], () => { if (!held) onLaunch(); }, { label: 'Review & Launch', tone: 'primary' });
+    tutorial.targets.set('cargo-launch', launch.entity);
 
     const piecesLayer = ui.box(grid, [0, 0, 520, 340]);
     let pieces = ui.box(piecesLayer, [0, 0, 520, 340]);
@@ -345,6 +350,7 @@ export function showCargoPacker(
     /** Packs the required equipment and one of each basic supply around what is already in the bay. */
     function autoFillBay(): void {
         cancelHeld();
+        tutorial.lessons.autoFilled = true;
         const before = placements.length;
         const short = (packed: readonly CargoPlacement[]) => supplyLasts(setup, packed).filter(entry => !entry.ok).map(entry => entry.key);
         const next = autoFillCargo(placements, required, short);
@@ -522,6 +528,12 @@ export function showCargoPacker(
         rotate.setDisabled(!held);
         cancel.setDisabled(!held);
         empty.setDisabled(placements.length === 0);
+        // What the tutorial coach needs to know to point at the next thing to do here.
+        const firstMissing = missing[0];
+        tutorial.view.cargo = {
+            needed: firstMissing ? { id: firstMissing.id, name: firstMissing.name, tab: tabOf(firstMissing.id) } : null,
+            tab, held: Boolean(held), short: lastsBy.some(entry => !entry.ok), ready: !problem,
+        };
         preview();
     }
     function paintMeter(meter: typeof meters[number]): void {

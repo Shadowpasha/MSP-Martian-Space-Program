@@ -14,6 +14,7 @@ import type { InputState } from 'esengine';
 import { playLaunchIntro, type LaunchIntro } from './launchIntro';
 import { easeOutBack, makeMotion } from './motion';
 import { makeAbsBox } from './theme';
+import { tutorial } from './tutorial';
 
 const ROLE: Record<string, string> = {
     engineer: 'Engineer', botanist: 'Botanist', pilot: 'Pilot', medic: 'Medic', scientist: 'Scientist', captain: 'Captain',
@@ -116,6 +117,7 @@ export function showLaunchSummary(
     const go = ui.button(side, [168, 528, 232, 48], () => {
         if (launching) return;
         launching = true;
+        tutorial.view.launching = true;
         // The menu music fades out: the rocket intro has only its own sounds, and the survival
         // run starts its game music when it opens.
         stopMusic();
@@ -129,6 +131,7 @@ export function showLaunchSummary(
         motion.shake(crewHolder, 248, 108, 3, 320);
         motion.shake(sideHolder, 848, 108, 3, 320, begin);
     }, { label: 'Launch Mission', tone: 'primary', disabled: Boolean(problem) });
+    tutorial.targets.set('review-launch', go.entity);
 
     // ---- Edit Crew popup: every crew member, tap to pick, confirm with exactly four ----
     let popup: Entity | null = null;

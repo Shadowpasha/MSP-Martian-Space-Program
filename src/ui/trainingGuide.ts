@@ -56,25 +56,14 @@ export function trainingHint(state: TharsisState, status?: MissionAssessment): H
     };
     if (!finishes('drive-check')) return followWork('drive-check', 'Check Rover Wheels', 'Eileen', true);
     if (!finishes('sampler')) return followWork('sampler', 'Attach Science Tool', 'Chiaki', true);
-    if (!finishes('audit')) {
-        if (state.sol === 1 && !doubleShift(state, scientist)) return {
-            kind: 'doubleShift',
-            text: 'Turn on Double Shift so Chiaki can also count supplies. Or let Neil count supplies if you want Chiaki to do one job.',
-            action: { label: 'Open Double Shift', panel: 'abilities', memberId: scientist.id },
-        };
-        return followWork('audit', 'Count Trip Supplies', doubleShift(state, scientist)?.active ? 'Chiaki' : 'Neil');
-    }
-    if (run.completed['drive-check'] && run.completed.sampler) {
-        if (!finishes('calibrate')) return followWork('calibrate', 'Test Tool on Rover', 'Chiaki', true);
+    if (!finishes('audit')) return followWork('audit', 'Count Trip Supplies', 'Neil');
+    if (run.completed['drive-check'] && run.completed.sampler && run.completed.audit) {
         const pair = fieldCrew(state);
         if (pair.length !== 2 || !pair.some(member => member.role === 'pilot')) return {
             kind: 'travelers',
             text: 'Pick Eileen and Neil in the rover checklist. A Pilot makes this a 3-Sol round trip.',
             action: { label: 'Choose Travelers', panel: 'roverChecklist' },
         };
-    }
-    if (run.completed.calibrate && run.completed.audit) {
-        if (!finishes('suits')) return followWork('suits', 'Check Space Suits', 'Neil');
         const oxygen = status?.dockReserves?.oxygen;
         if (oxygen !== undefined && oxygen < (state.goal.minimumReserves?.oxygen ?? 0)) return {
             kind: !upgradeProblem(state, { kind: 'electrolysis' }) ? 'oxygen' : undefined,
@@ -82,7 +71,7 @@ export function trainingHint(state: TharsisState, status?: MissionAssessment): H
             action: !upgradeProblem(state, { kind: 'electrolysis' }) ? { label: 'Open Electrolysis', panel: 'resources', area: 'station', resource: 'oxygen' } :
                 resourceOptions(state, 'station', 'oxygen')[0],
         };
-        if (run.completed.suits) return {
+        return {
             kind: 'dispatch',
             text: 'Use the clean-trip load, then dispatch. The Wind Sampler travels with the rover.',
             action: { label: 'Open Rover Checklist', panel: 'roverChecklist' },
