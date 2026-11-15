@@ -14,6 +14,7 @@ motion, placed so its standing frame lines up with the walk.
 Usage: python eva_walker.py [preview.gif]
 """
 import glob
+import math
 import os
 import sys
 
@@ -28,12 +29,14 @@ OUT = os.path.join(HERE, '..', 'assets', 'textures', 'eva_walker.png')
 HOP = os.path.join(HERE, 'eva_walker', 'hop_atlas.png')
 WALK = os.path.join(HERE, 'menu_crew_walk')
 HEAD_ROWS = 11      # rows of a frame from the top of the head down to the chin
-# Low gravity, for the preview (src/ui/evaWalker.ts uses the same numbers): each hop frame's time in
-# ms (a quick crouch and spring, a long float, a soft landing), the airborne frames, the extra lift
-# (screen px) they float at, and how far one hop carries him.
-HOP_MS = [160, 140, 140, 300, 360, 360, 300, 220]
-HOP_AIR = (3, 4, 5, 6)
-HOP_LIFT = {3: 4, 4: 7, 5: 7, 6: 4}
+# One hop for the preview, as (hop frame, ms); src/ui/evaWalker.ts uses the same. The sheet's own order
+# (stand, stand, take-off, three tucks, two crouches) has no wind-up and tucks while still rising,
+# so it is replayed as a jump: crouch, take off straight, tuck, float at the top, tuck, legs straight,
+# land in the crouch, stand. HOP_AIR: the steps off the ground (inclusive); HOP_LIFT: extra float
+# at the top (screen px); HOP_DRIFT: how far one hop carries him.
+HOP_SEQ = [(7, 260), (2, 150), (3, 260), (4, 460), (5, 260), (2, 200), (6, 200), (7, 240), (1, 180)]
+HOP_AIR = (1, 5)
+HOP_LIFT = 7
 HOP_DRIFT = 45
 
 # The helmet, facing right: O outline, W white, L light shade, S shadow, V visor, v visor shade,
@@ -114,23 +117,23 @@ def main():
     print('eva walker ->', os.path.normpath(OUT))
 
     if len(sys.argv) > 1:
-        # Preview at game size (2x) on Site A beside the rover: a few hops, a walk, hops back.
+        # Preview at game size (2x) on Site A beside the rover: hops, pauses, a turn, hops back.
         site = Image.open(os.path.join(HERE, '..', 'assets', 'textures', 'tharsis_site.png')).convert('RGBA')
         site = site.resize((site.width * 2, site.height * 2), Image.NEAREST).crop((560, 300, 920, 520))
         C = lambda col, row: atlas.crop((col * CELL_W, row * CELL_H, col * CELL_W + CELL_W, row * CELL_H + CELL_H)).resize((80, 128), Image.NEAREST)
         frames, durations, x = [], [], 40.0
         # Like the game: hop, stand about, hop, turn round, stand, hop back.
-        hop_right = [(2, k, HOP_MS[k]) for k in range(8)]
-        hop_left = [(3, k, HOP_MS[k]) for k in range(8)]
-        stand = lambda row, ms: [(row, 0, ms)]
-        for row, col, ms in hop_right + stand(2, 2200) + hop_right + stand(2, 1400) + stand(3, 1800) + hop_left + hop_left + stand(3, 1500):
+        air_steps = HOP_AIR[1] - HOP_AIR[0] + 1
+        hop_right = [(2, frame, ms, step) for step, (frame, ms) in enumerate(HOP_SEQ)]
+        hop_left = [(3, frame, ms, step) for step, (frame, ms) in enumerate(HOP_SEQ)]
+        stand = lambda row, ms: [(row, 0, ms, -1)]
+        for row, col, ms, step in hop_right + stand(2, 4000) + hop_right + stand(2, 2500) + stand(3, 3000) + hop_left + hop_left + stand(3, 3000):
             shot = site.copy()
             lift = 0
-            if row == 0:
-                x += 4
-            elif col in HOP_AIR:
-                x += (HOP_DRIFT if row == 2 else -HOP_DRIFT) / len(HOP_AIR)
-                lift = HOP_LIFT[col]
+            if HOP_AIR[0] <= step <= HOP_AIR[1]:
+                along = (step - HOP_AIR[0] + 0.5) / air_steps
+                x += (HOP_DRIFT if row == 2 else -HOP_DRIFT) / air_steps
+                lift = round(math.sin(math.pi * along) * HOP_LIFT)
             shot.alpha_composite(C(col, row), (int(x) - 40, 190 - 124 - lift))
             frames.append(shot.convert('P', palette=Image.ADAPTIVE))
             durations.append(ms)

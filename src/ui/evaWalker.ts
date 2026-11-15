@@ -23,10 +23,18 @@ const AREA = [470, 610] as const;
 /** The rover's door: where he hops up to (head centre x) and how far up the sill is. */
 const DOOR_X = 808;
 const DOOR_RISE = 56;
-/** Low gravity (the same numbers as art/eva_walker.py's preview): ms per hop frame, the airborne
- * frames, how high he floats at the top, and how far one hop carries him. */
-const HOP_MS = [160, 140, 140, 300, 360, 360, 300, 220] as const;
-const AIR = [3, 4, 5, 6] as const;
+/**
+ * One hop, as [atlas frame, ms] (the same as art/eva_walker.py's preview). The Sprite AI sheet runs
+ * stand, stand, take-off, three tucked frames, then two crouches; played in that order there is no
+ * wind-up, the knees tuck while he is still rising, and he pops up out of the crouch. So the
+ * frames are replayed as a jump: crouch to wind up, take off straight, tuck, float longest at the
+ * top, tuck, legs straight again to land, crouch to absorb it, stand.
+ */
+const HOP: ReadonlyArray<readonly [frame: number, ms: number]> = [
+    [7, 260], [2, 150], [3, 260], [4, 460], [5, 260], [2, 200], [6, 200], [7, 240], [1, 180],
+];
+/** The steps of HOP he is off the ground for (take-off to legs straight again), inclusive. */
+const AIR = [1, 5] as const;
 const LIFT = 7;
 const DRIFT = 45;
 /** Boarding is the same size of hop, just quicker, so it fits before the Sol ends. */
@@ -88,12 +96,12 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
     /** Where the hop is `ms` in: the frame, how far along, how high. Null once it has landed. */
     function hopAt(ms: number): { frame: number; along: number; lift: number } | null {
         let t = ms * speed;
-        const airStart = HOP_MS.slice(0, AIR[0]).reduce((a, b) => a + b, 0);
-        const airLength = AIR.reduce((sum, i) => sum + HOP_MS[i]!, 0);
+        const airStart = HOP.slice(0, AIR[0]).reduce((sum, [, ms]) => sum + ms, 0);
+        const airLength = HOP.slice(AIR[0], AIR[1] + 1).reduce((sum, [, ms]) => sum + ms, 0);
         const air = Math.min(1, Math.max(0, (t - airStart) / airLength));
-        for (let frame = 0; frame < HOP_MS.length; frame++) {
-            if (t < HOP_MS[frame]!) return { frame, along: air, lift: Math.round(Math.sin(Math.PI * air) * LIFT) };
-            t -= HOP_MS[frame]!;
+        for (const [frame, ms] of HOP) {
+            if (t < ms) return { frame, along: air, lift: Math.round(Math.sin(Math.PI * air) * LIFT) };
+            t -= ms;
         }
         return null;
     }
@@ -164,7 +172,7 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
                 const ahead = x + facing * DRIFT;
                 if (ahead < AREA[0] || ahead > AREA[1] || Math.random() < 0.3) {
                     facing = facing === 1 ? -1 : 1;
-                    rest(now, 1200, 2600);
+                    rest(now, 2500, 4500);
                     return;
                 }
                 startHop(now, DRIFT, 1);
@@ -194,7 +202,7 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
                     }
                     leaving = false;
                 }
-                rest(now, 1800, 4200);
+                rest(now, 3500, 7000);
                 return;
             }
             x = hopFrom + facing * hopDrift * at.along;
