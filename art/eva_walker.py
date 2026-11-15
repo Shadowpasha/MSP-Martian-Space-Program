@@ -36,7 +36,7 @@ HEAD_ROWS = 11      # rows of a frame from the top of the head down to the chin
 # at the top (screen px); HOP_DRIFT: how far one hop carries him.
 # (frame, ms, sink): sink lowers the coming-down tuck to the ground, as the in-between pose going into
 # and getting out of the crouch.
-HOP_SEQ = [(1, 140, 0), (5, 140, 8), (7, 240, 0), (2, 150, 0), (3, 260, 0), (4, 460, 0), (5, 300, 0), (6, 220, 0), (7, 260, 0), (5, 160, 8), (1, 180, 0)]
+HOP_SEQ = [(1, 140, 0), (5, 140, 8), (7, 240, 0), (2, 150, 0), (3, 260, 0), (4, 460, 0), (5, 300, 0), (6, 300, 0), (5, 160, 8), (1, 180, 0)]
 HOP_AIR = (3, 6)
 # Sheet frames with his feet on the ground: standing (0), half crouch (1), crouches (6, 7).
 HOP_GROUNDED = (0, 1, 6, 7)
