@@ -11,6 +11,7 @@ import { MENU_BACKGROUND, SIDEBAR_BACKGROUND, type Bounds, type FlightUi, type I
 import { mountMenuWalker } from './menuWalker';
 import { mountMenuAmbience } from './menuAmbience';
 import { mountMenuSky } from './menuSky';
+import { mountMenuCat } from './menuCat';
 import { play, vibrate } from './feedback';
 import { burst } from './fx';
 import { easeOutBack, makeMotion, type Motion } from './motion';
@@ -79,6 +80,10 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
     // The window (clouds, stars, shuttle, rover), then grow lights, motes, vents, steam and the door.
     const sky = mountMenuSky(ui, details, motion);
     const ambience = mountMenuAmbience(ui, details, motion);
+    // The station cat roams the deck too; the crew member is drawn after it, so he walks in front.
+    const cat = mountMenuCat(ui, layer, motion);
+    // The deck's railings are redrawn over the cat, so it walks behind them.
+    ui.image(layer, [0, 0, 1280, 720], 'assets/textures/menu_glow_deck_rail.png');
     const walker = mountMenuWalker(ui, layer, motion);
     // A few dust specks drift slowly across the painting (left to right, bobbing a little).
     if (!reducedMotion) {
@@ -211,6 +216,7 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
         walker.tick();
         sky();
         ambience();
+        cat();
         const hitX = Math.round(walker.position().x - 29);
         if (hitX !== walkerHitX) { motion.set(walkerHit, hitX, 410); walkerHitX = hitX; }
         if (reducedMotion) return;

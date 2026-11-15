@@ -40,6 +40,9 @@ See also `assets/audio/CREDITS.txt`.
 | `assets/textures/missions/map_lunar_south_pole_320x180.png` | Original pixel art, drawn in code by `scripts/art/prep_sprites.py` |
 | `menu_station.png`, `menu_landscape.png`, `mission_1..3.png`, crew portraits (`crew_*.png`), Tharsis backgrounds (`tharsis_station.png`, `tharsis_site.png`) | AI image generation (ImageGen), exported as pixel art. Sources and prompts: [`art/README.md`](art/README.md), [`art/image-prompts.md`](art/image-prompts.md) |
 | `flight_icons.png` | Supplied MSP icons plus glyphs made for this build. See [`art/README.md`](art/README.md) |
+| `menu_cat.png` (the station cat on the main menu) | [Animated Pixel Kittens](https://last-tick.itch.io/animated-pixel-kittens-cats-32x32) free pack by Last Tick, cut into an atlas by `art/menu_cat.py`. Free for commercial and non-commercial use; the original files are not redistributed here |
+| `menu_walker.png` (the walking crew member) | Back view cut from `menu_station.png`; walk frames made with [Sprite AI](https://www.sprite-ai.art) Restyle from that cut-out. Built by `art/menu_walker.py` |
+| `menu_station_empty.png`, `menu_glow_*.png`, `menu_door_*.png`, `menu_sky_clouds.png` (main menu ambience) | Derived from `menu_station.png` by `art/menu_station_empty.py`, `art/menu_glow.py`, `art/menu_sky.py` and `art/menu_door.py` (the door is drawn in code) |
 | `outpost_bg.png` (pixel-art Mars station interior), `ai_robot.png` | Added by the team. **TODO: record the source and licence here.** |
 
 ## Fonts

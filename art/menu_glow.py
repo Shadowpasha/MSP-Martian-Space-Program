@@ -50,7 +50,9 @@ def outline(x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
 gen_box = (171, 310, 270, 346)
 gen = outline(*gen_box)
 rail = (r > 170) & (g > 130) & (b < 90)
-SOLID = {'generator': (gen, gen_box, None), 'generator_hole': (gen, gen_box, (24, 27, 42)), 'door_rail': (rail, (578, 236, 632, 262), None)}
+# - deck_rail: the yellow railings along the front of the upper deck, drawn over the cat.
+SOLID = {'generator': (gen, gen_box, None), 'generator_hole': (gen, gen_box, (24, 27, 42)), 'door_rail': (rail, (578, 236, 632, 262), None),
+         'deck_rail': (rail, (165, 232, 578, 270), None)}
 
 jobs = [(name, mask, box, 0.45, None) for name, (mask, box) in LAYERS.items()]
 jobs += [(name, mask, box, 0.0, fill) for name, (mask, box, fill) in SOLID.items()]
