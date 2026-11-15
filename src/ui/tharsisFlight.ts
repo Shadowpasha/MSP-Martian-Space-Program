@@ -903,9 +903,11 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         crewWalkers?.sync(crewOnStation());
         // While he is hopping back in, leave him be: the Sol ends once he is inside.
         const atSiteNow = run.rover?.phase === 'site';
+        // Before the trip (no rover out yet) he waits beside the idling rover, hopping in place.
+        const readying = !run.rover;
         if (!atSiteNow) evaOut = false;
         if (eva && !boarding) {
-            eva.setPresent(atSiteNow, !evaOut);
+            eva.setPresent(atSiteNow || readying, atSiteNow && !evaOut, readying);
             if (atSiteNow) evaOut = true;
         }
         surface = makeAbsBox(world, uiLayer, 0, 0, 1280, 720);

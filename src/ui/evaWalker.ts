@@ -2,6 +2,8 @@
 // someone bored on a long shift: he stands, does a slow low-gravity hop, stops, now and then turns
 // around, and hops again, never far from the rover. When the rover arrives he hops down out of its
 // door; when it is about to leave he hops back over and up into the door before the Sol ends.
+// Before the trip, while the rover idles there being readied, he waits beside it ("calm"): he
+// stands on one spot and only hops in place now and then.
 // With Reduced Motion he just stands beside the rover.
 //
 // The atlas is art/eva_walker.py's: 8x4 cells of 40x64 pixels; the hop is row 2 (facing right)
@@ -47,6 +49,8 @@ const BOARD_SPEED = 2;
 const BOARD_DRIFT = 60;
 /** Where he heads after hopping out of the rover: the near edge of his patch. */
 const HOME_X = AREA[1] - 20;
+/** Where he waits while the rover is being readied (calm). */
+const WAIT_X = 560;
 /** Fading up into the door, or down out of it. */
 const DOOR_MS = 520;
 /** Mars dust kicked up when he lands (and, lighter, when he pushes off): reddish specks that drift
@@ -64,9 +68,10 @@ type Mode = 'gone' | 'idle' | 'hop' | 'emerge' | 'board' | 'enter';
 interface Mote { entity: Entity; x: number; y: number; vx: number; vy: number; born: number; life: number }
 
 export interface Eva {
-    /** Whether the rover is at the site. `fromDoor`: he has just arrived, so he hops out of the door;
-     * otherwise he is already standing about outside. */
-    setPresent(present: boolean, fromDoor: boolean): void;
+    /** Whether he is outside. `fromDoor`: the rover has just arrived, so he hops out of its door;
+     * otherwise he is already standing about. `calm`: the rover is still being readied, so he waits
+     * on one spot and only hops in place. */
+    setPresent(present: boolean, fromDoor: boolean, calm: boolean): void;
     /** Hop over and into the rover, then call `done`. False (and nothing happens) if he is not out. */
     board(done: () => void): boolean;
     tick(): void;
@@ -86,6 +91,8 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
     let onBoarded: (() => void) | null = null;
     /** Just out of the rover: still hopping over to his patch, one ordinary hop at a time. */
     let leaving = false;
+    /** Waiting while the rover is readied: hops in place, never moves off. */
+    let calm = false;
     /** The step of the current hop last drawn, to catch the moments he leaves and meets the ground. */
     let lastStep = -1;
     let last = Date.now();
@@ -168,15 +175,16 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
     }
 
     return {
-        setPresent(present, fromDoor) {
+        setPresent(present, fromDoor, waiting) {
             const now = Date.now();
+            calm = waiting;
             if (!present) {
                 if (mode !== 'enter') { mode = 'gone'; ui.show(sprite, false); }
                 return;
             }
             if (mode !== 'gone') return;
-            if (motion.reducedMotion || !fromDoor) {
-                x = AREA[0] + Math.round(Math.random() * (AREA[1] - AREA[0]));
+            if (motion.reducedMotion || !fromDoor || calm) {
+                x = calm ? WAIT_X : AREA[0] + Math.round(Math.random() * (AREA[1] - AREA[0]));
                 facing = 1;
                 ui.show(sprite, true);
                 rest(now, 0, 0);
@@ -224,6 +232,11 @@ export function mountEva(ui: FlightUi, parent: Entity, motion: Motion): Eva {
             if (mode === 'idle') {
                 draw(0, STAND);
                 if (now < waitUntil) return;
+                // Waiting for the rover: a hop on the spot now and then, nothing more.
+                if (calm) {
+                    startHop(now, 0, 1);
+                    return;
+                }
                 // Bored: sometimes he just turns around and stands a bit longer.
                 const ahead = x + facing * DRIFT;
                 if (ahead < AREA[0] || ahead > AREA[1] || Math.random() < 0.3) {
