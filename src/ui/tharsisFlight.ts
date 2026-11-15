@@ -19,6 +19,7 @@ import { RESOURCE_KEYS, resourceRate, runway, showConditions, showResources, sig
 import { ariesStatus, showTerminal, type TerminalStatus } from './tharsisTerminal';
 import { showWorkConsole, type WorkPanel } from './tharsisWorkConsole';
 import { makeAbsBox, setTextColor, setVisualColor } from './theme';
+import { round1 } from '../simulation/stateOps';
 import { makeMotion } from './motion';
 import { play } from './feedback';
 import { startAirlock, type Airlock } from './airlock';
@@ -639,7 +640,8 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             ui.image(monitor, [x, 5, 16, 16], morale ? 'assets/textures/outpost/hud/hud_morale_32.png' : 'assets/textures/outpost/hud/hud_radiation_32.png');
             ui.label(monitor, [x + 20, 4, 88, 22], morale ? 'Morale' : 'Radiation', { size: 14, color: p.secondary });
             const caution = morale ? value < LOW_MORALE : radiationEffects(value).health > 0;
-            ui.label(monitor, [x, 25, 108, 26], `${value}${morale ? '%' : ' mSv'}`, { display: true, size: 23, color: caution ? p.bad : p.cyan });
+            // Rounded for the screen, so a long float can never spill out of the panel.
+            ui.label(monitor, [x, 25, 108, 26], `${round1(value)}${morale ? '%' : ' mSv'}`, { display: true, size: 23, fit: 14, color: caution ? p.bad : p.cyan });
             if (forecast) ui.label(monitor, [x, 56, 108, 16],
                 morale ? value < SEVERE_MORALE ? 'Severe strain' : caution ? 'Low' : 'Steady' : radiationEffects(value).level,
                 { size: 12, color: caution ? p.amber : p.secondary });

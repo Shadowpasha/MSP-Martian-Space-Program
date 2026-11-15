@@ -327,7 +327,7 @@ export function advanceWork(state: TharsisState, conditions: ShiftConditions, re
         if (order.recovery) {
             const amount = order.recovery * (quote.specialist && quote.perk ? lead.perk.yieldMultiplier : 1);
             for (const member of stationCrew(state)) if (member.health > 0) member.health = clamp(member.health + amount, 0, 100);
-            state.conditions.radiation = Math.max(0, state.conditions.radiation - round1(amount * 0.6));
+            state.conditions.radiation = Math.max(0, round1(state.conditions.radiation - amount * 0.6));
         }
         if (!job.custom) state.tharsis.completed[order.id] = state.sol;
         finished.push(order.title);
