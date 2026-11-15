@@ -1,6 +1,6 @@
-import { Draggable, UINode, UIPositionType, px, uiNodeWorldBox, type Entity, type FocusManagerState,
+import { Draggable, Interactable, UINode, UIPositionType, px, uiNodeWorldBox, type Entity, type FocusManagerState,
     type InputState, type UIEventQueue, type World } from 'esengine';
-import type { CargoItemId, MainLoopResult, MissionSetupInput, ResourcePool } from '../contracts/gameContract';
+import type { CargoItemId, CrewMember, MainLoopResult, MissionSetupInput, ResourcePool } from '../contracts/gameContract';
 import { CREW_ABILITIES } from '../data/crewAbilities';
 import { formatResource, missionDeadline, resourceEntries, RESOURCE_LABELS } from '../data/missions';
 import { expeditionChecklist, type Technique } from '../data/tharsisOrders';
@@ -21,8 +21,22 @@ import { showAriesBadge, showTerminal, type TerminalStatus } from './tharsisTerm
 import { showWorkConsole, type WorkPanel } from './tharsisWorkConsole';
 import { makeAbsBox, setVisualColor } from './theme';
 import { makeMotion } from './motion';
+import { play } from './feedback';
 import { mountSceneAmbience, SITE_AMBIENCE, STATION_AMBIENCE } from './sceneAmbience';
-import { showCrewAbilities } from './tharsisCrew';
+import { HEAD_TOP, mountStationCrew, SPRITE_H, SPRITE_W, type StationCrew, type StationCrewMember } from './stationCrew';
+
+/** The name tag over a walking crew member (screen px). */
+const CREW_TAG = { w: 88, h: 44 } as const;
+/** The stripe along the top of a crew member's tag: their suit or patch colour. */
+const ROLE_COLOR: Record<CrewMember['role'], { r: number; g: number; b: number; a: number }> = {
+    engineer: { r: 0.94, g: 0.47, b: 0.16, a: 1 },
+    botanist: { r: 0.36, g: 0.7, b: 0.3, a: 1 },
+    pilot: { r: 0.78, g: 0.3, b: 0.22, a: 1 },
+    medic: { r: 0.88, g: 0.2, b: 0.2, a: 1 },
+    scientist: { r: 0.32, g: 0.52, b: 0.95, a: 1 },
+    captain: { r: 0.96, g: 0.72, b: 0.31, a: 1 },
+};
+import { crewDuty, LOW_HEALTH, showCrewAbilities } from './tharsisCrew';
 import { showMissionObjectives, showSolReview, solSafetyWarning, type MissionAssessment } from './tharsisObjectives';
 import { showTrainingGuide } from './trainingGuide';
 import { showCoach, type Coach } from './coach';
@@ -91,7 +105,15 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     let backdrop: Entity | null = null;
     let backdropView: 'station' | 'expedition' | null = null;
     let ambience: () => void = () => {};
+    let crewWalkers: StationCrew | null = null;
+    /** The name tags over the walking crew, redrawn with the UI and moved every frame. */
+    let crewTags: { id: string; entity: Entity; x: number; y: number; dy: number }[] = [];
     const backdropMotion = makeMotion(world, profile.reducedMotion);
+    /** Who walks about the station: everyone not with the rover and not incapacitated. */
+    function crewOnStation(): StationCrewMember[] {
+        const here = new Set(stationCrew(state).filter(member => member.health > 0).map(member => member.id));
+        return state.crew.map(member => ({ id: member.id, role: member.role, present: here.has(member.id) }));
+    }
     function drawBackdrop(): void {
         if (backdrop !== null && backdropView === view) return;
         if (backdrop !== null) world.despawn(backdrop);
@@ -99,7 +121,9 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         backdropView = view;
         const backUi = makeFlightUi(world, events, backdrop, art, focus, profile);
         const atSite = view === 'expedition';
-        ambience = mountSceneAmbience(backUi, backdrop, backdropMotion, atSite ? SITE : STATION, atSite ? SITE_AMBIENCE : STATION_AMBIENCE);
+        const scene = mountSceneAmbience(backUi, backdrop, backdropMotion, atSite ? SITE : STATION, atSite ? SITE_AMBIENCE : STATION_AMBIENCE);
+        crewWalkers = atSite ? null : mountStationCrew(backUi, backdrop, backdropMotion, crewOnStation());
+        ambience = () => { scene(); crewWalkers?.tick(); };
     }
     let ask: AbortController | null = null;
     let sentMessage: DiscussionMessage | null = null;
@@ -317,6 +341,80 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         dirty = true;
     }
 
+    /**
+     * A name tag over a walking crew member, with health and morale bars, plus a click area over
+     * their body; both open their crew panel. tick() keeps it over them as they walk.
+     */
+    function crewTag(parent: Entity, member: CrewMember, interactive: boolean): void {
+        const p = ui.palette;
+        const at = crewWalkers?.position(member.id);
+        if (!at) return;
+        const { w, h } = CREW_TAG;
+        const tagY = HEAD_TOP - h - 8;
+        // One click area from the top of the tag down to the room button that hides the boots. It
+        // must not be click-through: in this engine that also turns off everything inside it.
+        const group = makeAbsBox(world, parent, at.x - w / 2, at.top + tagY, w, h + 8 + SPRITE_H - HEAD_TOP - 20);
+        const plate = { r: 0.06, g: 0.06, b: 0.12, a: 0.86 };
+        const shadow = ui.box(group, [2, 2, w, h], { r: 0, g: 0, b: 0, a: 0.35 });
+        const back = ui.box(group, [0, 0, w, h], plate);
+        ui.box(group, [0, 0, w, 2], ROLE_COLOR[member.role]);
+        // A little pointer down to the head.
+        ui.box(group, [w / 2 - 4, h, 8, 2], plate);
+        ui.box(group, [w / 2 - 2, h + 2, 4, 2], plate);
+        ui.label(group, [4, 2, w - 8, 16], member.name.split(' ')[0]!, { display: true, size: 14, center: true, color: p.white });
+        const bar = (y: number, value: number, color: typeof p.good) => {
+            ui.box(group, [8, y, w - 16, 3], { r: 1, g: 1, b: 1, a: 0.12 });
+            ui.box(group, [8, y, Math.max(0, Math.round((w - 16) * Math.min(100, value) / 100)), 3], color);
+        };
+        bar(20, member.health, member.health <= LOW_HEALTH ? p.bad : p.good);
+        bar(25, member.morale, member.morale < LOW_MORALE ? p.bad : p.amber);
+        // Busy or ready this Sol (the crew panel says what with).
+        const duty = crewDuty(state, member);
+        ui.label(group, [4, 30, w - 8, 13], duty.word.toUpperCase(), { display: true, size: 11, center: true, color: p[duty.tone] });
+        if (interactive) {
+            world.insert(group, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
+            // Hover: an amber outline round the tag, a lighter plate.
+            const edges = [[-2, -2, w + 4, 2], [-2, h, w + 4, 2], [-2, 0, 2, h], [w, 0, 2, h]] as const;
+            const outline = edges.map(bounds => ui.box(group, [...bounds], p.amber));
+            let hovered: boolean | null = null;
+            const hover = (on: boolean) => {
+                // Hover events bubble up from the tag's parts: react once per real enter or exit.
+                if (hovered === on) return;
+                hovered = on;
+                if (on) play('tick');
+                outline.forEach(edge => ui.show(edge, on));
+                setVisualColor(world, back, on ? { ...plate, r: 0.14, g: 0.14, b: 0.24, a: 0.94 } : plate);
+                ui.show(shadow, !on);
+            };
+            outline.forEach(edge => ui.show(edge, false));
+            ui.on(group, 'hover_enter', () => { if (world.valid(group)) hover(true); });
+            ui.on(group, 'hover_exit', () => { if (world.valid(group)) hover(false); });
+            ui.on(group, 'press', () => {
+                if (!world.valid(group)) return;
+                play('blip');
+                open('abilities', member.id);
+            });
+            // The tutorial points at crew-<id> (it follows the tag as the crew member walks).
+            controls.set(`crew-${member.id}`, group);
+        }
+        crewTags.push({ id: member.id, entity: group, x: -1, y: -1, dy: tagY });
+    }
+
+    /** Keep each name tag over its crew member. */
+    function moveCrewTags(): void {
+        for (const tag of crewTags) {
+            if (!world.valid(tag.entity)) continue;
+            const at = crewWalkers?.position(tag.id);
+            if (!at) continue;
+            const x = at.x - CREW_TAG.w / 2;
+            const y = at.top + tag.dy;
+            if (x === tag.x && y === tag.y) continue;
+            tag.x = x;
+            tag.y = y;
+            world.update(tag.entity, UINode, node => { node.insetLeft = px(x); node.insetTop = px(y); });
+        }
+    }
+
     function board(root: Entity, interactive: boolean, status?: MissionAssessment) {
         const p = ui.palette;
         const atSite = view === 'expedition';
@@ -441,7 +539,18 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         ui.label(crew, [12, 0, 420, 24], `Your crew · ${run.work.filter(job => job.leadId).length}/${capacity} station shifts`,
             { display: true, size: 19, fit: 16 });
         if (interactive) button('morale-info', crew, [442, 1, 74, 23], () => { moraleInfo = !moraleInfo; dirty = true; }, { label: 'Morale', labelSize: 14, tone: moraleInfo ? 'hero' : 'plain' });
-        state.crew.forEach((member, index) => {
+        // On the station screen the crew walk about their rooms with a name tag over their heads
+        // (crewTag); the cards here are only for those who are not walking: out with the rover or
+        // incapacitated. The expedition screen keeps a card for everyone.
+        const walking = new Set(!atSite && crewWalkers ? crewOnStation().filter(member => member.present).map(member => member.id) : []);
+        crewTags = [];
+        for (const member of state.crew) if (walking.has(member.id)) crewTag(root, member, interactive);
+        const cards = state.crew.filter(member => !walking.has(member.id));
+        if (!cards.length) {
+            ui.label(crew, [12, 36, 508, 84], 'Everyone is at the station. Click a crew member in their room to see their specialty.',
+                { size: 15, wrap: true, color: p.secondary });
+        }
+        cards.forEach((member, index) => {
             const x = 12 + index * 128;
             const field = rover?.crewIds.includes(member.id);
             const bounds = [x, 28, 116, 92] as const;
@@ -617,6 +726,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             backdrop = null;
         }
         drawBackdrop();
+        crewWalkers?.sync(crewOnStation());
         surface = makeAbsBox(world, root, 0, 0, 1280, 720);
         ui = makeFlightUi(world, events, surface, art, focus, profile);
         const planning = run.phase === 'planning';
@@ -721,6 +831,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         backdropMotion.tick();
         ambience();
         if (dirty && !dragged.size) render();
+        moveCrewTags();
         coach?.tick();
         if (!profile.reducedMotion) {
             const pulse = 0.18 + 0.32 * (0.5 + 0.5 * Math.sin(performance.now() * 0.005));
