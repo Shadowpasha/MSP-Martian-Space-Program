@@ -1,10 +1,8 @@
 <h1 align="center">Mars Station Program</h1>
 
 <p align="center">
-  <a href="https://msp.amerai.top/"><img alt="Play now at msp.amerai.top" src="https://img.shields.io/badge/%E2%96%B6%20%20PLAY%20NOW-msp.amerai.top-E8A33D?style=for-the-badge&labelColor=1E1B2E" height="56"></a>
+  <a href="https://msp.amerai.top/"><img alt="Play here" src="https://img.shields.io/badge/PLAY%20HERE-E8A33D?style=for-the-badge" height="56"></a>
 </p>
-
-<h3 align="center">👉 <a href="https://msp.amerai.top/">msp.amerai.top</a> · plays in your browser, nothing to install</h3>
 
 <p align="center">A pixel-art Mars survival game for NASA Space Apps. Pick a crew, pack the rover, survive the storms, and bring the science home before the deadline.</p>
 
@@ -12,12 +10,15 @@
 
 ## Missions
 
-| Mission | Difficulty | Goal |
-| :--- | :--- | :--- |
-| **Tharsis Training Run** | Tutorial | Learn the game with ARIES in 5 Sols |
-| **Tharsis Ridge Weather Survey** | Easy | Record 48h of weather data |
-| **Radiation Detective** | Medium | Record 72h of radiation during a solar storm |
-| **Ice Hunter** | Hard | Drill ice cores at Jezero Crater in deep cold |
+<div align="center">
+<table>
+<tr><th>Mission</th><th>Difficulty</th><th>Goal</th></tr>
+<tr><td><b>Tharsis Training Run</b></td><td>Tutorial</td><td>Learn the game with ARIES in 5 Sols</td></tr>
+<tr><td><b>Tharsis Ridge Weather Survey</b></td><td>Easy</td><td>Record 48h of weather data</td></tr>
+<tr><td><b>Radiation Detective</b></td><td>Medium</td><td>Record 72h of radiation during a solar storm</td></tr>
+<tr><td><b>Ice Hunter</b></td><td>Hard</td><td>Drill ice cores at Jezero Crater in deep cold</td></tr>
+</table>
+</div>
 
 <p align="center"><img src="docs/screenshots/mission-select.jpg" alt="Mission Selection" width="640"></p>
 
@@ -50,8 +51,6 @@
 **ARIES**, the station robot, guides new players step by step and can give live advice through Gemini.
 
 ## Run It Locally
-
-The easiest way to play is **[msp.amerai.top](https://msp.amerai.top/)**. To run it yourself:
 
 
 1. Install [Estella Editor 0.104.1](https://github.com/esengine/estella/releases/tag/v0.104.1) and [Node.js 24](https://nodejs.org/en/download).
