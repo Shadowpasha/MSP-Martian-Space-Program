@@ -1,7 +1,15 @@
-<h1 align="center">Mars Station Program</h1>
+<p align="center"><img src="docs/itch/header-960x260.png" alt="Mars Station Program" width="960"></p>
 
 <p align="center">
-  <a href="https://msp.amerai.top/"><img alt="Play here" src="https://img.shields.io/badge/PLAY%20HERE-E8A33D?style=for-the-badge" height="56"></a>
+  <a href="https://msp.amerai.top/"><img alt="Play here" src="https://img.shields.io/badge/PLAY%20HERE-F5B84F?style=for-the-badge&labelColor=131422" height="48"></a>
+  &nbsp;
+  <a href="https://amer-adam.itch.io/mars-station-program"><img alt="Mars Station Program on itch.io" src="https://img.shields.io/badge/itch.io-FA5C5C?style=for-the-badge&logo=itchdotio&logoColor=white" height="48"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Shadowpasha/MSP-Martian-Space-Program/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Shadowpasha/MSP-Martian-Space-Program?style=flat-square&color=4FC7F7&labelColor=1B1E32"></a>
+  <img alt="NASA Space Apps" src="https://img.shields.io/badge/NASA-Space%20Apps-0B3D91?style=flat-square&labelColor=1B1E32">
+  <img alt="Made with Estella" src="https://img.shields.io/badge/made%20with-Estella-F5B84F?style=flat-square&labelColor=1B1E32">
 </p>
 
 <p align="center">A pixel-art Mars survival game for NASA Space Apps. Pick a crew, pack the rover, survive the storms, and bring the science home before the deadline.</p>
