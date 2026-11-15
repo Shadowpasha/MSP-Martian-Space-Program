@@ -632,3 +632,19 @@ test('fresh profiles finish near the deadline, with viable routes for all four-p
         }
     }
 });
+
+test('radiation stays at one decimal place, so it never shows a long float', () => {
+    const state = createInitialGameState(WEATHER_SURVEY);
+    assert.ok(isTharsis(state));
+    const oneDecimal = (value: number) => Math.round(value * 10) / 10 === value;
+    for (let sol = 0; sol < 12 && !state.result; sol++) {
+        state.conditions.radiation += 0.1;
+        state.conditions.radiation = Math.round(state.conditions.radiation * 10) / 10;
+        if (state.phase === 'briefing') commitBriefing(state, state.tharsis.briefing!.choices[0]!.id);
+        if (state.phase === 'outcome') continueAfterOutcome(state);
+        if (state.phase === 'planning') advanceSol(state);
+        if (state.phase === 'report') continueAfterReport(state);
+        assert.ok(oneDecimal(state.conditions.radiation), `station radiation ${state.conditions.radiation}`);
+        if (state.tharsis.rover) assert.ok(oneDecimal(state.tharsis.rover.conditions.radiation), `rover radiation ${state.tharsis.rover.conditions.radiation}`);
+    }
+});

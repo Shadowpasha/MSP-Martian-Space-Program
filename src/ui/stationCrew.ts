@@ -174,6 +174,9 @@ export function mountStationCrew(ui: FlightUi, parent: Entity, motion: Motion, c
     }
 
     sync(crew);
+    // The yellow railings at the ends of each room (art/station_rails.py), over the crew, so they
+    // walk behind them.
+    ui.image(parent, [0, 0, 1280, 720], 'assets/textures/run_station_rails.png');
     return {
         sync,
         position(id) {

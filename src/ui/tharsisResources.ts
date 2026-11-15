@@ -70,8 +70,8 @@ export function showConditions(ui: FlightUi, content: Entity, button: RunButton,
                     budget.heating ? 'Heaters are funded at current stock.' : 'Baseline heating is covered by routine upkeep.'],
         },
         {
-            title: 'Radiation', value: `${conditions.radiation} mSv`, warning: projectedEffects.health > 0,
-            rows: [`${projectedDose} mSv projected after exposure · ${projectedEffects.level}`,
+            title: 'Radiation', value: `${round1(conditions.radiation)} mSv`, warning: projectedEffects.health > 0,
+            rows: [`${round1(projectedDose)} mSv projected after exposure · ${projectedEffects.level}`,
                 projectedEffects.health ? `Each crew member loses ${projectedEffects.health} HP and ${round1(projectedEffects.morale * state.skillModifiers.moraleDecayMult)} Morale at this dose.` :
                     'Current exposure is below the crew health threshold.',
                 projectedEffects.exteriorHold ? 'Exposure exceeds the limit for outside work and field sampling.' :
