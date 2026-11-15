@@ -1,5 +1,4 @@
 import type { Entity } from 'esengine';
-import { missionDeadline } from '../data/missions';
 import { expeditionChecklist, expeditionOrder } from '../data/tharsisOrders';
 import { doubleShift } from '../simulation/crewAbilities';
 import { resourceOptions, type MissionAction } from '../simulation/missionStatus';
@@ -138,7 +137,8 @@ export function showTrainingGuide(ui: FlightUi, root: Entity, button: RunButton,
     const p = ui.palette;
     const isTraining = state.tharsis.expedition === 'training';
     if (!visible) {
-        button('show-guide', root, board ? [1064, 169, 188, 36] : [1064, 682, 184, 30], toggle, { label: 'Show Help', labelSize: 14 });
+        // On the board the Help button in the top bar brings it back.
+        if (!board) button('show-guide', root, [1064, 682, 184, 30], toggle, { label: 'Show Help', labelSize: 14 });
         return;
     }
     const hint = isTraining ? trainingHint(state, status) : generalHint(state, status);
@@ -152,13 +152,13 @@ export function showTrainingGuide(ui: FlightUi, root: Entity, button: RunButton,
         button('hide-guide', strip, [1029, 5, 149, 28], toggle, { label: 'Hide Help', labelSize: 13 });
         return;
     }
-    const box = ui.frame(root, [536, 194, 716, 138], p.ink, p.teal);
-    const title = isTraining ? `Training guide · Sol ${state.sol}/${missionDeadline(state)}` : `Next step · Sol ${state.sol}/${missionDeadline(state)}`;
-    ui.label(box, [16, 4, 480, 28], title, { size: 20, display: true, color: p.cyan });
-    button('hide-guide', box, [559, 9, 140, 29], toggle, { label: 'Hide Help', labelSize: 13 });
-    ui.label(box, [16, 40, 684, 47], hint.text, { size: 15, wrap: true, top: true });
+    // Docked under the top bar, full width: what to do next and a button that goes there.
+    const strip = ui.frame(root, [12, 160, 1256, 44], p.ink, p.teal);
+    ui.label(strip, [12, 0, 130, 40], isTraining ? 'Training' : 'Next step', { size: 16, display: true, color: p.cyan });
+    ui.label(strip, [142, 2, hint.action ? 742 : 950, 36], hint.text, { size: 14, fit: 11, wrap: true });
     if (hint.action) {
         const action = hint.action;
-        button('guide-next', box, [16, 90, 360, 36], () => open(action), { label: action.label, labelSize: 15, tone: 'hero' });
+        button('guide-next', strip, [892, 5, 210, 30], () => open(action), { label: action.label, labelSize: 13, labelFit: 10, tone: 'hero' });
     }
+    button('hide-guide', strip, [1110, 5, 134, 30], toggle, { label: 'Hide Help', labelSize: 13 });
 }

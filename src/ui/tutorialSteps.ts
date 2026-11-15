@@ -201,11 +201,11 @@ export interface RunView {
 
 /** Explained once on the first planning screen, before any job is given out. */
 const BOARD_TOUR: readonly CoachStep[] = [
-    { id: 'tour-supplies', area: [400, 12, 868, 84], next: 'Next',
+    { id: 'tour-supplies', area: [12, 12, 868, 84], next: 'Next',
         text: 'This is your station. Here are Power, Food, Water and Air. Do not let them run out!' },
-    { id: 'tour-crew', area: [348, 572, 532, 136], next: 'Next',
-        text: 'This is your team. Each one does one job a day.' },
-    { id: 'tour-sol', area: [1036, 636, 224, 60], next: 'Got it!',
+    { id: 'tour-crew', area: [16, 380, 1248, 160], next: 'Next',
+        text: 'This is your team, each in their own room. Each one does one job a day.' },
+    { id: 'tour-sol', area: [900, 638, 360, 60], next: 'Got it!',
         text: 'A day on Mars is a SOL. Give jobs first. Then click END SOL.' },
 ];
 export const BOARD_TOUR_LENGTH = BOARD_TOUR.length;
@@ -258,7 +258,7 @@ function guideStep(view: RunView, hint: Hint): CoachStep {
     if (view.panel) return { id: 'guide-panel', showGuide: true, compact: true, text: 'Something needs fixing. Read the blue strip below.' };
     return hint.action
         ? { id: 'guide-board', showGuide: true, target: 'guide-next', text: 'Something needs fixing. Click the glowing button.' }
-        : { id: 'guide-read', showGuide: true, text: 'Read the guide box.' };
+        : { id: 'guide-read', showGuide: true, text: 'Read the help strip at the top.' };
 }
 
 function roverWords(state: TharsisState): string | null {

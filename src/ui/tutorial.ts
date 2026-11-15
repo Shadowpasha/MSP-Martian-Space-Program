@@ -6,7 +6,8 @@
 //      It ends when the first real mission lifts off.
 //
 // The tutorial starts by itself the first time the game is opened. "Skip tutorial" ends it for good;
-// "How to Play" on the main menu starts it over from chapter 1.
+// "How to Play" starts it over from chapter 1: on the main menu while it is still running,
+// in Settings once it is done.
 //
 // What it says at each moment is in tutorialSteps.ts; how it is drawn is in coach.ts.
 import { Storage, type Entity } from 'esengine';
@@ -44,6 +45,12 @@ export const tutorial = {
     get active(): boolean {
         load();
         return active;
+    },
+
+    /** Done (skipped, or the first real mission lifted off): "How to Play" moves into Settings. */
+    get finished(): boolean {
+        load();
+        return !active;
     },
 
     get chapter(): 1 | 2 {

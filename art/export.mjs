@@ -85,6 +85,7 @@ for (const [index, crop] of crops.entries()) {
 
 const sheet = read(path.join(art, 'crew_portraits_source.png'));
 const roles = ['engineer', 'botanist', 'pilot', 'medic', 'scientist', 'captain'];
+const cuts = [];
 for (const [index, role] of roles.entries()) {
     const width = sheet.width / 3;
     const height = sheet.height / 2;
@@ -102,9 +103,11 @@ for (const [index, role] of roles.entries()) {
             }
         }
     }
-    const sw = x1 - x0 + 1;
-    const sh = y1 - y0 + 1;
-    const factor = Math.min(62 / sw, 76 / sh);
+    cuts.push({ role, tile, x0, y0, sw: x1 - x0 + 1, sh: y1 - y0 + 1 });
+}
+// One scale for all six (the largest that fits every bust in 62x76), so heads match across portraits.
+const factor = Math.min(...cuts.map(({ sw, sh }) => Math.min(62 / sw, 76 / sh)));
+for (const { role, tile, x0, y0, sw, sh } of cuts) {
     const dw = Math.round(sw * factor);
     const dh = Math.round(sh * factor);
     const portrait = image(64, 80);

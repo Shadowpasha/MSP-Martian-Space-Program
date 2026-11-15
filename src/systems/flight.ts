@@ -213,7 +213,7 @@ export const flightSystem = defineSystem(
                     break;
                 }
                 case 'settings':
-                    showShell(ui, page, 'Settings', 'Sound, vibration, motion, contrast and volume.', 'settings', navigate);
+                    showShell(ui, page, 'Settings', 'Sound, vibration, motion, contrast, volume and the tutorial.', 'settings', navigate);
                     showSettings(
                         ui,
                         profile,
@@ -224,6 +224,7 @@ export const flightSystem = defineSystem(
                             navigate('settings');
                         },
                         changeVolume,
+                        () => { tutorial.begin(); navigate('menu'); },
                     );
                     break;
                 case 'quit':
@@ -233,7 +234,9 @@ export const flightSystem = defineSystem(
                     showExit(ui, navigate);
                     break;
                 default:
-                    surfaceTick = showMenu(ui, navigate, profile.reducedMotion, () => { tutorial.begin(); navigate('menu'); });
+                    // "How to Play" sits on the main menu only until the tutorial is done; then it is in Settings.
+                    surfaceTick = showMenu(ui, navigate, profile.reducedMotion,
+                        tutorial.finished ? undefined : () => { tutorial.begin(); navigate('menu'); });
             }
             // The first-time tutorial: ARIES points at the next button on this page.
             // The step is worked out again every frame and redrawn when it changes, so the coach

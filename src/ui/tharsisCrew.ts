@@ -1,12 +1,30 @@
 import type { Entity } from 'esengine';
-import { CREW_ROLES } from '../contracts/gameContract';
+import { CREW_ROLES, type CrewMember } from '../contracts/gameContract';
 import { CREW_ABILITIES } from '../data/crewAbilities';
-import { activateCrewAbility, crewAbilityProblem, crewAbilityStatus, doubleShift } from '../simulation/crewAbilities';
+import { activateCrewAbility, crewAbilityProblem, crewAbilityStatus, doubleShift, stationShiftCapacity } from '../simulation/crewAbilities';
 import { activateUpgrade, hasUpgrade, upgradeProblem, type UpgradeCommand } from '../simulation/tharsisUpgrades';
 import { localArea, type Area, type TharsisState } from '../simulation/tharsis';
+import { LOW_MORALE } from '../simulation/tharsisConditions';
 import { scheduledOrder } from '../simulation/tharsisWork';
 import type { FlightUi } from './flightUi';
 import type { RunButton } from './tharsisFlight';
+
+/** Health at or below this shows red. */
+export const LOW_HEALTH = 30;
+
+export type DutyTone = 'good' | 'amber' | 'cyan' | 'bad';
+/** What a crew member is doing this Sol: free to lead a task, busy with one, or unable to. */
+export function crewDuty(state: TharsisState, member: CrewMember): { word: string; detail: string; tone: DutyTone } {
+    if (member.health <= 0) return { word: "Can't work", detail: 'Incapacitated: no health left.', tone: 'bad' };
+    if (state.tharsis.rover?.crewIds.includes(member.id)) return { word: 'With rover', detail: 'Out on the expedition with the rover.', tone: 'cyan' };
+    const capacity = stationShiftCapacity(state, member);
+    if (capacity === 0) return { word: 'Resting', detail: 'Recovering after Double Shift. Cannot lead tasks yet.', tone: 'cyan' };
+    const jobs = state.tharsis.work.filter(job => job.leadId === member.id);
+    const titles = jobs.map(job => scheduledOrder(job, state.tharsis.expedition).title).join(', ');
+    if (jobs.length >= capacity) return { word: 'Busy', detail: `Leading: ${titles}.`, tone: 'amber' };
+    if (jobs.length) return { word: 'Ready', detail: `Leading: ${titles}. Can lead ${capacity - jobs.length} more.`, tone: 'good' };
+    return { word: 'Ready', detail: 'Free to lead a task this Sol.', tone: 'good' };
+}
 
 export function showCrewAbilities(ui: FlightUi, content: Entity, button: RunButton, state: TharsisState,
     crewId: string | null, select: (id: string) => void, openWork: (id: string) => void, change: (action: () => string | null) => void): void {
@@ -22,11 +40,27 @@ export function showCrewAbilities(ui: FlightUi, content: Entity, button: RunButt
     });
     const details = ui.frame(content, [24, 140, 548, 438], p.ink, p.teal);
     ui.image(details, [18, 16, 88, 112], member.portraitPath);
-    ui.label(details, [122, 12, 403, 32], member.name, { display: true, size: 24 });
-    ui.label(details, [122, 46, 403, 26], `${area === 'rover' ? 'Rover' : 'Station'} · ${member.health} HP · ${member.morale}% Morale`, { size: 15, color: p.secondary });
-    ui.label(details, [122, 79, 403, 25], crewAbilityStatus(state, member), { size: 15, color: p.amber });
-    ui.label(details, [18, 141, 506, 29], ability.name, { size: 24, display: true, color: p.cyan });
-    ui.label(details, [18, 175, 506, 52], ability.description, { size: 15, wrap: true, top: true });
+    ui.label(details, [122, 10, 403, 30], member.name, { display: true, size: 24, fit: 18 });
+    // The same two bars as the name tag over their head, labelled.
+    const bar = (y: number, name: string, value: number, text: string, color: typeof p.good) => {
+        ui.label(details, [122, y, 70, 20], name, { size: 14, color: p.secondary });
+        ui.box(details, [196, y + 6, 236, 8], { r: 1, g: 1, b: 1, a: 0.12 });
+        ui.box(details, [196, y + 6, Math.round(236 * Math.min(100, Math.max(0, value)) / 100), 8], color);
+        ui.label(details, [440, y, 90, 20], text, { size: 14, color });
+    };
+    bar(44, 'Health', member.health, `${member.health}/100`, member.health <= LOW_HEALTH ? p.bad : p.good);
+    bar(68, 'Morale', member.morale, `${member.morale}%`, member.morale < LOW_MORALE ? p.bad : p.amber);
+    // Busy or ready this Sol.
+    const duty = crewDuty(state, member);
+    const dutyColor = p[duty.tone];
+    ui.box(details, [122, 94, 404, 30], { ...dutyColor, a: 0.16 });
+    ui.box(details, [122, 94, 4, 30], dutyColor);
+    ui.label(details, [134, 94, 110, 30], duty.word.toUpperCase(), { display: true, size: 16, color: dutyColor });
+    ui.label(details, [244, 94, 278, 30], duty.detail, { size: 13, fit: 10, color: p.text, wrap: true });
+    const D = 20;
+    ui.label(details, [18, 141 + D, 330, 29], ability.name, { size: 24, display: true, color: p.cyan, fit: 18 });
+    ui.label(details, [348, 145 + D, 176, 25], crewAbilityStatus(state, member), { size: 14, fit: 11, color: p.amber });
+    ui.label(details, [18, 175 + D, 506, 52], ability.description, { size: 15, wrap: true, top: true });
     const bestTime: Record<typeof member.role, string> = {
         captain: 'Best time: Before picking a news choice to see what happens first.',
         scientist: 'Best time: Early on when you have lots of station tasks to finish.',
@@ -35,23 +69,23 @@ export function showCrewAbilities(ui: FlightUi, content: Entity, button: RunButt
         pilot: 'Best time: When the rover is stuck in a dust storm.',
         medic: 'Best time: When a crew member gets hurt and you have a Medkit.',
     };
-    ui.label(details, [18, 228, 506, 36], bestTime[member.role], { size: 14, color: p.cyan, wrap: true, top: true });
+    ui.label(details, [18, 228 + D, 506, 36], bestTime[member.role], { size: 14, color: p.cyan, wrap: true, top: true });
     if (member.role === 'scientist' && !doubleShift(state, member)) {
-        ui.label(details, [18, 266, 506, 26], 'Works twice as fast for 3 days, then rests for 3 days.',
+        ui.label(details, [18, 266 + D, 506, 26], 'Works twice as fast for 3 days, then rests for 3 days.',
             { size: 14, color: p.amber });
     }
     const abilityProblem = crewAbilityProblem(state, area, member.id, member.role === 'medic' ? member.id : undefined);
-    if (abilityProblem) ui.label(details, [18, 294, 506, 44], abilityProblem, { size: 14, color: p.secondary, wrap: true, top: true });
+    if (abilityProblem) ui.label(details, [18, 294 + D, 506, 44], abilityProblem, { size: 14, color: p.secondary, wrap: true, top: true });
     if (member.role === 'medic' && !abilityProblem) {
         const targets = local.crew.filter(target => target.health > 0);
-        targets.forEach((target, index) => button(`triage-${target.id}`, details, [18 + index % 2 * 253, 294 + Math.floor(index / 2) * 52, 242, 44],
+        targets.forEach((target, index) => button(`triage-${target.id}`, details, [18 + index % 2 * 253, 294 + D + Math.floor(index / 2) * 52, 242, 44],
             () => change(() => activateCrewAbility(state, area, member.id, target.id)), {
                 label: `Treat ${target.name.split(' ')[0]}`, tone: 'hero',
             }));
     } else if (member.role !== 'captain') {
         const label = member.role === 'scientist' ? 'Work Double Speed' :
             member.role === 'engineer' ? 'Make a Repair Kit' : member.role === 'botanist' ? 'Plant Seed Pod' : 'Drive Through Storm';
-        button('activate-specialty', details, [18, 346, 398, 48], () => change(() => activateCrewAbility(state, area, member.id)), {
+        button('activate-specialty', details, [18, 346 + D, 398, 48], () => change(() => activateCrewAbility(state, area, member.id)), {
             label, disabled: Boolean(abilityProblem), tone: 'primary',
         });
     }
