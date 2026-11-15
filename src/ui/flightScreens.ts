@@ -9,6 +9,8 @@ import { LAUNCH_CREW_SIZE, missionDeadline, victoryCriteria, type MissionOffer }
 import { purchaseProblem, type PlaytestProfile } from '../data/profile';
 import { MENU_BACKGROUND, SIDEBAR_BACKGROUND, type Bounds, type FlightUi, type IconName } from './flightUi';
 import { mountMenuWalker } from './menuWalker';
+import { mountMenuAmbience } from './menuAmbience';
+import { mountMenuSky } from './menuSky';
 import { play, vibrate } from './feedback';
 import { burst } from './fx';
 import { easeOutBack, makeMotion, type Motion } from './motion';
@@ -74,6 +76,9 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
     const layer = ui.group(scene, [0, 0, 1280, 720]);
     // Lights painted onto the station (monitor light, beacon, radar blip) sit behind the walking crew member.
     const details = ui.group(layer, [0, 0, 1280, 720]);
+    // The window (clouds, stars, shuttle, rover), then grow lights, motes, vents, steam and the door.
+    const sky = mountMenuSky(ui, details, motion);
+    const ambience = mountMenuAmbience(ui, details, motion);
     const walker = mountMenuWalker(ui, layer, motion);
     // A few dust specks drift slowly across the painting (left to right, bobbing a little).
     if (!reducedMotion) {
@@ -204,6 +209,8 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
     return () => {
         motion.tick();
         walker.tick();
+        sky();
+        ambience();
         const hitX = Math.round(walker.position().x - 29);
         if (hitX !== walkerHitX) { motion.set(walkerHit, hitX, 410); walkerHitX = hitX; }
         if (reducedMotion) return;
