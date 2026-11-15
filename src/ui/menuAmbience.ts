@@ -7,7 +7,8 @@
 //   the leaves below, so it never crosses a plant).
 // - Upper deck: the doorway on the right slides open now and then (behind its railing), and the
 //   lamp above it turns amber while the door moves.
-// - Generator bay: the generator hums (a copy of it, over a dark fill in its shape, rises a
+// - Generator bay: every few seconds each of the three machines huffs (its copy heaves up a
+//   pixel over a dark fill in its shape, and smoke puffs from its vents); the generator also hums (rises a
 //   pixel in short bursts), the vent grilles flicker like a fire behind them, the lamps hum, the
 //   generator's indicator pulses, panel lights blink, embers drift up from the vents, a pipe
 //   drips onto the floor, and steam puffs rise from the pipes.
@@ -41,6 +42,15 @@ const DOOR_MS = { move: 650, open: 2600 };
 const INDICATOR = [191, 330, 13, 4] as const;
 const PANEL_LIGHTS = [[306, 322], [319, 322], [445, 338]] as const;
 /** Pipe joints that let off steam: x, y and how often (ms between puffs). */
+/** The three bay machines that huff: their copy layer, and the vents on top that puff smoke. */
+const MACHINES = [
+    { name: 'generator', vents: [[214, 306], [246, 309]] },
+    // The long middle unit blows a big cloud out of its front grille instead of its top.
+    { name: 'machine_mid', vents: [], grille: [410, 341, 432, 354] },
+    { name: 'machine_right', vents: [[493, 316], [516, 316]] },
+] as { name: string; vents: readonly (readonly [number, number])[]; grille?: readonly [number, number, number, number] }[];
+const HUFF_MS = 160;                       // the heave: up a pixel for this long, then back down
+const HUFF_EVERY = [4000, 9000] as const;  // ms between huffs, per machine
 const STEAM = [[332, 304, 2600], [547, 301, 3400], [276, 296, 4200], [320, 181, 5200], [545, 190, 4700]] as const;
 
 interface Particle { entity: Entity; x: number; y: number; vx: number; vy: number; born: number; life: number; size: number; grow: number; color: Color }
@@ -54,6 +64,11 @@ export function mountMenuAmbience(ui: FlightUi, parent: Entity, motion: Motion):
     // The generator copy (over a dark fill in its shape) goes first, so the lamp glow stays on top.
     layer('generator_hole', 1);
     const generator = layer('generator', 1);
+    // The other two machines that huff, each over a dark fill in its own shape.
+    const huffers = MACHINES.map(machine => {
+        const copy = machine.name === 'generator' ? generator : (layer(`${machine.name}_hole`, 1), layer(machine.name, 1));
+        return { ...machine, copy, at: Date.now() + 1500 + Math.random() * 4000, lastHuff: -1e9 };
+    });
     const leaves = layer('leaves');
     const grow = layer('grow');
     const lamps = layer('lamps');
@@ -117,7 +132,34 @@ export function mountMenuAmbience(ui: FlightUi, parent: Entity, motion: Motion):
         ui.fill(leaves, white(0.05 + 0.2 * wave(0.6, 1)));
         // The generator hums in short bursts: it rises a pixel and settles, a few times a second.
         const humming = now % 2600 < 700;
-        motion.set(generator, 0, humming && Math.floor(now / 70) % 2 === 0 ? -1 : 0);
+        // Every few seconds each machine huffs: a heave up a pixel and a puff of smoke from its vents.
+        for (const machine of huffers) {
+            if (now >= machine.at) {
+                machine.at = now + HUFF_EVERY[0] + Math.random() * (HUFF_EVERY[1] - HUFF_EVERY[0]);
+                machine.lastHuff = now;
+                if (machine.grille) {
+                    // A big puff: many soft wisps from across the grille, billowing out and up.
+                    const [gx0, gy0, gx1, gy1] = machine.grille;
+                    for (let k = 0; k < 18; k++) {
+                        spawn((gx0 + Math.random() * (gx1 - gx0)) * S, (gy0 + Math.random() * (gy1 - gy0)) * S,
+                            (Math.random() - 0.5) * 30, -10 - Math.random() * 22, 1500 + Math.random() * 900, 4,
+                            { r: 0.8, g: 0.78, b: 0.82, a: 0.42 }, 14);
+                    }
+                }
+                for (const [vx, vy] of machine.vents) {
+                    for (let k = 0; k < 5; k++) {
+                        spawn(vx * S + (Math.random() - 0.5) * 6, vy * S - k * 2, (Math.random() - 0.5) * 14, -22 - Math.random() * 18,
+                            1100 + k * 180, 3, { r: 0.78, g: 0.76, b: 0.8, a: 0.5 }, 8);
+                    }
+                }
+            }
+        }
+        for (const machine of huffers) {
+            const sinceHuff = now - machine.lastHuff;
+            const huff = sinceHuff >= 0 && sinceHuff < HUFF_MS;
+            const hum = machine.name === 'generator' && humming && Math.floor(now / 70) % 2 === 0;
+            motion.set(machine.copy, 0, huff || hum ? -1 : 0);
+        }
 
         // The door: closed for a while, slides open, stays open, slides shut.
         const since = now - doorAt;

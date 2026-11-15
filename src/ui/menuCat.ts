@@ -6,6 +6,7 @@
 // With Reduced Motion it just sits on the console desk.
 import { Interactable, type Entity } from 'esengine';
 import { makeAbsBox } from './theme';
+import { play } from './feedback';
 import type { FlightUi } from './flightUi';
 import type { Motion } from './motion';
 
@@ -29,8 +30,8 @@ const LEAP_FRAME = 2;
 const SIT = REST.first;
 const GLANCE = REST.first + 4;            // the stretched-out walk frame, used mid-jump
 
-const WALK_SPEED = 8;            // painting px per second: an unhurried stroll
-const WALK_FRAME_MS = 140;
+const WALK_SPEED = 12;           // painting px per second: an easy trot
+const WALK_FRAME_MS = 110;
 const JUMP_MS = 700;
 const JUMP_HEIGHT = 10;
 /** How long it stays in one spot before moving on by itself (ms). */
@@ -39,6 +40,16 @@ const STAY = [45000, 90000] as const;
 interface Surface { name: string; x0: number; x1: number; y: number; sleep: boolean }
 /** Where the cat can stand: the deck floor and four things it can jump onto (painting pixels). */
 const FLOOR: Surface = { name: 'floor', x0: 206, x1: 532, y: 263, sleep: false };
+/** Floor stretches clear of the railings: the cat only stops to sit here, so it is never hidden behind the bars. */
+const FLOOR_CLEAR = [[236, 294], [336, 530]] as const;
+/** The closest floor spot to `x` that is clear of the railings: it takes off and lands only there. */
+const nearestClear = (x: number) => FLOOR_CLEAR.map(([x0, x1]) => Math.min(x1, Math.max(x0, x)))
+    .reduce((best, spot) => (Math.abs(spot - x) < Math.abs(best - x) ? spot : best));
+/** The clear stretch the cat is on. On the floor it never walks out of it (that would pass behind a
+ * railing); it only changes stretch by jumping (down from a perch onto the other side). */
+const stretchOf = (x: number) => FLOOR_CLEAR.find(([x0, x1]) => x >= x0 - 1 && x <= x1 + 1) ?? FLOOR_CLEAR[0];
+/** How far it can jump sideways onto a perch. */
+const REACH = 20;
 const PERCHES: Surface[] = [
     { name: 'crate', x0: 237, x1: 256, y: 244, sleep: true },
     { name: 'cabinet', x0: 308, x1: 322, y: 233, sleep: false },
@@ -57,8 +68,9 @@ const rand = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
 const pick = <T>(items: readonly T[]): T => items[Math.floor(Math.random() * items.length)]!;
 
 export function mountMenuCat(ui: FlightUi, parent: Entity, motion: Motion): () => void {
-    let surface: Surface = motion.reducedMotion ? PERCHES[2]! : FLOOR;
-    let x = motion.reducedMotion ? 360 : 300;
+    // It starts sitting on the console desk, in plain view.
+    let surface: Surface = PERCHES[2]!;
+    let x = 360;
     let y = surface.y;
     let facing: 1 | -1 = 1;
     const sprite = ui.image(parent, [0, 0, CELL * S, CELL * S], CAT_ATLAS, ui.palette.white, REST.first, GRID);
@@ -98,20 +110,29 @@ export function mountMenuCat(ui: FlightUi, parent: Entity, motion: Motion): () =
         if (surface === FLOOR) {
             if (Math.random() < 0.55) {
                 // Head for a perch: walk to just beside it, jump up, maybe stroll along it, settle.
-                const perch = pick(PERCHES);
-                const fromLeft = x < (perch.x0 + perch.x1) / 2;
-                const launch = fromLeft ? perch.x0 - 9 : perch.x1 + 9;
-                tasks.push({ kind: 'walk', x: Math.min(FLOOR.x1, Math.max(FLOOR.x0, launch)) });
-                tasks.push({ kind: 'jump', to: perch, x: fromLeft ? perch.x0 + 3 : perch.x1 - 3 });
+                // Only perches it can reach from its own stretch; take off from the spot in that
+                // stretch nearest the perch.
+                const [s0, s1] = stretchOf(x);
+                const options = PERCHES.map(perch => {
+                    const fromLeft = x < (perch.x0 + perch.x1) / 2;
+                    const launch = Math.min(s1, Math.max(s0, fromLeft ? perch.x0 - 9 : perch.x1 + 9));
+                    return { perch, launch, gap: launch < perch.x0 ? perch.x0 - launch : launch - perch.x1 };
+                }).filter(option => option.gap <= REACH);
+                if (!options.length) { tasks.push({ kind: 'walk', x: rand(s0, s1) }); return; }
+                const { perch, launch } = pick(options);
+                tasks.push({ kind: 'walk', x: launch });
+                tasks.push({ kind: 'jump', to: perch, x: launch < perch.x0 ? perch.x0 + 3 : perch.x1 - 3 });
                 if (perch.x1 - perch.x0 > 20) tasks.push({ kind: 'walk', x: rand(perch.x0 + 4, perch.x1 - 4) });
             } else {
-                tasks.push({ kind: 'walk', x: rand(FLOOR.x0, FLOOR.x1) });
+                const [x0, x1] = stretchOf(x);
+                tasks.push({ kind: 'walk', x: rand(x0, x1) });
             }
         } else {
             // Hop down to the floor on one side.
             const left = Math.random() < 0.5;
-            const edge = left ? surface.x0 + 2 : surface.x1 - 2;
-            tasks.push({ kind: 'walk', x: edge }, { kind: 'jump', to: FLOOR, x: left ? surface.x0 - 10 : surface.x1 + 10 });
+            // It lands on the clear spot nearest that side, never behind a railing.
+            const landing = nearestClear(left ? surface.x0 - 10 : surface.x1 + 10);
+            tasks.push({ kind: 'walk', x: landing < surface.x0 ? surface.x0 + 2 : surface.x1 - 2 }, { kind: 'jump', to: FLOOR, x: landing });
         }
     }
 
@@ -120,7 +141,17 @@ export function mountMenuCat(ui: FlightUi, parent: Entity, motion: Motion): () =
         from = { x, y };
     }
 
-    // Clicking the cat: it meows, then gets up and moves somewhere else.
+    // A "Meow!" speech bubble above its head while it meows (same look as the crew's hello).
+    const { palette: p } = ui;
+    const BUBBLE = { w: 64, h: 26 };
+    const bubble = ui.group(parent, [0, 0, BUBBLE.w, BUBBLE.h + 4]);
+    ui.box(bubble, [0, 0, BUBBLE.w, BUBBLE.h], p.text);
+    ui.label(bubble, [0, 0, BUBBLE.w, BUBBLE.h], 'Meow!', { size: 14, color: p.ink, center: true });
+    ui.box(bubble, [BUBBLE.w / 2 - 3, BUBBLE.h, 6, 4], p.text);
+    ui.show(bubble, false);
+    let bubbleUntil = 0;
+
+    // Clicking the cat: it meows (with the sound and the bubble), then gets up and moves.
     const HIT = { w: 20, h: 16 };
     const hit = makeAbsBox(ui.world, parent, 0, 0, HIT.w * S, HIT.h * S, undefined, false);
     ui.world.insert(hit, Interactable, { enabled: true, blockRaycast: true, raycastTarget: true });
@@ -129,6 +160,9 @@ export function mountMenuCat(ui: FlightUi, parent: Entity, motion: Motion): () =
         if (busy) return;
         tasks.length = 0;
         tasks.push({ kind: 'anim', ...MEOW, loops: 2 });
+        play('meow');
+        bubbleUntil = Date.now() + 1600;
+        ui.show(bubble, true);
         wantsToMove = true;
         begin();
     });
@@ -171,6 +205,10 @@ export function mountMenuCat(ui: FlightUi, parent: Entity, motion: Motion): () =
 
         place();
         motion.set(hit, Math.round((x - HIT.w / 2) * S), Math.round((y - HIT.h) * S));
+        if (bubbleUntil) {
+            motion.set(bubble, Math.round(x * S - BUBBLE.w / 2), Math.round((y - 18) * S - BUBBLE.h - 4));
+            if (now >= bubbleUntil) { ui.show(bubble, false); bubbleUntil = 0; }
+        }
         if (done) { tasks.shift(); begin(); }
     };
 }

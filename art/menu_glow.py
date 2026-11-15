@@ -21,7 +21,14 @@ hot = (r > 190) & (g > 100) & (b < 120) & (r - b > 90)          # orange vent fi
 cream = (r > 225) & (g > 205) & (b > 150)                         # grow-light tubes and lamp cores
 leaf = (g > 170) & (g > r + 10) & (b < 140)                       # sunlit leaves
 
+violet = (b > 110) & (b > g + 25) & (r > 70)                     # the dome's glass panes (not its struts or plants)
+# Only inside the dome's half-ellipse (centre of its base, half-width, height), not the base buildings.
+_yy, _xx = np.mgrid[0:a.shape[0], 0:a.shape[1]]
+violet &= ((_xx - 452) / 49) ** 2 + ((_yy - 133) / 31) ** 2 <= 1
+violet &= _yy <= 133
+
 LAYERS = {
+    'dome': (violet, (400, 92, 505, 138)),
     'vent_a': (hot, (395, 295, 440, 332)),
     'vent_b': (hot, (585, 310, 620, 347)),
     'lamps': (hot | cream, (190, 288, 500, 312)),
@@ -53,6 +60,12 @@ rail = (r > 170) & (g > 130) & (b < 90)
 # - deck_rail: the yellow railings along the front of the upper deck, drawn over the cat.
 SOLID = {'generator': (gen, gen_box, None), 'generator_hole': (gen, gen_box, (24, 27, 42)), 'door_rail': (rail, (578, 236, 632, 262), None),
          'deck_rail': (rail, (165, 232, 578, 270), None)}
+# The two other bay machines (the long middle unit and the tall box on the right), which huff:
+# copies without the yellow pipe rail in front of them (so the rail stays put), over dark fills.
+for _name, _box in (('machine_mid', (398, 328, 476, 357)), ('machine_right', (480, 316, 529, 357))):
+    _shape = outline(*_box) & ~rail
+    SOLID[_name] = (_shape, _box, None)
+    SOLID[_name + '_hole'] = (_shape, _box, (24, 27, 42))
 
 jobs = [(name, mask, box, 0.45, None) for name, (mask, box) in LAYERS.items()]
 jobs += [(name, mask, box, 0.0, fill) for name, (mask, box, fill) in SOLID.items()]

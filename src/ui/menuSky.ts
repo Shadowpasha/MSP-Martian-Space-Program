@@ -2,8 +2,8 @@
 // cut from the painting (art/menu_sky.py), shown at 2×.
 //
 // Draw order, back to front: the clear sky (clouds smoothed away, sun kept), twinkling stars,
-// the painting's clouds above the sun swaying gently left and right, a shuttle light crossing high up, a shooting star now
-// and then, then the window's front (bars, wall, mountains, dish, dome, ground).
+// the painting's clouds above the sun swaying gently left and right, a shuttle light crossing high up, shooting stars every
+// couple of seconds, then the window's front (bars, wall, mountains, dish, dome, ground).
 //
 // With Reduced Motion only the still layers are drawn (the painting looks unchanged).
 import type { Color, Entity } from 'esengine';
@@ -20,6 +20,8 @@ const CLOUD_BREATH = 11;      // seconds for one slow brighten-and-dim
 /** Star field: the upper sky, painting pixels. */
 const STAR_AREA = { x0: 172, x1: 636, y0: 31, y1: 62 };
 const STAR_COUNT = 26;
+/** Shooting stars that can be in the sky at the same time. */
+const METEORS = 4;
 
 export function mountMenuSky(ui: FlightUi, parent: Entity, motion: Motion): () => void {
     if (motion.reducedMotion) return () => {};
@@ -39,13 +41,15 @@ export function mountMenuSky(ui: FlightUi, parent: Entity, motion: Motion): () =
     const shuttle = ui.box(parent, [0, 0, S, S], white(0));
     const trail = ui.box(parent, [0, 0, 6 * S, 1], white(0));
     // A shooting star: a short bright streak.
-    const meteor = Array.from({ length: 5 }, () => ui.box(parent, [0, 0, S, S], white(0)));
+    // Shooting stars: a few at once, each a short streak of fading dots.
+    const meteors = Array.from({ length: METEORS }, () => ({
+        dots: Array.from({ length: 5 }, () => ui.box(parent, [0, 0, S, S], white(0))),
+        started: -1e9, x: 0, y: 0, dx: 0, dy: 0, ms: 500,
+    }));
     image('assets/textures/menu_glow_window_front.png');
 
     const start = Date.now();
-    let meteorAt = start + 3000;
-    let meteorStarted = -1e9;
-    let meteorFrom = { x: 0, y: 0 };
+    let meteorAt = start + 1200;
     return () => {
         const now = Date.now();
         const t = (now - start) / 1000;
@@ -77,18 +81,29 @@ export function mountMenuSky(ui: FlightUi, parent: Entity, motion: Motion): () =
         ui.fill(trail, white(flying ? 0.25 : 0));
 
         // A shooting star every 6–12 s: falls down-left across the upper sky in 0.5 s.
+        // A new shooting star every 1.5-4 s, on whichever streak is free; each has its own
+        // length, angle and speed, falling down-left across the upper sky.
         if (now >= meteorAt) {
-            meteorStarted = now;
-            meteorAt = now + 6000 + Math.random() * 6000;
-            meteorFrom = { x: STAR_AREA.x0 + 80 + Math.random() * 360, y: STAR_AREA.y0 + Math.random() * 10 };
+            meteorAt = now + 1500 + Math.random() * 2500;
+            const free = meteors.find(m => now - m.started > m.ms);
+            if (free) {
+                free.started = now;
+                free.x = STAR_AREA.x0 + 60 + Math.random() * 380;
+                free.y = STAR_AREA.y0 + Math.random() * 14;
+                free.dx = -(26 + Math.random() * 28);
+                free.dy = 10 + Math.random() * 12;
+                free.ms = 380 + Math.random() * 320;
+            }
         }
-        const age = now - meteorStarted;
-        meteor.forEach((dot, i) => {
-            const k = age / 500 - i * 0.06;
-            const visible = k >= 0 && k <= 1;
-            motion.set(dot, Math.round((meteorFrom.x - k * 40) * S), Math.round((meteorFrom.y + k * 16) * S));
-            ui.fill(dot, white(visible ? (1 - k) * (1 - i * 0.18) : 0));
-        });
+        for (const m of meteors) {
+            const age = now - m.started;
+            m.dots.forEach((dot, i) => {
+                const k = age / m.ms - i * 0.06;
+                const visible = k >= 0 && k <= 1;
+                motion.set(dot, Math.round((m.x + k * m.dx) * S), Math.round((m.y + k * m.dy) * S));
+                ui.fill(dot, white(visible ? (1 - k) * (1 - i * 0.18) : 0));
+            });
+        }
 
     };
 }

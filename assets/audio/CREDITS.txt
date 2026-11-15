@@ -10,6 +10,9 @@ Source: https://kyrasvoice.itch.io/8-bit-space-music
 License: https://creativecommons.org/licenses/by/4.0/
 The original recordings were converted to Ogg Vorbis.
 
+sfx_cat_meow.mp3: "Cat Meow 8 FX" Sound Effect by SOUND_GARAGE from Pixabay
+(https://pixabay.com/users/sound_garage-47313534/), under the Pixabay Content License.
+
 The files in ui/ are original: generated in code by scripts/art/sfx.py for this project
 (no samples or third-party files). Written with Claude (Anthropic's AI assistant).
 

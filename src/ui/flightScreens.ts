@@ -136,17 +136,12 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
         });
     }));
 
-    // The greenhouse dome glows a few times with a chime.
-    // A stepped, dome-shaped glow laid over the painted dome (rows of pixels, widest at the base).
+    // The greenhouse dome glows a few times with a chime. DOME is its click area (screen pixels).
     const DOME = { cx: 903, base: 266, halfWidth: 84, height: 62 };
-    const ROW = 6;
-    const domeRows = Array.from({ length: Math.ceil(DOME.height / ROW) }, (_, i) => {
-        const top = DOME.base - DOME.height + i * ROW;
-        const rise = (DOME.base - top - ROW / 2) / DOME.height;
-        const half = Math.round(DOME.halfWidth * Math.sqrt(Math.max(0, 1 - rise * rise)));
-        return ui.box(layer, [DOME.cx - half, top, half * 2, ROW], { ...DOME_LIGHT, a: 0 });
-    });
-    const glow = { set: (a: number) => domeRows.forEach(row => ui.fill(row, { ...DOME_LIGHT, a })) };
+    // The glow lights the dome's glass panes from inside (a layer cut from the painting by
+    // art/menu_glow.py): the lattice and the plants stay dark on top of it.
+    const domeGlow = ui.image(layer, [0, 0, 1280, 720], 'assets/textures/menu_glow_dome.png', { r: 1, g: 1, b: 1, a: 0 });
+    const glow = { set: (a: number) => ui.fill(domeGlow, { r: 1, g: 1, b: 1, a: Math.min(1, a * 1.6) }) };
     // The clickable area (and its hover outline) follows the glow: tune DOME above and both move.
     hotspot([DOME.cx - DOME.halfWidth - 4, DOME.base - DOME.height - 4, DOME.halfWidth * 2 + 8, DOME.height + 6], () => once('dome', 900, () => {
         play('chime');
@@ -655,9 +650,6 @@ export function showUpgrades(
 }
 
 export const MISSIONS_PER_PAGE = 3;
-
-/** Soft lavender light for the greenhouse dome on the menu painting. */
-const DOME_LIGHT = { r: 0.92, g: 0.8, b: 1, a: 1 };
 
 const DIFFICULTY_NAMES = ['Easy', 'Medium', 'Hard'] as const;
 
