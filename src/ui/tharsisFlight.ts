@@ -20,6 +20,8 @@ import { RESOURCE_KEYS, resourceRate, runway, showConditions, showResources, sig
 import { showAriesBadge, showTerminal, type TerminalStatus } from './tharsisTerminal';
 import { showWorkConsole, type WorkPanel } from './tharsisWorkConsole';
 import { makeAbsBox } from './theme';
+import { makeMotion } from './motion';
+import { mountSceneAmbience, SITE_AMBIENCE, STATION_AMBIENCE } from './sceneAmbience';
 import { showCrewAbilities } from './tharsisCrew';
 import { showMissionObjectives, showSolReview, type MissionAssessment } from './tharsisObjectives';
 import { showTrainingGuide } from './trainingGuide';
@@ -67,6 +69,21 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     let message = '';
     let dirty = true;
     let surface: Entity | null = null;
+    // The background and its ambience live in their own layer under the UI, so redrawing the UI
+    // (which happens on every change) never restarts them. Rebuilt only when the view switches.
+    let backdrop: Entity | null = null;
+    let backdropView: 'station' | 'expedition' | null = null;
+    let ambience: () => void = () => {};
+    const backdropMotion = makeMotion(world, profile.reducedMotion);
+    function drawBackdrop(): void {
+        if (backdrop !== null && backdropView === view) return;
+        if (backdrop !== null) world.despawn(backdrop);
+        backdrop = makeAbsBox(world, root, 0, 0, 1280, 720);
+        backdropView = view;
+        const backUi = makeFlightUi(world, events, backdrop, art, focus, profile);
+        const atSite = view === 'expedition';
+        ambience = mountSceneAmbience(backUi, backdrop, backdropMotion, atSite ? SITE : STATION, atSite ? SITE_AMBIENCE : STATION_AMBIENCE);
+    }
     let ask: AbortController | null = null;
     let sentMessage: DiscussionMessage | null = null;
     let pendingBriefing: AbortController | null = null;
@@ -283,7 +300,6 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         const sol = run.phase === 'report' ? run.reportSol : state.sol;
         const day = stormDay(state, sol);
         const weatherAtSol = run.phase === 'report' ? state.timeline[state.timeline.length - 1]?.weather ?? state.conditions.weather : state.conditions.weather;
-        ui.image(root, [0, 0, 1280, 720], atSite ? SITE : STATION);
         if (day) ui.box(root, [0, 98, 1280, 476], { r: 0.41, g: 0.15, b: 0.08, a: 0.26 });
         const clock = ui.frame(root, [12, 12, 376, 84], p.ink, day ? p.rust : p.edge);
         ui.label(clock, [14, 4, 352, 34], expeditionFor(state).region, { display: true, size: 33, fit: 20 });
@@ -518,6 +534,12 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         trackLabel = null;
         dragged.clear();
         if (surface !== null) world.despawn(surface);
+        // A new backdrop must exist before the UI surface, so the UI is drawn on top of it.
+        if (backdropView !== view) {
+            if (backdrop !== null) world.despawn(backdrop);
+            backdrop = null;
+        }
+        drawBackdrop();
         surface = makeAbsBox(world, root, 0, 0, 1280, 720);
         ui = makeFlightUi(world, events, surface, art, focus, profile);
         const planning = run.phase === 'planning';
@@ -607,6 +629,8 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         return levels.soundEnabled ? shownTrack ? `Now playing · ${shownTrack}` : 'Loading mission music…' : 'Audio muted';
     }
     return () => {
+        backdropMotion.tick();
+        ambience();
         if (dirty && !dragged.size) render();
         if (trackLabel !== null && shownTrack !== currentMissionMusic()) {
             shownTrack = currentMissionMusic();

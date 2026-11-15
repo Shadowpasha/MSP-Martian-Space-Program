@@ -86,7 +86,10 @@ export function makeFlightArt(world: World, root: Entity, assets: AssetsData): F
     };
 }
 
-export const MENU_BACKGROUND = 'assets/textures/menu_station.png';
+/** The station painting with the standing crew member erased: on the main menu a walking sprite takes his place. */
+export const MENU_BACKGROUND = 'assets/textures/menu_station_empty.png';
+/** 8×4 atlas of 40×64 walk frames: row 0 faces right, row 1 faces left (see art/menu_walker.py). */
+export const MENU_WALKER = 'assets/textures/menu_walker.png';
 export const SIDEBAR_BACKGROUND = 'assets/textures/menu_landscape.png';
 export const ICON_NAMES = [
     'play', 'crew', 'upgrade', 'settings', 'quit', 'lock', 'check', 'back',
@@ -184,9 +187,26 @@ export function makeFlightUi(
         return el;
     }
 
-    function image(parent: Entity, bounds: Bounds, ref: string, tint = palette.white, slot?: number) {
+    /**
+     * The cell an atlas image shows, and its grid (columns × rows, 8 × 4 unless given). setSlot
+     * changes the cell, even before the texture loads.
+     */
+    const slots = new Map<Entity, number>();
+    const grids = new Map<Entity, readonly [number, number]>();
+    const applySlot = (data: { uvOffset: { x: number; y: number }; uvScale: { x: number; y: number } }, slot: number, [cols, rows]: readonly [number, number]) => {
+        data.uvOffset = { x: (slot % cols) / cols, y: (rows - 1 - Math.floor(slot / cols)) / rows };
+        data.uvScale = { x: 1 / cols, y: 1 / rows };
+    };
+    const gridOf = (entity: Entity) => grids.get(entity) ?? [8, 4] as const;
+
+    function image(parent: Entity, bounds: Bounds, ref: string, tint = palette.white, slot?: number, grid?: readonly [number, number]) {
         const el = box(parent, bounds);
         world.insert(el, UIVisual, { visualType: UIVisualType.Image, enabled: false });
+        // Entity ids are reused after a despawn, so a plain image clears any old cell for its id.
+        if (slot !== undefined) slots.set(el, slot);
+        else slots.delete(el);
+        if (grid) grids.set(el, grid);
+        else grids.delete(el);
         void art.texture(ref).then(texture => {
             if (!world.valid(el)) return;
             world.update(el, UIVisual, data => {
@@ -194,13 +214,18 @@ export function makeFlightUi(
                 data.color = tint;
                 data.enabled = true;
                 data.fit = UIVisualFit.Fill;
-                if (slot !== undefined) {
-                    data.uvOffset = { x: (slot % 8) / 8, y: (3 - Math.floor(slot / 8)) / 4 };
-                    data.uvScale = { x: 1 / 8, y: 1 / 4 };
-                }
+                const current = slots.get(el);
+                if (current !== undefined) applySlot(data, current, gridOf(el));
             });
         }).catch(() => {});
         return el;
+    }
+
+    /** Show another cell of an atlas image: sprite animation frames. */
+    function setSlot(entity: Entity, slot: number): void {
+        if (slots.get(entity) === slot || !world.valid(entity)) return;
+        slots.set(entity, slot);
+        world.update(entity, UIVisual, data => applySlot(data, slot, gridOf(entity)));
     }
 
     function icon(parent: Entity, x: number, y: number, size: number, name: IconName, tint = palette.text) {
@@ -408,7 +433,7 @@ export function makeFlightUi(
     }
 
     return {
-        world, root, palette, box, group, frame, label, image, icon, button, slider, updateFocus,
+        world, root, palette, box, group, frame, label, image, setSlot, icon, button, slider, updateFocus,
         /** The player's Reduced Motion setting; screens with motion read it. */
         reducedMotion: options.reducedMotion,
         setText: (entity: Entity | null, content: string) => setText(world, entity, content),

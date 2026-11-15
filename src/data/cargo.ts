@@ -89,3 +89,56 @@ export function placementProblem(draft: readonly CargoPlacement[], next: CargoPl
     if (cells.some(([x, y]) => taken.has(y * CARGO_COLUMNS + x))) return 'Another item occupies this space.';
     return null;
 }
+
+/** Auto Fill's basics after the required equipment: one each of food, water, O₂ and first aid. */
+export const AUTO_FILL_BASICS: readonly CargoItemId[] = ['extraRations', 'waterCanisters', 'oxygenTanks', 'medkits'];
+
+export type SupplyKey = 'food' | 'water' | 'oxygen';
+
+/**
+ * Auto Fill: keeps what is already packed, then adds what the mission requires and one of each
+ * basic supply, then tops up until every supply meter covers the whole trip. `shortSupplies`
+ * names the supplies that still run out before the deadline (the meters' own numbers). Each
+ * item goes in the first spot (top-left first, any rotation) where it fits. Items that are out
+ * of stock or have no room are skipped.
+ */
+export function autoFillCargo(
+    placements: readonly CargoPlacement[],
+    required: Partial<Record<CargoItemId, number>>,
+    shortSupplies: (placements: readonly CargoPlacement[]) => readonly SupplyKey[] = () => [],
+): CargoPlacement[] {
+    const packed = [...placements];
+    let nextId = Math.max(0, ...packed.map(piece => piece.id)) + 1;
+    const counts = () => packedInventory(packed);
+    const place = (item: CargoItemId): boolean => {
+        for (let y = 0; y < CARGO_ROWS; y++) {
+            for (let x = 0; x < CARGO_COLUMNS; x++) {
+                for (const rotation of [0, 1, 2, 3] as const) {
+                    const next: CargoPlacement = { id: nextId, item, x, y, rotation };
+                    if (placementProblem(packed, next)) continue;
+                    packed.push(next);
+                    nextId++;
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    for (const [item, need] of Object.entries(required) as [CargoItemId, number][]) {
+        while (counts()[item] < need && place(item)) { /* keep packing until the requirement is met */ }
+    }
+    for (const item of AUTO_FILL_BASICS) {
+        if (counts()[item] === 0) place(item);
+    }
+    // Top up: for each supply that still runs short, pack whichever item gives the most of it,
+    // falling back to the next best when one is out of stock or will not fit.
+    const givesUp = new Set<SupplyKey>();
+    for (;;) {
+        const key = shortSupplies(packed).find(supply => !givesUp.has(supply));
+        if (!key) break;
+        const best = CARGO_ITEMS.filter(item => (item.resources?.[key] ?? 0) > 0)
+            .sort((a, b) => (b.resources![key] ?? 0) - (a.resources![key] ?? 0));
+        if (!best.some(item => place(item.id))) givesUp.add(key);
+    }
+    return packed;
+}

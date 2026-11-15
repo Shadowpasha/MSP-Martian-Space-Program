@@ -8,6 +8,10 @@ import { CREW_ABILITIES } from '../data/crewAbilities';
 import { LAUNCH_CREW_SIZE, missionDeadline, victoryCriteria, type MissionOffer } from '../data/missions';
 import { purchaseProblem, type PlaytestProfile } from '../data/profile';
 import { MENU_BACKGROUND, SIDEBAR_BACKGROUND, type Bounds, type FlightUi, type IconName } from './flightUi';
+import { mountMenuWalker } from './menuWalker';
+import { mountMenuAmbience } from './menuAmbience';
+import { mountMenuSky } from './menuSky';
+import { mountMenuCat } from './menuCat';
 import { play, vibrate } from './feedback';
 import { burst } from './fx';
 import { easeOutBack, makeMotion, type Motion } from './motion';
@@ -67,9 +71,20 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
     // The painting stays still. Small details inside it come alive in place instead (a blinking
     // beacon, the dome's soft glow, a radar blip), and some of them react when clicked.
     const scene = ui.group(root, [0, 0, 1280, 720]);
+    // The painting without its standing crew member: he is a sprite that walks the deck.
     ui.image(scene, [0, 0, 1280, 720], MENU_BACKGROUND);
     // Everything else in the painting uses screen coordinates inside this layer.
     const layer = ui.group(scene, [0, 0, 1280, 720]);
+    // Lights painted onto the station (monitor light, beacon, radar blip) sit behind the walking crew member.
+    const details = ui.group(layer, [0, 0, 1280, 720]);
+    // The window (clouds, stars, shuttle, rover), then grow lights, motes, vents, steam and the door.
+    const sky = mountMenuSky(ui, details, motion);
+    const ambience = mountMenuAmbience(ui, details, motion);
+    // The station cat roams the deck too; the crew member is drawn after it, so he walks in front.
+    const cat = mountMenuCat(ui, layer, motion);
+    // The deck's railings are redrawn over the cat, so it walks behind them.
+    ui.image(layer, [0, 0, 1280, 720], 'assets/textures/menu_glow_deck_rail.png');
+    const walker = mountMenuWalker(ui, layer, motion);
     // A few dust specks drift slowly across the painting (left to right, bobbing a little).
     if (!reducedMotion) {
         for (let i = 0; i < 14; i++) {
@@ -100,6 +115,7 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
             vibrate('short');
             onPress();
         });
+        return hit;
     };
     const busy = new Set<string>();
     const once = (key: string, ms: number, run: () => void) => {
@@ -120,17 +136,12 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
         });
     }));
 
-    // The greenhouse dome glows a few times with a chime.
-    // A stepped, dome-shaped glow laid over the painted dome (rows of pixels, widest at the base).
+    // The greenhouse dome glows a few times with a chime. DOME is its click area (screen pixels).
     const DOME = { cx: 903, base: 266, halfWidth: 84, height: 62 };
-    const ROW = 6;
-    const domeRows = Array.from({ length: Math.ceil(DOME.height / ROW) }, (_, i) => {
-        const top = DOME.base - DOME.height + i * ROW;
-        const rise = (DOME.base - top - ROW / 2) / DOME.height;
-        const half = Math.round(DOME.halfWidth * Math.sqrt(Math.max(0, 1 - rise * rise)));
-        return ui.box(layer, [DOME.cx - half, top, half * 2, ROW], { ...DOME_LIGHT, a: 0 });
-    });
-    const glow = { set: (a: number) => domeRows.forEach(row => ui.fill(row, { ...DOME_LIGHT, a })) };
+    // The glow lights the dome's glass panes from inside (a layer cut from the painting by
+    // art/menu_glow.py): the lattice and the plants stay dark on top of it.
+    const domeGlow = ui.image(layer, [0, 0, 1280, 720], 'assets/textures/menu_glow_dome.png', { r: 1, g: 1, b: 1, a: 0 });
+    const glow = { set: (a: number) => ui.fill(domeGlow, { r: 1, g: 1, b: 1, a: Math.min(1, a * 1.6) }) };
     // The clickable area (and its hover outline) follows the glow: tune DOME above and both move.
     hotspot([DOME.cx - DOME.halfWidth - 4, DOME.base - DOME.height - 4, DOME.halfWidth * 2 + 8, DOME.height + 6], () => once('dome', 900, () => {
         play('chime');
@@ -150,15 +161,19 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
         return { holder, x, y };
     };
     const hello = [bubble(690, 372, 'Hi there!'), bubble(970, 390, 'Hello!')];
+    // The walking crew member's bubble and click area follow him; he stops while he says hello.
+    const walkerBubble = () => ({ x: Math.round(walker.position().x - 24), y: walker.position().top - 30 });
     const greet = (index: number) => once(`crew${index}`, 1600, () => {
-        const { holder, x, y } = hello[index]!;
+        const { holder } = hello[index]!;
+        const { x, y } = index === 0 ? walkerBubble() : hello[index]!;
+        if (index === 0) { walker.pause(1600); motion.set(holder, x, y); }
         play('blip', 1.3);
         motion.after(110, () => play('blip', 1.6));
         ui.show(holder, true);
         motion.hop(holder, x, y, 6);
         motion.after(1400, () => ui.show(holder, false));
     });
-    hotspot([685, 410, 52, 120], () => greet(0));
+    const walkerHit = hotspot([685, 410, 52, 120], () => greet(0));
     hotspot([965, 430, 60, 90], () => greet(1));
 
     const play_ = sidebar(ui, 'menu', navigate, true, motion);
@@ -172,17 +187,17 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
     let lastLit = -1;
 
     // Small status light aligned with the monitor in the station painting.
-    const monitorLight = ui.box(layer, [776, 393, 4, 4], p.cyan);
+    const monitorLight = ui.box(details, [776, 393, 4, 4], p.cyan);
     let lastBlink = true;
     // A red beacon on top of the dish, blinking slowly.
-    const beacon = ui.group(layer, [461, 120, 18, 18]);
+    const beacon = ui.group(details, [461, 120, 18, 18]);
     ui.box(beacon, [0, 0, 18, 18], { ...p.bad, a: 0.25 });
     ui.box(beacon, [3, 3, 12, 12], { ...p.bad, a: 0.45 });
     ui.box(beacon, [6, 6, 6, 6], { r: 1, g: 0.35, b: 0.3, a: 1 });
     let beaconOn = true;
     // A radar blip circling the round scope on the monitor.
     if (!reducedMotion) {
-        const blip = ui.box(layer, [832, 408, 4, 4], p.white);
+        const blip = ui.box(details, [832, 408, 4, 4], p.white);
         motion.path(blip, ms => {
             const turn = (ms / 3200) * Math.PI * 2;
             // Circles the round scope on the monitor (lined up against captures of the painting).
@@ -190,8 +205,15 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
         });
     }
     let lastGlow = -1;
+    let walkerHitX = 685;
     return () => {
         motion.tick();
+        walker.tick();
+        sky();
+        ambience();
+        cat();
+        const hitX = Math.round(walker.position().x - 29);
+        if (hitX !== walkerHitX) { motion.set(walkerHit, hitX, 410); walkerHitX = hitX; }
         if (reducedMotion) return;
         const lit = Date.now() % 2900 < 2600;
         if (lastBlink !== lit) ui.show(monitorLight, lit);
@@ -245,6 +267,9 @@ function perkScope(member: CrewMember): string {
     return `On ${category}${member.role === 'pilot' ? ' and Expedition' : ''} jobs:`;
 }
 
+/** Two taps on the same crew card within this many ms add or remove them. */
+const DOUBLE_TAP_MS = 400;
+
 export function showCrew(
     ui: FlightUi, profile: PlaytestProfile, initialId: string, onCrew: (ids: string[]) => void, selectedId: (id: string) => void,
 ): () => void {
@@ -270,6 +295,7 @@ export function showCrew(
     let streak = 0;
     let lastTap = 0;
     let field = false;
+    let cardTaps = { id: '', time: 0, count: 0 };
     const cards = AVAILABLE_CREW.map((member, index) => {
         const cardX = 12 + (index % 3) * 204;
         const cardY = 48 + Math.floor(index / 3) * 270;
@@ -277,6 +303,13 @@ export function showCrew(
             selected = member;
             selectedId(member.id);
             if (member.role === 'scientist') tap();
+            // Double-tap a card to add or remove that crew member. Only the second quick tap
+            // counts, so a longer burst of taps does not keep flipping them on and off.
+            const time = Date.now();
+            cardTaps = cardTaps.id === member.id && time - cardTaps.time < DOUBLE_TAP_MS
+                ? { id: member.id, time, count: cardTaps.count + 1 }
+                : { id: member.id, time, count: 1 };
+            if (cardTaps.count === 2) { toggleSelected(); return; }
             refresh();
         }, { tone: 'tile' });
         const outline = [
@@ -345,19 +378,29 @@ export function showCrew(
     const abilityName = ui.label(abilityCard, [12, 3, 316, 23], '', { display: true, size: 18, color: p.cyan });
     const abilityText = ui.label(abilityCard, [12, 26, 316, 46], '', { size: 13, color: p.text, wrap: true, top: true });
     // One action per state: Add (seat open), Remove (on the crew), or a plain "Crew is full" note.
-    const add = ui.button(inspector, [16, 532, 332, 44], () => {
+    function addSelected(): void {
         if (assigned.includes(selected.id) || assigned.length >= LAUNCH_CREW_SIZE) return;
         assigned = [...assigned, selected.id];
         onCrew(assigned);
         refresh();
         celebrateJoin();
-    }, { tone: 'primary', label: 'Add to Crew' });
-    const remove = ui.button(inspector, [16, 532, 332, 44], () => {
+    }
+    function removeSelected(): void {
         if (!assigned.includes(selected.id)) return;
         assigned = assigned.filter(id => id !== selected.id);
         onCrew(assigned);
         refresh();
-    }, { label: 'Remove from Crew' });
+    }
+    /** Double-tap: on the crew → off; open seat → on; crew full → the "Crew is full" plate shakes. */
+    function toggleSelected(): void {
+        if (assigned.includes(selected.id)) { removeSelected(); play('blip', 0.8); return; }
+        if (assigned.length < LAUNCH_CREW_SIZE) { addSelected(); return; }
+        refresh();
+        play('buzz');
+        motion.shake(fullPlate, 16, 532, 3, 240);
+    }
+    const add = ui.button(inspector, [16, 532, 332, 44], addSelected, { tone: 'primary', label: 'Add to Crew' });
+    const remove = ui.button(inspector, [16, 532, 332, 44], removeSelected, { label: 'Remove from Crew' });
     const fullPlate = ui.box(inspector, [16, 532, 332, 44], p.well);
     ui.icon(fullPlate, 12, 12, 20, 'lock', p.muted);
     ui.label(fullPlate, [44, 0, 276, 44], 'Crew is full', { size: 15, color: p.muted });
@@ -607,9 +650,6 @@ export function showUpgrades(
 }
 
 export const MISSIONS_PER_PAGE = 3;
-
-/** Soft lavender light for the greenhouse dome on the menu painting. */
-const DOME_LIGHT = { r: 0.92, g: 0.8, b: 1, a: 1 };
 
 const DIFFICULTY_NAMES = ['Easy', 'Medium', 'Hard'] as const;
 
