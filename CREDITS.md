@@ -11,14 +11,6 @@ MSP: Mars Station Program, made for the NASA Space Apps Challenge 2026
 - Adam ([@amer-adam](https://github.com/amer-adam)): missions, Mission Selection, Cargo Preparation, Launch Summary,
   Crew and Upgrade redo, launch intro, animations, UI sound effects, and the Radiation and Ice expeditions
 
-## AI assistance
-
-Parts of the code, the generated UI sound effects and the generated pixel sprites listed below were written
-with **Claude** (Anthropic's AI assistant) in Claude Code, working with Adam. Every fact shown in the game was
-checked against the sources listed under *Facts and sources*.
-
-A.R.I.E.S. (the expedition briefings and work-order assistant) can use **Google Gemini** at runtime through the local playtest server (`scripts/playtest.mjs`, `src/services/geminiPlanner.ts`).
-
 ## Audio
 
 | Files | Source | Licence |
