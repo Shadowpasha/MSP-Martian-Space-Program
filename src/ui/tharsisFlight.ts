@@ -960,8 +960,8 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         // A new player gets the tutorial coach: it points at one button at a time. It takes the place
         // of the training guide, except where it sends the player to the guide for an unusual fix.
         const step = training && tutorial.active
-            ? runStep(state, status, { panel, selected, resource: selectedResource, technique: id => methods.get(id) }, tutorial.tourStep) : null;
-        if (step?.done) tutorial.markDone();
+            ? runStep(state, status, { panel, selected, resource: selectedResource, technique: id => methods.get(id), pendingLead: id => pendingLeads.get(id) }, tutorial.tourStep) : null;
+        if (step?.done) tutorial.trainingWon();
         if (!training || !step || step.showGuide) showTrainingGuide(ui, surface, button, state, status, guideVisible || Boolean(step), planning && !panel,
             () => { guideVisible = !guideVisible; dirty = true; }, openAction);
         if (planning && !panel) drawGameMenu();

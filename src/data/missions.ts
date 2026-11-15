@@ -28,14 +28,14 @@ export const WEATHER_SURVEY: MissionSetupInput = {
 export const TRAINING_RUN: MissionSetupInput = {
     ...cloneSetup(WEATHER_SURVEY),
     expedition: 'training',
-    targetSol: 9,
+    targetSol: 5,
     missionGoal: {
         ...WEATHER_SURVEY.missionGoal,
         id: 'tharsis_training',
         title: 'Tharsis Training Run',
         description: 'Record 24 hours of weather at Training Marker and bring it back to the station.',
         durationHours: 24,
-        deadlineSol: 9,
+        deadlineSol: 5,
         requirements: expeditionRequirements('training'),
     },
     crew: AVAILABLE_CREW.filter(member => ['captain', 'scientist', 'pilot', 'engineer'].includes(member.role))
@@ -89,7 +89,7 @@ const laterMissions: MissionOffer[] = nasaMissionOffers();
 export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
     const training: MissionOffer = {
         title: TRAINING_RUN.missionGoal.title,
-        site: 'TUTORIAL · 9 SOLS',
+        site: 'TUTORIAL · 5 SOLS',
         description: 'Practice assigning crew, driving the rover, and surviving with a step-by-step guide.',
         setup: TRAINING_RUN,
         prepared: 'training',
@@ -163,7 +163,10 @@ export function buildLaunchSetup(
             ...member, perk: { ...member.perk }, stageAnchor: { ...(anchors[index] ?? member.stageAnchor) },
         }));
     }
-    setup.cargo = offer.prepared ? normalizeCargo(setup.cargo) : packedInventory(placements);
+    // Training is packed by the player like a real mission. If nothing was packed, its ready-made
+    // cargo is used, so a first-time player can never launch the practice trip empty-handed.
+    const readyMade = offer.prepared === 'team' || (offer.prepared === 'training' && placements.length === 0);
+    setup.cargo = readyMade ? normalizeCargo(setup.cargo) : packedInventory(placements);
     return setup;
 }
 

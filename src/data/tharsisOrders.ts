@@ -56,11 +56,11 @@ export const WORK_ORDERS: readonly WorkOrder[] = [
     { id: 'shield', title: 'Shield the storm room', bay: 'life', category: 'ENG', specialists: ['engineer', 'medic'], shifts: 2,
         description: 'Stack water tanks and panels around the shelter to block radiation.', cost: { energy: 2, res: 2 }, methods: METHODS },
     { id: 'greens', title: 'Pick space veggies', bay: 'life', category: 'BIO', specialists: ['botanist'], shifts: 2,
-        description: 'Harvest fresh veggies and plant new seeds for extra Food and O2.', cost: { energy: 3, water: 1 }, yield: { food: 18, oxygen: 4 }, methods: ['specialist', 'conserve', 'dry'] },
+        description: 'Harvest fresh veggies and plant new seeds for extra Food and O2.', cost: { energy: 3, water: 1 }, yield: { food: 22, oxygen: 5 }, methods: ['specialist', 'conserve', 'dry'] },
     { id: 'water', title: 'Clean recycled water', bay: 'life', category: 'SCI', specialists: ['scientist', 'botanist'], shifts: 2,
-        description: 'Filter and clean used station water so the crew can drink it.', cost: { energy: 3 }, yield: { water: 19 }, methods: ['specialist', 'conserve'] },
+        description: 'Filter and clean used station water so the crew can drink it.', cost: { energy: 3 }, yield: { water: 23 }, methods: ['specialist', 'conserve'] },
     { id: 'air', title: 'Make fresh oxygen', bay: 'life', category: 'ENG', specialists: ['engineer'], shifts: 2,
-        description: 'Turn clean water into breathable O2 air for the station.', cost: { energy: 3, water: 1 }, yield: { oxygen: 23 }, methods: ['specialist', 'conserve'] },
+        description: 'Turn clean water into breathable O2 air for the station.', cost: { energy: 3, water: 1 }, yield: { oxygen: 28 }, methods: ['specialist', 'conserve'] },
     { id: 'solar', title: 'Clean solar panels', bay: 'life', category: 'ENG', specialists: ['engineer'], shifts: 2,
         description: 'Brush dust off the solar panels so the station makes more Power.', cost: { energy: 1 }, yield: { energy: 21 }, exterior: true, methods: ['specialist', 'parallel'] },
     { id: 'spares', title: 'Gather spare parts', bay: 'stores', category: 'ENG', specialists: ['engineer', 'captain'], shifts: 2,
@@ -84,11 +84,12 @@ export const CHECKLIST = [
     { kind: 'assign_crew', label: 'Field crew', bay: 'crew', orders: ['route', 'suits'] },
 ] as const satisfies readonly ChecklistGroup[];
 
+// Training is short on purpose: one job per group, all done on the first Sol, so the whole
+// mission (get ready, drive out, record, drive home) fits in a few Sols.
 const TRAINING_CHECKLIST: readonly ChecklistGroup[] = [
     { ...CHECKLIST[0], orders: ['drive-check'] },
-    { ...CHECKLIST[1], orders: ['sampler', 'calibrate'] },
+    { ...CHECKLIST[1], orders: ['sampler'] },
     { ...CHECKLIST[2], orders: ['audit'] },
-    { ...CHECKLIST[3], orders: ['suits'] },
 ];
 
 export function expeditionChecklist(id: ExpeditionId): readonly ChecklistGroup[] {

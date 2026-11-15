@@ -329,11 +329,11 @@ export const DEFAULT_CREW: CrewMember[] = [
         perk: {
             id: 'perk_green_thumb',
             title: 'Green Thumb',
-            description: '+45% Food & O2 yield and -25% Water cost on Hydroponics (BIO) tasks.',
+            description: '+20% Food & O2 yield and -15% Water cost on Hydroponics (BIO) tasks.',
             bonusCategory: 'BIO',
-            costMultiplier: 0.75,
-            speedMultiplier: 1.3,
-            yieldMultiplier: 1.45,
+            costMultiplier: 0.85,
+            speedMultiplier: 1.2,
+            yieldMultiplier: 1.2,
         },
     },
     {
@@ -448,7 +448,7 @@ export const AVAILABLE_CREW: CrewMember[] = [
         stageAnchor: { x: 0.84, y: 0.63 },
         perk: {
             id: 'perk_field_command', title: 'Field Command', bonusCategory: 'GOAL',
-            description: '−10% cost, +30% progress, and +20% yield on Goal tasks.',
+            description: '−10% cost, +30% progress, and +20% yield on Captain tasks.',
             costMultiplier: 0.9, speedMultiplier: 1.3, yieldMultiplier: 1.2,
         },
     },

@@ -3,12 +3,12 @@ import {
     type Entity, type World,
 } from 'esengine';
 import {
-    SKILL_TREE_UPGRADES, STORAGE_KEYS,
+    AVAILABLE_CREW, SKILL_TREE_UPGRADES, STORAGE_KEYS,
     type MainLoopResult, type MissionSetupInput,
 } from '../contracts/gameContract';
 import type { CargoPlacement } from '../data/cargo';
 import { buildLaunchSetup, cargoProblem, LAUNCH_CREW_SIZE, launchProblem, missionOffers, type MissionOffer } from '../data/missions';
-import { loadProfile, purchaseUpgrade, recordResearch, resetUpgrades, type PlaytestProfile } from '../data/profile';
+import { loadProfile, purchaseProblem, purchaseUpgrade, recordResearch, resetUpgrades, type PlaytestProfile } from '../data/profile';
 import { showCargoPacker } from '../ui/cargoPacker';
 import { showLaunchSummary } from '../ui/launchSummary';
 import {
@@ -21,7 +21,7 @@ import { bindAudio, playMusic, setSoundEnabled, setVolumes, unlockAudio } from '
 import { mountTharsisFlight } from '../ui/tharsisFlight';
 import { showCoach, type Coach } from '../ui/coach';
 import { tutorial } from '../ui/tutorial';
-import { menuStep } from '../ui/tutorialSteps';
+import { menuStep, prepStep, type CoachStep } from '../ui/tutorialSteps';
 import type { VolumeField } from '../ui/audioSettings';
 
 const controllers = new WeakMap<World, { root: Entity; update: () => void }>();
@@ -103,6 +103,8 @@ export const flightSystem = defineSystem(
             if (next.prepared !== 'training') {
                 setup.upgradeIds = [...new Set([...(Array.isArray(setup.upgradeIds) ? setup.upgradeIds : []), ...profile.upgradeIds])];
             }
+            // Chapter 2 of the tutorial ends when the first real mission lifts off.
+            if (next.prepared !== 'training' && tutorial.active && tutorial.chapter === 2) tutorial.finish();
             runSetup = setup;
             draft = [];
             draftKey = '';
@@ -118,7 +120,7 @@ export const flightSystem = defineSystem(
             const root = makeAbsBox(world, sceneRoot, 0, 0, 1280, 720);
             pageRoot = root;
             tickPage = null;
-            tutorial.targets.clear();
+            tutorial.resetPage();
             // The expedition draws its own station and site; the scene's old outpost backdrop stays hidden.
             setNodeDisplayed(world, backdrop, false);
             playMusic(page === 'run' ? 'game' : 'menu');
@@ -133,7 +135,7 @@ export const flightSystem = defineSystem(
                 const setup: MissionSetupInput = { ...runSetup, rules: 'tharsis-expedition' };
                 tickPage = mountTharsisFlight({
                     world, events, input, focus, root, art, setup, profile, onFinish: finish,
-                    onExit: target => { tutorial.leaveRun(); navigate(target); }, onRetry: () => navigate('run'),
+                    onExit: target => navigate(target), onRetry: () => navigate('run'),
                     onVolume: changeVolume, onSound: soundEnabled => {
                         saveProfile({ ...profile, soundEnabled });
                         setSoundEnabled(soundEnabled);
@@ -158,6 +160,7 @@ export const flightSystem = defineSystem(
                         saveProfile(purchaseUpgrade(profile, node));
                         Storage.setJSON(STORAGE_KEYS.ACTIVE_SKILLS, profile.upgradeIds);
                         justUnlocked = node.id;
+                        if (tutorial.chapter === 2) tutorial.lessons.upgradeDone = true;
                         navigate('upgrade');
                     }, (() => {
                         const branch = SKILL_TREE_UPGRADES.find(node => node.id === selectedUpgradeId)!.branch;
@@ -179,17 +182,18 @@ export const flightSystem = defineSystem(
                 case 'cargo': {
                     const chosen = offer;
                     if (!chosen?.setup) { navigate('mission'); break; }
-                    showShell(ui, page, chosen.prepared ? 'Launch Briefing' : 'Cargo Preparation', chosen.prepared ? chosen.title : `${chosen.title} · pack what the mission needs`,
+                    const readyMade = chosen.prepared === 'team';
+                    showShell(ui, page, readyMade ? 'Launch Briefing' : 'Cargo Preparation', readyMade ? chosen.title : `${chosen.title} · pack what the mission needs`,
                         (Object.keys(chosen.setup.missionGoal.requiredEquipment ?? {})[0] ?? 'windSampler') as IconName, navigate);
                     // Prepared missions launch from here, so they check everything. Packed missions only
                     // check the cargo: the crew is picked next, on the Launch Summary.
                     const problem = (placements: CargoPlacement[]) => {
                         const setup = buildLaunchSetup(chosen, profile.crewIds, placements);
                         if (!setup) return 'Choose a mission to launch.';
-                        return chosen.prepared ? launchProblem(setup) : cargoProblem(setup);
+                        return readyMade ? launchProblem(setup) : cargoProblem(setup);
                     };
                     const start = () => launch(chosen, Boolean(chosen.prepared));
-                    if (chosen.prepared) showPreparedManifest(ui, chosen, problem(draft), start);
+                    if (readyMade) showPreparedManifest(ui, chosen, problem(draft), start);
                     // Packed missions go through the Launch Summary before the run.
                     else surfaceTick = showCargoPacker(ui, chosen.setup, draft, next => { draft = next; }, problem, () => navigate('review'));
                     break;
@@ -199,11 +203,13 @@ export const flightSystem = defineSystem(
                     const preview = chosen?.setup ? buildLaunchSetup(chosen, profile.crewIds, draft) : null;
                     if (!chosen || !preview) { navigate('mission'); break; }
                     showShell(ui, page, 'Launch Summary', `${chosen.title} · last check before launch`, 'check', navigate);
-                    surfaceTick = showLaunchSummary(ui, preview, draft, launchProblem(preview), () => launch(chosen, false), () => navigate('cargo'), chosen.image, {
-                        crewIds: profile.crewIds,
-                        // Edit Crew saves the new four to the profile (the Crew page shows the same picks) and redraws the summary.
-                        onCrew: crewIds => { saveProfile({ ...profile, crewIds }); navigate('review'); },
-                    });
+                    // The training run keeps its own crew (the guide names them), so it has no Edit Crew.
+                    surfaceTick = showLaunchSummary(ui, preview, draft, launchProblem(preview), () => launch(chosen, Boolean(chosen.prepared)), () => navigate('cargo'), chosen.image,
+                        chosen.prepared ? undefined : {
+                            crewIds: profile.crewIds,
+                            // Edit Crew saves the new four to the profile (the Crew page shows the same picks) and redraws the summary.
+                            onCrew: crewIds => { saveProfile({ ...profile, crewIds }); navigate('review'); },
+                        });
                     break;
                 }
                 case 'settings':
@@ -233,15 +239,32 @@ export const flightSystem = defineSystem(
                         tutorial.finished ? undefined : () => { tutorial.begin(); navigate('menu'); });
             }
             // The first-time tutorial: ARIES points at the next button on this page.
+            // The step is worked out again every frame and redrawn when it changes, so the coach
+            // follows whatever the page does (a card picked, an item packed, a popup opened).
             let coach: Coach | null = null;
-            let coachStale = true;
+            let shownStep: string | null = null;
+            const currentStep = (): CoachStep | null => {
+                if (!tutorial.active) return null;
+                const launchView = { lessons: tutorial.lessons, missionPopup: tutorial.view.missionPopup, launching: tutorial.view.launching, cargo: tutorial.view.cargo };
+                if (tutorial.chapter === 1) return menuStep(page, { welcomed: tutorial.welcomed, ...launchView });
+                const node = SKILL_TREE_UPGRADES.find(candidate => candidate.id === selectedUpgradeId)!;
+                return prepStep(page, {
+                    ...launchView, crewIds: profile.crewIds, crewSize: LAUNCH_CREW_SIZE, selectedCrewId,
+                    freeCrewId: AVAILABLE_CREW.find(member => !profile.crewIds.includes(member.id))?.id ?? null,
+                    upgrade: {
+                        canBuySelected: !purchaseProblem(profile, node),
+                        buyableId: SKILL_TREE_UPGRADES.find(candidate => candidate.branch === node.branch && !purchaseProblem(profile, candidate))?.id ?? null,
+                    },
+                });
+            };
             const refreshCoach = () => {
-                coachStale = false;
+                const step = currentStep();
+                if ((step?.id ?? null) === shownStep) return;
+                shownStep = step?.id ?? null;
                 coach?.dispose();
-                const step = tutorial.active ? menuStep(page, { welcomed: tutorial.welcomed, trainingReady: offer?.prepared === 'training' }) : null;
                 coach = step && showCoach(ui, root, step, key => tutorial.targets.get(key), {
-                    next: () => { tutorial.welcomed = true; coachStale = true; },
-                    skip: () => { tutorial.finish(); coachStale = true; },
+                    next: () => tutorial.read(step.id),
+                    skip: () => tutorial.finish(),
                 });
             };
             tickPage = () => {
@@ -252,7 +275,7 @@ export const flightSystem = defineSystem(
                     else if (page === 'review') navigate('cargo');
                     else if (page !== 'menu') navigate('menu');
                 }
-                if (coachStale) refreshCoach();
+                refreshCoach();
                 coach?.tick();
                 ui.updateFocus(input);
             };
