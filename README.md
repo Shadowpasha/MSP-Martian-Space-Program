@@ -19,33 +19,33 @@
 | **Radiation Detective** | Medium | Record 72h of radiation during a solar storm |
 | **Ice Hunter** | Hard | Drill ice cores at Jezero Crater in deep cold |
 
-![Mission Selection](docs/screenshots/mission-select.jpg)
+<img src="docs/screenshots/mission-select.jpg" alt="Mission Selection" width="100%">
 
-![Launch, cruise and landing](docs/gifs/launch.gif)
+<img src="docs/gifs/launch.gif" alt="Launch, cruise and landing" width="100%">
 
 ## How It Plays
 
 **1. Pick your crew.** Choose 4 of 6 real NASA astronauts, each with their own skill.
 
-![Crew Selection](docs/screenshots/crew-select.jpg)
+<img src="docs/screenshots/crew-select.jpg" alt="Crew Selection" width="100%">
 
-![Launch Summary](docs/screenshots/launch-summary.jpg)
+<img src="docs/screenshots/launch-summary.jpg" alt="Launch Summary" width="100%">
 
 **2. Pack the rover.** Fit the instrument, food, water and oxygen into a 6×4 cargo grid.
 
-![Packing the cargo bay by hand](docs/gifs/cargo.gif)
+<img src="docs/gifs/cargo.gif" alt="Packing the cargo bay by hand" width="100%">
 
 **3. Run the station.** Each Sol, handle the morning news, assign crew to jobs, and send two of them out in the rover.
 
-![Station crew at work, then the airlock to the expedition site](docs/gifs/station.gif)
+<img src="docs/gifs/station.gif" alt="Station crew at work, then the airlock to the expedition site" width="100%">
 
-![Morning Briefing](docs/screenshots/morning-briefing.jpg)
+<img src="docs/screenshots/morning-briefing.jpg" alt="Morning Briefing" width="100%">
 
-![End of Sol crew report](docs/gifs/endsol.gif)
+<img src="docs/gifs/endsol.gif" alt="End of Sol crew report" width="100%">
 
 **4. Upgrade.** Spend research points on power, survival, operations and crew upgrades.
 
-![Unlocking an upgrade](docs/gifs/upgrade.gif)
+<img src="docs/gifs/upgrade.gif" alt="Unlocking an upgrade" width="100%">
 
 **ARIES**, the station robot, guides new players step by step and can give live advice through Gemini.
 
