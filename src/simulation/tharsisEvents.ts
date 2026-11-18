@@ -1,5 +1,6 @@
 import { EXPEDITIONS, expeditionOf, type Expedition } from '../data/expeditions';
-import type { CargoItemId, ResourcePool } from '../contracts/gameContract';
+import { proceduralDailyEvent, proceduralLandingEvent } from '../data/eventLibrary';
+import { cloneValue, type CargoItemId, type ResourcePool } from '../contracts/gameContract';
 import { CARGO_BY_ID } from '../data/cargo';
 import { formatResource, missionDeadline, resourceEntries } from '../data/missions';
 import { appendLog, applyResourceDelta, canAffordCost, clamp, resourceChanges, round1, spend } from './stateOps';
@@ -22,6 +23,10 @@ const EFFECTS = {
     crew_stress: { morale: -2 },
     exposure: { radiation: 3 },
     field_reset: { resetsSurvey: true },
+    resupply_water: { resource: 'water', amount: 14 },
+    resupply_power: { resource: 'energy', amount: 16 },
+    resupply_oxygen: { resource: 'oxygen', amount: 14 },
+    resupply_rad: { radiation: -12, morale: 8 },
 } satisfies Record<string, EffectRule>;
 
 const POSITIVE_BANDS: Record<string, readonly (keyof typeof EFFECTS)[]> = {
@@ -77,7 +82,7 @@ export interface SurveyBriefing {
     observation: string;
     system: string;
     area: Area;
-    source: 'Mission control' | 'Local' | 'Gemini';
+    source: 'Mission control' | 'Local';
     choices: SurveyChoice[];
 }
 
@@ -484,7 +489,7 @@ const LANDING_EVENTS: readonly LocalScenario[] = [
 
 export function authoredBriefing(
     sol: number, area: Area, seed: number, storm: 'onset' | 'peak' | 'clearing' | null,
-    expedition: Expedition = EXPEDITIONS.tharsis, deadline = 16, atSurveySite = false,
+    expedition: Expedition = EXPEDITIONS.tharsis, deadline = 16, atSurveySite = false, recentSystems: readonly string[] = [],
 ): SurveyBriefing {
     if (sol === 1) {
         const missionLine = expedition.intro.replace('{deadline}', String(deadline));
@@ -498,6 +503,10 @@ export function authoredBriefing(
                 ],
             };
         }
+        if ((seed >>> 0) % 5 !== 0) {
+            const generated = proceduralLandingEvent(seed);
+            return { ...generated, area, observation: `${generated.observation} ${missionLine}` };
+        }
         const landing = LANDING_EVENTS[(seed >>> 0) % LANDING_EVENTS.length]!;
         const rotation = ((seed >>> 0) >>> 4) % landing.choices.length;
         return {
@@ -510,6 +519,20 @@ export function authoredBriefing(
         };
     }
     if (expedition.id === 'training') return trainingBriefing(sol, area, atSurveySite);
+    if (expedition.id === 'infinite' && sol > 1 && sol % 10 === 0) {
+        return {
+            title: `Sol ${sol} orbital resupply drop`,
+            system: 'mission control',
+            area,
+            source: 'Mission control',
+            observation: 'A supply pod entered Elysium airspace. Select one emergency crate for immediate recovery.',
+            choices: [
+                choice('Recover Water & Hydro Crate', 'Retrieve the insulated water bladder and tray nutrients.', 'Recovered +14 Water for station reserves.', 'resupply_water'),
+                choice('Recover Fuel-Cell & Power Crate', 'Retrieve the high-density fuel cell pack.', 'Recovered +16 Power for station reserves.', 'resupply_power'),
+                choice('Recover Medical & Scrub Crate', 'Retrieve radiation chelation kits and morale rations.', 'Crew radiation dropped and morale surged.', 'resupply_rad'),
+            ],
+        };
+    }
     if (storm && expedition.hazard.kind === 'solar') {
         const title = storm === 'onset' ? 'Solar particle storm' : storm === 'peak' ? 'Storm at peak flux' : 'Last Sol of the storm';
         const observation = area === 'rover'
@@ -529,6 +552,9 @@ export function authoredBriefing(
             choice('Isolate nonessential circuits', 'Use the low-load storm checklist.', 'The lower electrical load preserved reserve power.', 'power_saved'),
             choice('Run at full output', 'Keep all lights, transmitters, and work circuits live.', 'The extra load drained reserves during the alert.', 'power_loss', 'none', 2),
         ] };
+    }
+    if (((seed >>> 0) + sol) % 5 !== 0) {
+        return proceduralDailyEvent(seed, sol, area, recentSystems, atSurveySite);
     }
     const deck = [...(area === 'station' ? STATION_EVENTS : ROVER_EVENTS)];
     let rng = ((seed >>> 0) ^ (area === 'station' ? 0x517cc1b7 : 0x85ebca6b)) >>> 0;
@@ -585,7 +611,8 @@ export function nextBriefing(state: TharsisState): SurveyBriefing {
     const day = stormDay(state);
     return authoredBriefing(state.sol, state.tharsis.rover ? 'rover' : 'station', state.tharsis.seed,
         day === 1 ? 'onset' : day === 2 ? 'peak' : day === 3 ? 'clearing' : null,
-        expeditionOf(state.tharsis.expedition), missionDeadline(state), state.tharsis.rover?.phase === 'site');
+        expeditionOf(state.tharsis.expedition), missionDeadline(state), state.tharsis.rover?.phase === 'site',
+        state.tharsis.recentSystems);
 }
 
 export function commitmentLabel(choice: SurveyChoice): string {
@@ -645,7 +672,7 @@ export function validateBriefing(value: unknown, state: TharsisState): SurveyBri
             return (effect.amount ?? 0) < 0 || (effect.radiation ?? 0) > 0 || (effect.morale ?? 0) < 0 || effect.resetsSurvey;
         }));
     const distinct = new Set(choices.map(choice => JSON.stringify([choice.commitment, choice.cargo, [...choice.effects].sort((a, b) => a.id.localeCompare(b.id))])));
-    return free && distinct.size > 1 ? { title, observation, system, area, source: 'Gemini', choices } : null;
+    return free && distinct.size > 1 ? { title, observation, system, area, source: 'Local', choices } : null;
 }
 
 export function allowedPositiveEffects(system: string): readonly string[] {
@@ -673,7 +700,7 @@ export function briefingPreview(state: TharsisState): { choice: SurveyChoice; ou
     const index = state.tharsis.previewedChoice;
     if (index === null || state.tharsis.phase !== 'briefing') return null;
     const choice = state.tharsis.briefing.choices[index]!;
-    return { choice, outcome: applyBriefingChoice(structuredClone(state), choice) };
+    return { choice, outcome: applyBriefingChoice(cloneValue(state), choice) };
 }
 
 function applyBriefingChoice(state: TharsisState, choice: SurveyChoice): string[] {

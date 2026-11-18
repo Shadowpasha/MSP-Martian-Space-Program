@@ -1,4 +1,4 @@
-import { GAMEPLAY_UPGRADES, type CargoInventory, type CargoItemId, type ConditionState, type CrewMember, type ResourcePool } from '../contracts/gameContract';
+import { cloneValue, GAMEPLAY_UPGRADES, type CargoInventory, type CargoItemId, type ConditionState, type CrewMember, type ResourcePool } from '../contracts/gameContract';
 import { CARGO_BY_ID, CARGO_ITEMS, normalizeCargo } from '../data/cargo';
 import type { StationEquipmentId } from '../data/tharsisEquipment';
 import { formatResource, missionDeadline, resourceEntries, RESOURCE_LABELS } from '../data/missions';
@@ -80,8 +80,10 @@ export function createTharsis(state: OutpostGameState, seed: number, id: Expedit
         seed: seed >>> 0, stormStart: expedition.hazard.firstSol + (seed >>> 0) % expedition.hazard.spread, phase: 'briefing', work: [], completed: {},
         disabledEquipment: {}, dutyStreak: {},
         abilities: { doubleShiftStarts: {}, used: {}, trayHarvestSol: null, stormOverrideSol: null },
-        upgrades: { batteryCharged: false, batteryTransferSol: null, electrolysisSol: null, emergencyStoresUsed: false,
-            recorderUsed: false, crossTraining: null, rotation: null },
+        upgrades: {
+            batteryCharged: false, batteryTransferSol: null, electrolysisSol: null, emergencyStoresUsed: false,
+            recorderUsed: false, crossTraining: null, rotation: null
+        },
         fieldPair: [], rover: null, hours: 0, returnedWithData: false, shelter: 'off',
         briefing: authoredBriefing(1, 'station', seed, null, expedition, missionDeadline(state)), previewedChoice: null,
         stormBriefing: null, outcome: [], reportSol: 0, lastReportCrew: [],
@@ -116,6 +118,11 @@ export function applyForecast(state: OutpostGameState, run: TharsisRun): void {
 }
 
 export function stormDay(state: TharsisState, sol = state.sol): number {
+    if (state.tharsis.expedition === 'infinite' && sol >= state.tharsis.stormStart) {
+        const period = sol >= 25 ? 6 : 7;
+        const offset = (sol - state.tharsis.stormStart) % period;
+        return offset >= 0 && offset < 3 ? offset + 1 : 0;
+    }
     return hazardDay(state.tharsis.stormStart, sol);
 }
 
@@ -363,7 +370,7 @@ function degradeArea(state: TharsisState, crew: CrewMember[], conditions: Condit
     const loss = round1(morale * state.skillModifiers.moraleDecayMult);
     changeAreaMorale(crew, conditions, -loss);
     const reasons = [radiation.health && `${radiation.level.toLowerCase()} radiation`, unheated && 'not enough heat',
-        shortOnSupplies && !unheated && 'low food, water, or air'].filter(Boolean).join(' and ');
+    shortOnSupplies && !unheated && 'low food, water, or air'].filter(Boolean).join(' and ');
     report.push(`${area} crew · ${reasons} · −${health} HP and −${loss} Morale per living crew member.`);
 }
 
@@ -480,7 +487,7 @@ export function resourceForecast(state: TharsisState, area: Area) {
     if (area === 'rover' && state.tharsis.rover) {
         return { ...budget, tasks, recovery: { ...EMPTY_POOLS } };
     }
-    const predicted = structuredClone(state);
+    const predicted = cloneValue(state);
     const recovery = { ...EMPTY_POOLS };
     const unheated = stationUpkeep(predicted, budget, [], recovery);
     advanceWork(predicted, { storm: stormDay(state) > 0, unheated }, [], tasks);
@@ -549,9 +556,9 @@ function advanceRover(state: TharsisState, day: number, report: string[]): strin
     }
     const hold = unheated ? 'insufficient heating power' : !funded ? 'insufficient field supplies' : restricted ? 'crew sheltering through the storm' :
         lowMorale ? 'crew resting due to low Morale' : rover.resting ? 'planned field rest' :
-        rover.phase === 'site' && radiationEffects(rover.conditions.radiation).exteriorHold ? 'radiation above field work limit' :
-        rover.interrupted ? 'field systems required a reset' : crew.some(member => member.health < 40) ? 'field crew needs treatment' :
-        rover.phase === 'site' && !rover.cargo[expeditionFor(state).instrument] ? `${CARGO_BY_ID[expeditionFor(state).instrument].name} missing` : null;
+            rover.phase === 'site' && radiationEffects(rover.conditions.radiation).exteriorHold ? 'radiation above field work limit' :
+                rover.interrupted ? 'field systems required a reset' : crew.some(member => member.health < 40) ? 'field crew needs treatment' :
+                    rover.phase === 'site' && !rover.cargo[expeditionFor(state).instrument] ? `${CARGO_BY_ID[expeditionFor(state).instrument].name} missing` : null;
     for (const member of crew) if (member.health > 0) member.stamina = clamp(member.stamina + (hold ? 12 : -7), 20, 100);
     applyDutyMorale(state, crew, rover.conditions, new Set(hold ? [] : rover.crewIds), 'Rover', report);
     if (rover.conditions.morale <= 0) return 'Field crew Morale collapsed before docking.';
@@ -655,7 +662,18 @@ export function resolveTharsisSol(state: TharsisState, report: string[]) {
     }
     const collapse = fieldFailure ?? (state.conditions.radiation >= 100 ? 'Radiation got too high at the station.' :
         state.resources.oxygen <= 0 ? 'The station ran out of oxygen.' : state.conditions.morale <= 0 ? 'The crew got too stressed to keep going.' :
-        stationCrew(state).every(member => member.health <= 0) ? 'The station crew got too hurt to continue.' : null);
+            stationCrew(state).every(member => member.health <= 0) ? 'The station crew got too hurt to continue.' : null);
+    if (state.tharsis.expedition === 'infinite') {
+        if (!collapse && state.tharsis.returnedWithData) {
+            state.tharsis.returnedWithData = false;
+            state.tharsis.hours = 0;
+            state.tasksCompletedCount += 2;
+            applyResourceDelta(state.resources, { energy: 12, res: 4 });
+            changeAreaMorale(stationCrew(state), state.conditions, 8);
+            report.push('Survey cycle logged · +12 Power, +4 Materials, +8% Morale.');
+        }
+        return { completed, collapse };
+    }
     if (!collapse && state.tharsis.returnedWithData && !missing.length) state.goal.completed = true;
     if (!state.goal.completed && state.tharsis.returnedWithData && missing.length) report.push(`Docked · restore reserves: ${missing.join(', ')}.`);
     return { completed, collapse };

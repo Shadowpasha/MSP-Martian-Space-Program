@@ -3,7 +3,7 @@ import test from 'node:test';
 import { AVAILABLE_CREW, DEFAULT_CREW, DEFAULT_MARS_SETUP, GAMEPLAY_UPGRADES, SKILL_TREE_UPGRADES, UPGRADE_BRANCHES, computeSkillModifiers } from '../src/contracts/gameContract';
 import { packedInventory, placementProblem, rotatedCells, type CargoPlacement } from '../src/data/cargo';
 import { buildLaunchSetup, launchProblem, missionOffers } from '../src/data/missions';
-import { loadProfile, purchaseProblem, purchaseUpgrade, resetUpgrades, spentResearch } from '../src/data/profile';
+import { isVeteran, loadProfile, purchaseProblem, purchaseUpgrade, recordResearch, resetUpgrades, spentResearch } from '../src/data/profile';
 import { createInitialGameState, isTharsis } from '../src/simulation/solEngine';
 import { hasUpgrade } from '../src/simulation/tharsisUpgrades';
 
@@ -14,11 +14,11 @@ const tank: CargoPlacement = { id: 3, item: 'oxygenTanks', x: 3, y: 0, rotation:
 const starterCrew = DEFAULT_CREW.map(member => member.id);
 const playableOffer = missionOffers().find(offer => offer.setup?.expedition === 'tharsis')!;
 
-test('the picker offers optional training, three expeditions, and three upcoming missions', () => {
+test('the picker offers optional training, six expeditions, and infinite survival', () => {
     const offers = missionOffers();
-    assert.equal(offers.length, 7);
+    assert.equal(offers.length, 8);
     assert.deepEqual(offers.map(offer => offer.title), [
-        'Tharsis Training Run', 'Tharsis Ridge Weather Survey', 'Radiation Detective', 'Ice Hunter', 'Shadow Ice', 'Breathe Easy', 'Space Garden',
+        'Tharsis Training Run', 'Tharsis Ridge Weather Survey', 'Radiation Detective', 'Ice Hunter', 'Shadow Ice', 'Breathe Easy', 'Space Garden', 'Infinite Survival',
     ]);
     const training = offers[0]!;
     const trainingSetup = buildLaunchSetup(training, [], [])!;
@@ -27,9 +27,8 @@ test('the picker offers optional training, three expeditions, and three upcoming
     assert.equal(launchProblem(trainingSetup), null);
     assert.deepEqual(trainingSetup.upgradeIds, [GAMEPLAY_UPGRADES.electrolysis]);
     const playable = offers.slice(1).filter(offer => offer.setup);
-    assert.equal(playable.length, 3);
-    assert.deepEqual(playable.map(offer => offer.difficulty), [1, 2, 3]);
-    assert.deepEqual(playable.map(offer => offer.setup!.expedition), ['tharsis', 'radiation', 'ice']);
+    assert.equal(playable.length, 7);
+    assert.deepEqual(playable.map(offer => offer.setup!.expedition), ['tharsis', 'radiation', 'ice', 'shadow_ice', 'oxygen_maker', 'space_garden', 'infinite']);
     assert.ok(playable.every(offer => offer.setup!.rules === 'tharsis-expedition'));
     assert.equal(playableOffer.setup?.missionGoal.deadlineSol, 20);
     assert.ok(offers.slice(1).every(offer => offer.briefing));
@@ -87,16 +86,17 @@ test('crew, cargo and one paid upgrade transfer into the built-in survey', () =>
 test('each upgrade branch forks and rejoins and purchases debit and unlock together', () => {
     for (const branch of UPGRADE_BRANCHES) {
         const nodes = SKILL_TREE_UPGRADES.filter(node => node.branch === branch);
-        assert.deepEqual(nodes.map(node => node.tier), [1, 2, 2, 3, 3, 4]);
-        assert.deepEqual(nodes.map(node => node.cost), [3, 5, 5, 7, 7, 10]);
-        assert.deepEqual(nodes[5]!.prerequisites, [nodes[3]!.id, nodes[4]!.id]);
-        let profile = loadProfile({ researchPoints: 37 }, [], false);
-        assert.match(purchaseProblem(profile, nodes[5]!)!, /required/);
+        assert.deepEqual(nodes.map(node => node.tier), [1, 2, 2, 3, 3, 3, 4, 4, 4, 5]);
+        assert.deepEqual(nodes.map(node => node.cost), [3, 4, 4, 6, 6, 6, 8, 8, 8, 11]);
+        assert.deepEqual(nodes[4]!.prerequisites, [nodes[1]!.id, nodes[2]!.id]);
+        assert.deepEqual(nodes[9]!.prerequisites, [nodes[6]!.id, nodes[7]!.id, nodes[8]!.id]);
+        let profile = loadProfile({ researchPoints: 64 }, [], false);
+        assert.match(purchaseProblem(profile, nodes[9]!)!, /required/);
         for (const node of nodes) {
             const before = computeSkillModifiers(profile.upgradeIds);
             profile = purchaseUpgrade(profile, node);
             assert.ok(profile.upgradeIds.includes(node.id));
-            if (node.tier === 2 || node.tier === 3) assert.notDeepEqual(before, computeSkillModifiers(profile.upgradeIds));
+            if (node.tier >= 2 && node.tier <= 4) assert.notDeepEqual(before, computeSkillModifiers(profile.upgradeIds));
             else assert.deepEqual(before, computeSkillModifiers(profile.upgradeIds));
             assert.equal(purchaseUpgrade(profile, node), profile);
         }
@@ -119,4 +119,35 @@ test('resetting upgrades refunds every point spent and clears the tree', () => {
     assert.deepEqual(reset.upgradeIds, []);
     assert.equal(reset.researchPoints, 40);
     assert.equal(resetUpgrades(reset), reset, 'nothing to reset leaves the profile unchanged');
+});
+
+test('Tier 5 unlocks with any two Tier 4 nodes, and runs award crew veterancy and 3-star mastery', () => {
+    const infra = SKILL_TREE_UPGRADES.filter(n => n.branch === 'Infrastructure');
+    let profile = loadProfile({ researchPoints: 100 }, [], false);
+    for (const node of infra.slice(0, 8)) profile = purchaseUpgrade(profile, node);
+    assert.equal(purchaseProblem(profile, infra[9]!), null);
+    profile = purchaseUpgrade(profile, infra[9]!);
+    assert.ok(profile.upgradeIds.includes(infra[9]!.id));
+
+    const result = {
+        outcome: 'victory' as const,
+        reason: 'Done early',
+        planet: 'mars' as const,
+        solReached: 15,
+        targetSol: 20,
+        finalResources: { energy: 40, food: 20, water: 20, oxygen: 50, res: 10 },
+        finalMorale: 80,
+        finalRadiation: 15,
+        score: 2000,
+        researchPointsEarned: 10,
+        timeline: [],
+        lessons: [],
+    };
+    profile = recordResearch(profile, 'run-1', result, false, { missionId: 'tharsis_weather_survey', crewIds: ['crew_engineer', 'crew_pilot'], targetSol: 20 });
+    assert.equal(profile.missionStars['tharsis_weather_survey'], 3);
+    assert.equal(profile.crewSols['crew_engineer'], 15);
+    assert.equal(isVeteran(profile, 'crew_engineer'), false);
+    profile = recordResearch(profile, 'run-2', result, false, { missionId: 'tharsis_weather_survey', crewIds: ['crew_engineer'], targetSol: 20 });
+    assert.equal(profile.crewSols['crew_engineer'], 30);
+    assert.equal(isVeteran(profile, 'crew_engineer'), true);
 });

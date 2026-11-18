@@ -55,7 +55,8 @@ test('Auto Fill fills every supply meter for the whole trip on each packed missi
         const short = (packed: readonly { item: keyof typeof CARGO_BY_ID }[]) => (['food', 'water', 'oxygen'] as const).filter(key => {
             const amount = packed.reduce((sum, piece) => sum + (CARGO_BY_ID[piece.item].resources?.[key] ?? 0), setup.startingResources[key]);
             const perSol = key === 'food' ? 4 * FOOD_PER_CREW_PER_SOL : key === 'water' ? 4 * WATER_PER_CREW_PER_SOL : OXYGEN_PER_SOL;
-            return Math.floor(amount / perSol) < setup.missionGoal.deadlineSol;
+            const targetSols = setup.expedition === 'infinite' ? 20 : setup.missionGoal.deadlineSol;
+            return Math.floor(amount / perSol) < targetSols;
         });
         const packed = autoFillCargo([], offer.setup!.missionGoal.requiredEquipment ?? {}, short);
         assert.deepEqual(short(packed), [], offer.title);

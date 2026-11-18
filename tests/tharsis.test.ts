@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AVAILABLE_CREW, DEFAULT_CREW, type CrewMember } from '../src/contracts/gameContract';
+import { AVAILABLE_CREW, DEFAULT_CREW, SKILL_TREE_UPGRADES, type CrewMember } from '../src/contracts/gameContract';
 import { WEATHER_SURVEY } from '../src/data/missions';
 import { CHECKLIST, ORDER_BY_ID, type Technique } from '../src/data/tharsisOrders';
 import { advanceSol, commitBriefing, continueAfterOutcome, continueAfterReport, createInitialGameState, isTharsis } from '../src/simulation/solEngine';
@@ -8,7 +8,8 @@ import { applyForecast, defaultLoad, dispatchProblem, dispatchRover, emergencyRe
 import { choiceBlock, resolveBriefing, validateBriefing } from '../src/simulation/tharsisEvents';
 import { acceptCustomWork, acceptWork, assignWork, chooseFieldCrew, findOrder, orderBlock, updateChecklist, workQuote } from '../src/simulation/tharsisWork';
 import { awardResearch, loadProfile } from '../src/data/profile';
-import { discussWork, draftSurveyBriefing } from '../src/services/tharsisAries';
+import { EVENT_LIBRARY_COUNTS, proceduralDailyEvent, proceduralLandingEvent } from '../src/data/eventLibrary';
+import { discussWork } from '../src/services/tharsisAries';
 
 function survey(seed = 0, crew: CrewMember[] = DEFAULT_CREW): TharsisState {
     const state = createInitialGameState({ ...WEATHER_SURVEY, crew }, [], seed);
@@ -411,38 +412,29 @@ test('Gemini choices are validated, hidden until committed, location-scoped, and
     assert.match(resolveBriefing(state, 0)!, /pending/);
 });
 
-test('A.R.I.E.S. can brainstorm, draft a custom procedure, and retain conversational context', async t => {
-    const previous = Object.getOwnPropertyDescriptor(globalThis, 'location');
-    Object.defineProperty(globalThis, 'location', { configurable: true, value: new URL('http://localhost:4173/') });
-    t.after(() => previous ? Object.defineProperty(globalThis, 'location', previous) : Reflect.deleteProperty(globalThis, 'location'));
+test('A.R.I.E.S. negotiates custom tasks, counter-offers, and salvage offline without LLMs', () => {
     const state = survey();
     plan(state);
     state.resources.res = 0;
-    const conversation = [{ speaker: 'crew' as const, text: 'We have no materials. Is there hardware we can give up?' }];
-    const task = { title: 'Strip auxiliary solar string', description: 'Isolate its feed and reclaim wiring and mounting rails.', category: 'ENG', shifts: 2,
-        cost: { energy: 3 }, output: { res: 9 }, decommission: 'auxiliary-solar' };
-    const answers: object[] = [
-        { message: 'We can give up some solar output. How much power can you reserve for the storm?' },
-        { message: 'Then the auxiliary string is a workable trade. Keep a battery in reserve.', draft: { kind: 'custom', task, leadRole: 'engineer' } },
-        { message: 'A partial strip takes less time.', draft: { kind: 'custom', task: { ...task, shifts: 1, output: { res: 6 } }, leadRole: 'engineer' } },
-    ];
-    t.mock.method(globalThis, 'fetch', async (_url: string, options?: RequestInit) => {
-        if (!options?.method) return Response.json({ model: 'test-model' });
-        const body = JSON.parse(String(options.body));
-        assert.equal(body.kind, 'discussion');
-        assert.match(body.systemInstruction, /Brainstorm/);
-        const snapshot = JSON.parse(body.input);
-        assert.equal(snapshot.resources.res, 0);
-        assert.equal(snapshot.recentConversation[0].text, conversation[0]!.text);
-        return Response.json({ text: JSON.stringify(answers.shift()) });
-    });
-    const initial = await discussWork(state, null, conversation, null);
-    assert.equal(initial?.draft, undefined);
-    const draft = (await discussWork(state, null, conversation, null))?.draft;
-    assert.equal(draft?.kind, 'custom');
-    assert.equal(draft?.leadId, 'crew_engineer');
-    const revised = (await discussWork(state, null, conversation, draft ?? null))?.draft;
-    assert.equal(revised?.kind === 'custom' && revised.task.output.res, 6);
+    const salvageTurn = discussWork(state, null, [{ speaker: 'crew', text: 'We need to salvage hardware for materials' }], null);
+    assert.equal(salvageTurn.draft?.kind, 'custom');
+    assert.ok(salvageTurn.draft?.kind === 'custom' && salvageTurn.draft.task.decommission);
+    assert.equal(salvageTurn.draft?.leadId, 'crew_engineer');
+
+    const waterTurn = discussWork(state, null, [{ speaker: 'crew', text: 'We need water urgently' }], null);
+    assert.equal(waterTurn.draft?.kind, 'custom');
+    assert.ok(waterTurn.draft?.kind === 'custom' && (waterTurn.draft.task.output.water ?? 0) > 0);
+
+    const stretched = discussWork(state, null, [{ speaker: 'crew', text: 'Cut cost and stretch it' }], waterTurn.draft ?? null);
+    assert.equal(stretched.draft?.kind, 'custom');
+    assert.ok(stretched.draft?.kind === 'custom' && stretched.draft.task.shifts > 1);
+
+    const rushed = discussWork(state, null, [{ speaker: 'crew', text: 'Make it faster' }], stretched.draft ?? null);
+    assert.equal(rushed.draft?.kind, 'custom');
+    assert.ok(rushed.draft?.kind === 'custom' && rushed.draft.task.shifts === 1);
+
+    const cleared = discussWork(state, null, [{ speaker: 'crew', text: 'Cancel' }], rushed.draft ?? null);
+    assert.equal(cleared.draft, null);
     assert.equal(state.tharsis.work.length, 0);
     assert.deepEqual(state.tharsis.disabledEquipment, {});
 });
@@ -523,35 +515,37 @@ test('the resource forecast counts the final fractional shift as finishing this 
     assert.ok(state.lastSolReport.includes('Gather spare parts complete · Bernard · +9 Materials.'));
 });
 
-test('a live briefing can accompany authored storm warnings without replacing the storm', async t => {
-    const previous = Object.getOwnPropertyDescriptor(globalThis, 'location');
-    Object.defineProperty(globalThis, 'location', { configurable: true, value: new URL('http://localhost:4173/') });
-    t.after(() => previous ? Object.defineProperty(globalThis, 'location', previous) : Reflect.deleteProperty(globalThis, 'location'));
-    const state = survey();
-    setDeparture(state, 7);
-    assert.equal(advanceSol(state).advanced, true);
-    assert.equal(state.tharsis.briefing.system, 'storm');
-    t.mock.method(globalThis, 'fetch', async (_url: string, options?: RequestInit) => {
-        if (!options?.method) return Response.json({ model: 'test-model' });
-        const body = JSON.parse(String(options.body));
-        const snapshot = JSON.parse(body.input);
-        assert.equal(body.kind, 'briefing');
-        assert.equal(snapshot.area, 'station');
-        assert.equal(snapshot.lastSol, 7);
-        assert.equal(snapshot.stormDay, 1);
-        assert.equal(snapshot.conditions.temperatureC, -76);
-        assert.equal(snapshot.dailyBudget.heating, 2);
-        return Response.json({ text: JSON.stringify({ title: 'Bus fault', observation: 'One solar branch draws current with the relay off.', system: 'solar power', choices: [
-            { action: 'Isolate branch', detail: 'Open the local breaker.', result: 'The fault stopped drawing power.', commitment: 'none', cargo: 'none', effects: [{ id: 'power_saved', severity: 1 }] },
-            { action: 'Retry the inverter', detail: 'Run the same startup sequence.', result: 'The faulty branch consumed reserves.', commitment: 'power', cargo: 'none', effects: [{ id: 'power_loss', severity: 1 }] },
-        ] }) });
-    });
-    const generated = await draftSurveyBriefing(state);
-    assert.ok(generated);
-    assert.equal(commitBriefing(state, 8, generated), true);
-    assert.equal(state.tharsis.stormBriefing?.title, 'Regional dust storm');
-    assert.equal(state.tharsis.briefing.source, 'Gemini');
-    assert.equal(stormDay(state), 1);
+test('the procedural event library provides thousands of valid landing and daily events and 40-node upgrade trees', () => {
+    const total = EVENT_LIBRARY_COUNTS.landingProcedural + EVENT_LIBRARY_COUNTS.stationProcedural + EVENT_LIBRARY_COUNTS.roverProcedural;
+    assert.ok(EVENT_LIBRARY_COUNTS.landingProcedural >= 2000);
+    assert.ok(EVENT_LIBRARY_COUNTS.stationProcedural >= 2000);
+    assert.ok(EVENT_LIBRARY_COUNTS.roverProcedural >= 2000);
+    assert.ok(total >= 6000);
+
+    const landingTitles = new Set<string>();
+    for (let s = 1; s <= 40; s++) {
+        const ev = proceduralLandingEvent(s * 977);
+        landingTitles.add(`${ev.title}|${ev.observation}`);
+        assert.ok(ev.title.length <= 52);
+        assert.ok(ev.choices.length >= 2);
+        assert.ok(ev.choices.some(c => c.commitment === 'none'));
+    }
+    assert.ok(landingTitles.size >= 30);
+
+    const dailyTitles = new Set<string>();
+    for (let sol = 2; sol <= 20; sol++) {
+        const st = proceduralDailyEvent(101, sol, 'station', [], false);
+        const rv = proceduralDailyEvent(101, sol, 'rover', [], true);
+        dailyTitles.add(`${st.title}|${st.observation}`);
+        dailyTitles.add(`${rv.title}|${rv.observation}`);
+        assert.ok(st.choices.length >= 2 && rv.choices.length >= 2);
+    }
+    assert.ok(dailyTitles.size >= 30);
+
+    assert.equal(SKILL_TREE_UPGRADES.length, 40);
+    const tier5 = SKILL_TREE_UPGRADES.filter(n => n.tier === 5);
+    assert.equal(tier5.length, 4);
+    assert.ok(tier5.every(n => n.prerequisites.length === 3));
 });
 
 const route = ['drive-check', 'drive-service', 'sampler', 'calibrate', 'audit', 'load-test', 'telemetry', 'seal', 'route', 'suits'];

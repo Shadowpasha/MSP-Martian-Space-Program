@@ -84,7 +84,7 @@ export interface SupplyLasts {
 /** Shared by the packer and the launch summary so both always show the same numbers. */
 export function supplyLasts(setup: MissionSetupInput, placements: readonly CargoPlacement[]): SupplyLasts[] {
     const crew = setup.crew.length || 4;
-    const deadline = setup.missionGoal.deadlineSol;
+    const deadline = setup.expedition === 'infinite' ? 20 : setup.missionGoal.deadlineSol;
     return (['food', 'water', 'oxygen'] as const).map((key) => {
         let amount = setup.startingResources[key];
         for (const piece of placements) amount += CARGO_BY_ID[piece.item].resources?.[key] ?? 0;

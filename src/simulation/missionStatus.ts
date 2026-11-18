@@ -1,4 +1,4 @@
-import type { CargoItemId, ResourcePool } from '../contracts/gameContract';
+import { cloneValue, type CargoItemId, type ResourcePool } from '../contracts/gameContract';
 import { CARGO_ITEMS } from '../data/cargo';
 import { formatResource, missionDeadline } from '../data/missions';
 import { expeditionChecklist } from '../data/tharsisOrders';
@@ -154,7 +154,7 @@ export function assessMission(state: TharsisState, draft: RoverLoad) {
     let dockSol = run.rover ? fieldReturnEstimate(state) : run.returnedWithData ? null : earliestDockSol(state);
     const launchReady = !run.rover && !run.returnedWithData && !dispatch.length && state.phase === 'planning';
     if (launchReady) {
-        const launch = structuredClone(state);
+        const launch = cloneValue(state);
         if (!dispatchRover(launch, draft)) dockSol = fieldReturnEstimate(launch);
     }
     const dockIsLate = dockSol !== null && dockSol > deadline;

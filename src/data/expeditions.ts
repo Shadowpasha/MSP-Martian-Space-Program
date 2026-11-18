@@ -78,6 +78,42 @@ export const EXPEDITIONS: Record<ExpeditionId, Expedition> = {
         aries: 'the Tharsis training run',
         ariesExamples: 'weather instrument checks and relay contacts',
     },
+    shadow_ice: {
+        id: 'shadow_ice', region: 'Cabeus Crater', site: 'the permanently shadowed floor', instrument: 'iceDrill', surveyHours: 72, dataKind: 'lunar ice cores',
+        legs: { pilot: 2, backup: 3 },
+        hazard: { kind: 'solar', firstSol: 7, spread: 3, exposure: 1.5 },
+        temperature: { clear: -120, warning: -145, hazard: -180 },
+        intro: 'Cabeus Crater is in permanent shadow at -180°C with zero atmosphere. Pack heavy O₂ and power, drill 72 hours of ice cores, and return by Sol {deadline}.',
+        aries: 'the Cabeus Crater lunar south pole ice expedition',
+        ariesExamples: 'cryogenic drill heaters, oxygen seal checks in vacuum, and solar particle storm shielding',
+    },
+    oxygen_maker: {
+        id: 'oxygen_maker', region: 'Three Forks', site: 'MOXIE Test Pad', instrument: 'windSampler', surveyHours: 96, dataKind: 'MOXIE oxygen logs',
+        legs: { pilot: 1, backup: 2 },
+        hazard: { kind: 'dust', firstSol: 6, spread: 3, exposure: 1.1 },
+        temperature: { clear: -60, warning: -68, hazard: -80 },
+        intro: 'Three Forks tests field ISRU oxygen production. Run 96 hours of atmospheric electrolysis at the test pad and return by Sol {deadline}.',
+        aries: 'the Three Forks MOXIE oxygen-production field trial',
+        ariesExamples: 'CO2 compressor intake dust clearing, solid-oxide cell power draw, and purity telemetry',
+    },
+    space_garden: {
+        id: 'space_garden', region: 'Butler Landing', site: 'Greenhouse Ridge', instrument: 'windSampler', surveyHours: 96, dataKind: 'botanical growth logs',
+        legs: { pilot: 1, backup: 2 },
+        hazard: { kind: 'solar', firstSol: 6, spread: 4, exposure: 1.25 },
+        temperature: { clear: -56, warning: -64, hazard: -74 },
+        intro: 'Butler Landing hosts our remote Veggie field dome. Record 96 hours of crop growth telemetry and return before Sol {deadline}!',
+        aries: 'the Butler Landing greenhouse field experiment',
+        ariesExamples: 'LED array power balancing, hydroponic moisture recovery, and solar radiation shielding',
+    },
+    infinite: {
+        id: 'infinite', region: 'Elysium Outpost', site: 'Elysium Plains', instrument: 'windSampler', surveyHours: 48, dataKind: 'endless survey data',
+        legs: { pilot: 1, backup: 2 },
+        hazard: { kind: 'dust', firstSol: 5, spread: 3, exposure: 1.15 },
+        temperature: { clear: -62, warning: -74, hazard: -88 },
+        intro: 'No rescue ship is scheduled. Keep the crew alive through escalating storms as many Sols as you can, and run rover surveys for bonus score.',
+        aries: 'Elysium Outpost endless survival operations',
+        ariesExamples: 'long-term life support rationing, recurring dust storm survival, and emergency salvage',
+    },
 };
 
 export const INSTRUMENTS: readonly CargoItemId[] = [...new Set(Object.values(EXPEDITIONS).map(expedition => expedition.instrument))];

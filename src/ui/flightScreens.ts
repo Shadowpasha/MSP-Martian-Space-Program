@@ -6,7 +6,7 @@ import {
 import { CARGO_BY_ID, normalizeCargo } from '../data/cargo';
 import { CREW_ABILITIES } from '../data/crewAbilities';
 import { LAUNCH_CREW_SIZE, missionDeadline, victoryCriteria, type MissionOffer } from '../data/missions';
-import { purchaseProblem, type PlaytestProfile } from '../data/profile';
+import { isVeteran, purchaseProblem, VETERAN_SOLS, type PlaytestProfile } from '../data/profile';
 import { MENU_BACKGROUND, SIDEBAR_BACKGROUND, type Bounds, type FlightUi, type IconName } from './flightUi';
 import { mountMenuWalker } from './menuWalker';
 import { mountMenuAmbience } from './menuAmbience';
@@ -18,8 +18,9 @@ import { easeOutBack, makeMotion, type Motion } from './motion';
 import { makeAbsBox } from './theme';
 import { tutorial } from './tutorial';
 import { showVolumeControls, type VolumeField } from './audioSettings';
+import { fetchScoreboard, loadLocalScores, type ScoreEntry } from '../services/scoreboard';
 
-export type Page = 'menu' | 'crew' | 'upgrade' | 'settings' | 'mission' | 'cargo' | 'review' | 'quit' | 'exit' | 'run';
+export type Page = 'menu' | 'crew' | 'upgrade' | 'settings' | 'mission' | 'cargo' | 'review' | 'scoreboard' | 'quit' | 'exit' | 'run';
 type Navigate = (page: Page) => void;
 const NAV = [
     ['Play', 'mission'], ['Crew', 'crew'], ['Upgrade', 'upgrade'], ['Settings', 'settings'], ['Quit', 'quit'],
@@ -180,6 +181,7 @@ export function showMenu(ui: FlightUi, navigate: Navigate, reducedMotion: boolea
     hotspot([965, 430, 60, 90], () => greet(1));
 
     const play_ = sidebar(ui, 'menu', navigate, true, motion);
+    ui.button(root, [36, 562, 228, 40], () => navigate('scoreboard'), { label: 'Scoreboard', labelSize: 16 });
     // Hovering Play runs a chase of launch lights along its bottom edge.
     const lights = play_ ? Array.from({ length: 9 }, (_, i) => ui.box(play_, [14 + i * 22, 44, 12, 3], { ...p.cyan, a: 0.25 })) : [];
     let playHovered = false;
@@ -456,7 +458,9 @@ export function showCrew(
         ui.setText(count, full ? 'Crew ready' : `${assigned.length} of ${LAUNCH_CREW_SIZE} picked`);
         ui.textColor(count, full ? p.good : p.amber);
         ui.setText(name, selected.name);
-        ui.setText(role, field && selected.role === 'scientist' ? 'Not a Spy · Field Researcher' : `${titleCase(selected.role)} · ${selected.trait}`);
+        const loggedSols = profile.crewSols[selected.id] ?? 0;
+        const vetTag = isVeteran(profile, selected.id) ? ` · VETERAN (${loggedSols} Sols)` : loggedSols > 0 ? ` · ${loggedSols}/${VETERAN_SOLS} Sols` : '';
+        ui.setText(role, field && selected.role === 'scientist' ? 'Not a Spy · Field Researcher' : `${titleCase(selected.role)} · ${selected.trait}${vetTag}`);
         ui.setText(bio, selected.bio);
         ui.setText(source, selected.source ? `Source: ${selected.source.label}` : '');
         ui.setText(perkName, selected.perk.title);
@@ -479,13 +483,17 @@ const BRANCH_ICON: Record<UpgradeBranch, IconName> = {
 };
 const TECH_ICON: Record<string, IconName> = {
     solar_mppt: 'solar', efficient_inverters: 'power', power_balancing: 'circuit', sun_tracking: 'solar',
-    heat_recovery: 'power', habitat_microgrid: 'circuit',
+    smart_breakers: 'circuit', heat_recovery: 'power', solid_state_storage: 'solar', cryo_heat_pipes: 'power',
+    dust_repellent_coatings: 'solar', habitat_microgrid: 'circuit',
     closed_o2: 'oxygen', hydro_rationing: 'food', greywater_reclaimer: 'water', grow_trays: 'botanist',
-    condenser: 'water', redundant_scrubbers: 'oxygen',
+    bioreactor_loop: 'oxygen', condenser: 'water', vapor_recovery: 'water', oxygen_scrubbers_v2: 'oxygen',
+    hydro_led_matrix: 'botanist', redundant_scrubbers: 'oxygen',
     ai_logistics: 'circuit', survey_routes: 'mars', planning_cache: 'circuit', rover_racks: 'rover',
-    dispatch_automation: 'settings', autonomous_logistics: 'rover',
+    route_telemetry: 'mars', dispatch_automation: 'settings', autonomous_nav: 'rover', aries_heuristics: 'circuit',
+    rapid_docking: 'rover', autonomous_logistics: 'rover',
     rad_hull: 'radiation', habitation_quarters: 'crew', dosimeter_network: 'radiation', shift_scheduling: 'captain',
-    storm_shelter: 'mars', crew_support: 'medic',
+    ergonomic_bays: 'crew', storm_shelter: 'mars', boron_shielding: 'radiation', medbay_automation: 'medic',
+    eva_exosuits: 'crew', crew_support: 'medic',
 };
 
 export function showUpgrades(
@@ -523,24 +531,24 @@ export function showUpgrades(
     });
     const graph = ui.frame(tree, [12, 68, 596, 464], p.well);
     const coordinates = (node: SkillUpgradeDef) => ({
-        x: node.slot === 'left' ? 116 : node.slot === 'right' ? 408 : 262, y: 16 + 108 * (node.tier - 1),
+        x: node.slot === 'left' ? 92 : node.slot === 'right' ? 428 : 260, y: 12 + 88 * (node.tier - 1),
     });
-    for (let tier = 1; tier <= 4; tier++) {
-        const y = 16 + (tier - 1) * 108;
-        ui.box(graph, [72, y + 40, 492, 2], p.edge);
-        ui.label(graph, [8, y + 30, 64, 22], `Tier ${tier}`, { size: 13, color: p.muted });
+    for (let tier = 1; tier <= 5; tier++) {
+        const y = 12 + (tier - 1) * 88;
+        ui.box(graph, [72, y + 36, 492, 2], p.edge);
+        ui.label(graph, [8, y + 26, 60, 22], `Tier ${tier}`, { size: 13, color: p.muted });
     }
     for (const node of branchNodes) {
         for (const id of node.prerequisites) {
             const parent = branchNodes.find(candidate => candidate.id === id)!;
             const from = coordinates(parent);
             const to = coordinates(node);
-            const fromX = from.x + 64;
-            const toX = to.x + 64;
-            const turn = from.y + 96;
+            const fromX = from.x + 62;
+            const toX = to.x + 62;
+            const turn = from.y + 80;
             const routed = node.id === initial.id || (owned.has(node.id) && owned.has(id));
             const ink = routed ? p.amber : owned.has(id) ? p.bevel : p.edge;
-            const segments = [ui.box(graph, [fromX, from.y + 80, 4, 18], ink)];
+            const segments = [ui.box(graph, [fromX, from.y + 72, 4, 10], ink)];
             if (fromX !== toX) segments.push(ui.box(graph, [Math.min(fromX, toX), turn, Math.abs(toX - fromX) + 4, 4], ink));
             segments.push(ui.box(graph, [toX, turn, 4, to.y - turn], ink));
             if (id === justUnlocked) {
@@ -555,26 +563,27 @@ export function showUpgrades(
     for (const node of branchNodes) {
         const { x, y } = coordinates(node);
         const isOwned = owned.has(node.id);
-        const locked = node.prerequisites.some(id => !owned.has(id)) && !isOwned;
+        const ownedPrereqs = node.prerequisites.filter(id => owned.has(id)).length;
+        const locked = ownedPrereqs < (node.requiredCount ?? node.prerequisites.length) && !isOwned;
         const affordable = !locked && !isOwned && points >= node.cost;
         const selected = node.id === initial.id;
-        const button = ui.button(graph, [x, y, 132, 84], () => select(node.id), { tone: 'tile' });
+        const button = ui.button(graph, [x, y, 124, 74], () => select(node.id), { tone: 'tile' });
         tutorial.targets.set(`upgrade-node-${node.id}`, button.entity);
         if (selected || isOwned) {
             const thickness = selected ? 4 : 2;
-            ui.box(button.entity, [4, 4, 124, thickness], p.amber);
-            ui.box(button.entity, [4, 80 - thickness, 124, thickness], p.amber);
-            ui.box(button.entity, [4, 4, thickness, 76], p.amber);
-            ui.box(button.entity, [128 - thickness, 4, thickness, 76], p.amber);
+            ui.box(button.entity, [4, 4, 116, thickness], p.amber);
+            ui.box(button.entity, [4, 70 - thickness, 116, thickness], p.amber);
+            ui.box(button.entity, [4, 4, thickness, 66], p.amber);
+            ui.box(button.entity, [120 - thickness, 4, thickness, 66], p.amber);
         }
-        ui.icon(button.entity, 12, 8, 28, TECH_ICON[node.id]!, locked ? p.muted : p.amber);
-        if (isOwned || locked) ui.icon(button.entity, 102, 10, 20, isOwned ? 'check' : 'lock', isOwned ? p.good : p.muted);
+        ui.icon(button.entity, 10, 6, 24, TECH_ICON[node.id]!, locked ? p.muted : p.amber);
+        if (isOwned || locked) ui.icon(button.entity, 96, 8, 18, isOwned ? 'check' : 'lock', isOwned ? p.good : p.muted);
         else {
-            const tag = ui.box(button.entity, [78, 10, 46, 20], affordable ? p.amber : p.edge);
-            if (!affordable) ui.box(tag, [2, 2, 42, 16], p.well);
-            ui.label(tag, [0, 0, 46, 20], `${node.cost} pts`, { size: 12, color: affordable ? p.ink : p.muted, center: true });
+            const tag = ui.box(button.entity, [72, 8, 44, 18], affordable ? p.amber : p.edge);
+            if (!affordable) ui.box(tag, [2, 2, 40, 14], p.well);
+            ui.label(tag, [0, 0, 44, 18], `${node.cost} pts`, { size: 11, color: affordable ? p.ink : p.muted, center: true });
         }
-        ui.label(button.entity, [8, 42, 116, 38], node.label, { size: 13, fit: 11, color: locked ? p.muted : p.text, center: true, wrap: true });
+        ui.label(button.entity, [6, 34, 112, 36], node.label, { size: 12, fit: 10, color: locked ? p.muted : p.text, center: true, wrap: true });
         if (node.id === justUnlocked) {
             motion.hop(button.entity, x, y, 10);
             play('sparkle');
@@ -614,7 +623,7 @@ export function showUpgrades(
     const short = Math.max(0, initial.cost - points);
     ui.icon(inspector, 16, 14, 48, TECH_ICON[initial.id]!, p.amber);
     ui.label(inspector, [76, 8, 272, 60], initial.label, { display: true, size: 24, fit: 16, wrap: true });
-    ui.label(inspector, [16, 76, 332, 24], `${initial.branch}  ·  Tier ${initial.tier}`, { size: 15, color: p.amber });
+    ui.label(inspector, [16, 76, 332, 24], initial.requiredCount ? `${initial.branch}  ·  Tier ${initial.tier} (Any ${initial.requiredCount})` : `${initial.branch}  ·  Tier ${initial.tier}`, { size: 15, color: p.amber });
     const effects = ui.frame(inspector, [12, 112, 340, 120], p.well);
     ui.label(effects, [12, 6, 300, 26], 'What it does', { display: true, size: 20 });
     ui.label(effects, [12, 36, 308, 72], initial.summary, { wrap: true, top: true, size: 15, color: p.good });
@@ -687,7 +696,7 @@ function requirementText(r: MissionRequirement): string {
 
 export function showMissions(
     ui: FlightUi, offers: readonly MissionOffer[], onChoose: (offer: MissionOffer) => void,
-    page = 0, onPage: (page: number) => void = () => {},
+    page = 0, onPage: (page: number) => void = () => {}, missionStars: Record<string, number> = {},
 ): () => void {
     const { root, palette: p } = ui;
     const motion = makeMotion(ui.world, ui.reducedMotion);
@@ -734,6 +743,11 @@ export function showMissions(
             // Not playable yet: the card still shows the job and its NASA mission, with a clear lock.
             ui.icon(card, 16, 306, 20, 'lock', p.muted);
             ui.label(card, [44, 304, 268, 24], 'Coming soon', { size: 15, color: p.muted });
+        }
+        const earnedStars = offer.setup ? (missionStars[offer.setup.missionGoal.id] ?? 0) : 0;
+        if (earnedStars > 0) {
+            const starText = '★'.repeat(earnedStars) + '☆'.repeat(3 - earnedStars);
+            ui.label(card, [16, 496, 296, 24], `Mastery ${starText}`, { size: 15, color: p.amber, center: true });
         }
         // Selecting a mission opens its briefing popup first; "Prepare Cargo" there continues.
         const button = ui.button(card, [16, 532, 296, 44], () => (offer.briefing ? openBriefing(offer) : onChoose(offer)), {
@@ -821,6 +835,43 @@ export function showPreparedManifest(ui: FlightUi, offer: MissionOffer, problem:
 
 export type SettingField = 'soundEnabled' | 'vibration' | 'reducedMotion' | 'highContrast';
 
+export function showScoreboard(ui: FlightUi, navigate: Navigate): void {
+    const { root, palette: p } = ui;
+    const panel = ui.frame(root, [248, 108, 1016, 596]);
+    ui.label(panel, [20, 12, 500, 34], 'Survival Scoreboard', { display: true, size: 26, color: p.amber });
+    const statusLabel = ui.label(panel, [560, 18, 430, 24], 'Loading local & Firestore scores…', { size: 14, color: p.cyan });
+    ui.box(panel, [20, 52, 976, 2], p.edge);
+    ui.label(panel, [24, 62, 70, 24], 'RANK', { size: 13, color: p.muted });
+    ui.label(panel, [104, 62, 260, 24], 'COMMANDER', { size: 13, color: p.muted });
+    ui.label(panel, [374, 62, 310, 24], 'MISSION', { size: 13, color: p.muted });
+    ui.label(panel, [700, 62, 120, 24], 'SOLS', { size: 13, color: p.muted });
+    ui.label(panel, [840, 62, 130, 24], 'SCORE', { size: 13, color: p.muted });
+
+    const table = ui.group(panel, [0, 92, 1008, 430]);
+    const renderRows = (entries: ScoreEntry[], source: 'firestore' | 'local') => {
+        if (!ui.world.valid(panel)) return;
+        ui.setText(statusLabel, source === 'firestore' ? 'Synced · Firestore + Local' : 'Local Scoreboard (configure Firestore ID to sync)');
+        const rows = entries.slice(0, 10);
+        if (!rows.length) {
+            ui.label(table, [24, 24, 600, 30], 'No runs recorded yet. Play Infinite Survival or any mission to post a score!', { size: 16, color: p.secondary });
+            return;
+        }
+        rows.forEach((entry, i) => {
+            const y = i * 41;
+            ui.box(table, [20, y, 968, 36], i % 2 === 0 ? p.well : p.panel);
+            ui.label(table, [28, y + 6, 64, 24], `#${i + 1}`, { size: 15, color: i === 0 ? p.amber : p.cyan });
+            ui.label(table, [104, y + 6, 260, 24], entry.player, { size: 15, color: p.text });
+            ui.label(table, [374, y + 6, 310, 24], entry.mission, { size: 14, color: p.secondary });
+            ui.label(table, [700, y + 6, 120, 24], `${entry.sols}`, { size: 15, color: p.amber });
+            ui.label(table, [840, y + 6, 130, 24], `${entry.score}`, { size: 15, color: p.good });
+        });
+    };
+
+    renderRows(loadLocalScores(), 'local');
+    void fetchScoreboard().then(({ entries, source }) => renderRows(entries, source));
+    ui.button(panel, [20, 534, 200, 44], () => navigate('menu'), { label: 'Back to Menu', tone: 'primary' });
+}
+
 export function showSettings(
     ui: FlightUi,
     profile: PlaytestProfile,
@@ -853,6 +904,21 @@ export function showSettings(
     showVolumeControls(ui, panel, 304, profile, onVolume);
 }
 
+function tryExitRuntime(): void {
+    const g = globalThis as {
+        NativeBridge?: { exit?: () => void; quit?: () => void; channel?: { invoke?: (method: string) => Promise<unknown> } };
+        close?: () => void;
+    };
+    try {
+        g.NativeBridge?.exit?.();
+        g.NativeBridge?.quit?.();
+        void g.NativeBridge?.channel?.invoke?.('exitApp')?.catch(() => {});
+        if (typeof window !== 'undefined' && typeof window.close === 'function') window.close();
+    } catch {
+        // Fall through to the Session Ended screen when the host blocks programmatic close.
+    }
+}
+
 export function showQuit(ui: FlightUi, navigate: Navigate): void {
     const { root, palette: p } = ui;
     ui.box(root, [0, 0, 1280, 720], p.ink);
@@ -861,7 +927,7 @@ export function showQuit(ui: FlightUi, navigate: Navigate): void {
     ui.label(panel, [24, 28, 480, 52], 'Leave the Station?', { display: true, size: 38 });
     ui.label(panel, [24, 92, 480, 52], 'Your crew and unlocked upgrades are saved.', { color: p.secondary, wrap: true });
     ui.button(panel, [24, 172, 224, 48], () => navigate('menu'), { label: 'Cancel' });
-    ui.button(panel, [272, 172, 224, 48], () => navigate('exit'), { label: 'Quit', tone: 'primary' });
+    ui.button(panel, [272, 172, 224, 48], () => { tryExitRuntime(); navigate('exit'); }, { label: 'Quit', tone: 'primary' });
 }
 
 export function showExit(ui: FlightUi, navigate: Navigate): void {
@@ -870,6 +936,6 @@ export function showExit(ui: FlightUi, navigate: Navigate): void {
     logo(ui, 512, 116, true);
     const panel = ui.frame(root, [344, 316, 592, 212]);
     ui.label(panel, [16, 20, 548, 48], 'Session Ended', { display: true, size: 34, center: true });
-    ui.label(panel, [20, 72, 540, 40], 'Close this browser tab or press Stop in Estella.', { center: true, color: p.secondary, wrap: true });
+    ui.label(panel, [20, 72, 540, 40], 'Close this window, press Home/Back on mobile, or press Stop in Estella.', { center: true, color: p.secondary, wrap: true });
     ui.button(panel, [152, 136, 280, 48], () => navigate('menu'), { label: 'Return to Main Menu' });
 }

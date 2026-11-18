@@ -1,6 +1,7 @@
 import {
-    Assets, Audio, defineSystem, FocusManager, GamepadButton, GetWorld, Input, Res, Storage, UIEvents,
-    type Entity, type World,
+    AlignContent, AlignItems, Assets, Audio, defineSystem, FlexContainer, FlexDirection, FocusManager,
+    GamepadButton, GetWorld, Input, JustifyContent, px, Res, spawnUIEntity, Storage, UIEvents,
+    UIPointerEvents, UIPositionType, UIVisual, UIVisualType, type Color, type Entity, type World,
 } from 'esengine';
 import {
     AVAILABLE_CREW, SKILL_TREE_UPGRADES, STORAGE_KEYS,
@@ -8,14 +9,15 @@ import {
 } from '../contracts/gameContract';
 import type { CargoPlacement } from '../data/cargo';
 import { buildLaunchSetup, cargoProblem, LAUNCH_CREW_SIZE, launchProblem, missionOffers, type MissionOffer } from '../data/missions';
-import { loadProfile, purchaseProblem, purchaseUpgrade, recordResearch, resetUpgrades, type PlaytestProfile } from '../data/profile';
+import { isVeteran, loadProfile, purchaseProblem, purchaseUpgrade, recordResearch, resetUpgrades, type PlaytestProfile } from '../data/profile';
 import { showCargoPacker } from '../ui/cargoPacker';
 import { showLaunchSummary } from '../ui/launchSummary';
 import {
-    showCrew, showExit, showMenu, showMissions, showPreparedManifest, showQuit, showSettings, showShell, showUpgrades, type Page,
+    showCrew, showExit, showMenu, showMissions, showPreparedManifest, showQuit, showScoreboard, showSettings, showShell, showUpgrades, type Page,
 } from '../ui/flightScreens';
+import { submitScoreboardEntry } from '../services/scoreboard';
 import { makeFlightArt, makeFlightUi, type IconName } from '../ui/flightUi';
-import { makeAbsBox, setNodeDisplayed } from '../ui/theme';
+import { setNodeDisplayed, setVisualColor } from '../ui/theme';
 import { setFeedbackPrefs } from '../ui/feedback';
 import { bindAudio, playMusic, setSoundEnabled, setVolumes, unlockAudio } from '../audio/soundManager';
 import { mountTharsisFlight } from '../ui/tharsisFlight';
@@ -45,6 +47,23 @@ export const flightSystem = defineSystem(
         }
 
         const backdrop = world.findEntityByName('OutpostBackdrop');
+        // Center the fixed 1280x720 stage inside GameRoot on wider or taller mobile screens.
+        world.insert(sceneRoot, FlexContainer, {
+            direction: FlexDirection.Row,
+            wrap: 0,
+            justifyContent: JustifyContent.Center,
+            alignItems: AlignItems.Center,
+            alignContent: AlignContent.Center,
+            gap: { x: 0, y: 0 },
+            padding: { left: 0, top: 0, right: 0, bottom: 0 },
+        });
+        const setStageMarginColor = (color: Color) => {
+            if (!world.has(sceneRoot, UIVisual)) {
+                world.insert(sceneRoot, UIVisual, { visualType: UIVisualType.SolidColor, color, enabled: true });
+            } else {
+                setVisualColor(world, sceneRoot, color);
+            }
+        };
         const art = makeFlightArt(world, sceneRoot, assets);
         const legacySkills = Storage.getJSON<unknown>(STORAGE_KEYS.ACTIVE_SKILLS);
         const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -107,6 +126,9 @@ export const flightSystem = defineSystem(
             if (!setup || launchProblem(setup)) return;
             if (next.prepared !== 'training') {
                 setup.upgradeIds = [...new Set([...(Array.isArray(setup.upgradeIds) ? setup.upgradeIds : []), ...profile.upgradeIds])];
+                setup.crew = setup.crew.map(member => isVeteran(profile, member.id)
+                    ? { ...member, perk: { ...member.perk, speedMultiplier: Number((member.perk.speedMultiplier + 0.15).toFixed(2)), costMultiplier: Math.max(0.5, Number((member.perk.costMultiplier - 0.05).toFixed(2))) } }
+                    : member);
             }
             // Chapter 2 of the tutorial ends when the first real mission lifts off.
             if (next.prepared !== 'training' && tutorial.active && tutorial.chapter === 2) tutorial.finish();
@@ -122,7 +144,16 @@ export const flightSystem = defineSystem(
             page = destination;
             focus.blur();
             if (pageRoot !== null) world.despawn(pageRoot);
-            const root = makeAbsBox(world, sceneRoot, 0, 0, 1280, 720);
+            const root = spawnUIEntity({
+                world,
+                parent: sceneRoot,
+                node: {
+                    position: UIPositionType.Relative,
+                    width: px(1280),
+                    height: px(720),
+                    pointerEvents: UIPointerEvents.Auto,
+                },
+            });
             pageRoot = root;
             tickPage = null;
             tutorial.resetPage();
@@ -133,8 +164,21 @@ export const flightSystem = defineSystem(
             if (page === 'run' && runSetup) {
                 const runId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
                 const finish = (result: MainLoopResult) => {
-                    saveProfile(recordResearch(profile, runId, result, runSetup?.expedition === 'training'));
+                    saveProfile(recordResearch(profile, runId, result, runSetup?.expedition === 'training', {
+                        missionId: runSetup?.missionGoal.id,
+                        crewIds: runSetup?.crew.map(c => c.id),
+                        targetSol: runSetup?.targetSol,
+                    }));
                     Storage.setJSON(STORAGE_KEYS.LAST_RESULT, result);
+                    if (runSetup && runSetup.expedition !== 'training') {
+                        const lead = runSetup.crew[0]?.name ?? 'Commander';
+                        void submitScoreboardEntry({
+                            player: lead,
+                            mission: runSetup.missionGoal.title,
+                            sols: result.solReached,
+                            score: result.score,
+                        });
+                    }
                 };
                 // Every mission is an expedition; a team manifest without rules runs as the Tharsis survey.
                 const setup: MissionSetupInput = { ...runSetup, rules: 'tharsis-expedition' };
@@ -145,11 +189,13 @@ export const flightSystem = defineSystem(
                         saveProfile({ ...profile, soundEnabled });
                         setSoundEnabled(soundEnabled);
                     },
+                    onMarginColor: setStageMarginColor,
                 });
                 return;
             }
 
             const ui = makeFlightUi(world, events, root, art, focus, profile);
+            setStageMarginColor(ui.palette.ink);
             // Returns true when the page used Escape itself (e.g. putting back a held cargo item).
             let surfaceTick: ((state: typeof input) => boolean | void) | undefined;
             switch (page) {
@@ -182,7 +228,7 @@ export const flightSystem = defineSystem(
                     break;
                 case 'mission':
                     showShell(ui, page, 'Mission Selection', 'Pick a job for your crew. A Sol is one day on Mars: 24 hours 39 minutes.', 'mars', navigateFromSidebar);
-                    surfaceTick = showMissions(ui, missionOffers(readPendingSetup()), selectMission, missionPage, next => { missionPage = next; navigate('mission'); });
+                    surfaceTick = showMissions(ui, missionOffers(readPendingSetup()), selectMission, missionPage, next => { missionPage = next; navigate('mission'); }, profile.missionStars);
                     break;
                 case 'cargo': {
                     const chosen = offer;
@@ -231,6 +277,10 @@ export const flightSystem = defineSystem(
                         changeVolume,
                         () => { tutorial.begin(); missionPage = 0; navigate('mission'); },
                     );
+                    break;
+                case 'scoreboard':
+                    showShell(ui, page, 'Scoreboard', 'Top Mars & Moon survival records (local + Firestore sync).', 'upgrade', navigateFromSidebar);
+                    showScoreboard(ui, navigate);
                     break;
                 case 'quit':
                     showQuit(ui, navigate);

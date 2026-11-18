@@ -10,13 +10,11 @@ import { findOrder, preferredLead, quoteForLead, scheduledOrder, stationCrew, wo
 import type { Bounds, FlightUi } from './flightUi';
 import type { RunButton } from './tharsisFlight';
 
-export type TerminalStatus = 'checking' | 'configured' | 'online' | 'fallback';
+export type TerminalStatus = 'local';
 
 /** What the A.R.I.E.S. link is doing, in words and colour. */
-export function ariesStatus(p: FlightUi['palette'], status: TerminalStatus): { label: string; color: FlightUi['palette']['good'] } {
-    const color = status === 'online' ? p.good : status === 'fallback' ? p.amber : p.cyan;
-    const label = { online: 'API online', configured: 'API configured', checking: 'Checking API', fallback: 'Local fallback' }[status];
-    return { label, color };
+export function ariesStatus(p: FlightUi['palette'], _status: TerminalStatus): { label: string; color: FlightUi['palette']['good'] } {
+    return { label: 'A.R.I.E.S. Local', color: p.cyan };
 }
 
 export function showAriesBadge(ui: FlightUi, parent: Entity, bounds: Bounds, status: TerminalStatus): void {
@@ -25,7 +23,7 @@ export function showAriesBadge(ui: FlightUi, parent: Entity, bounds: Bounds, sta
     const badge = ui.frame(parent, bounds, p.ink, color);
     const innerHeight = bounds[3] - 8;
     const iconSize = Math.min(16, innerHeight);
-    ui.icon(badge, 6, (innerHeight - iconSize) / 2, iconSize, status === 'online' ? 'check' : status === 'fallback' ? 'settings' : 'circuit', color);
+    ui.icon(badge, 6, (innerHeight - iconSize) / 2, iconSize, 'circuit', color);
     ui.label(badge, [14 + iconSize, 0, bounds[2] - 24 - iconSize, innerHeight], label, { size: 12, fit: 11, color });
 }
 
@@ -76,7 +74,7 @@ function wrapLines(text: string, width: number): string[] {
 }
 
 type TranscriptRow = { speaker?: DiscussionMessage['speaker']; text: string };
-const VISIBLE_ROWS = 19;
+const VISIBLE_ROWS = 17;
 
 function transcriptRows(history: readonly DiscussionMessage[]): TranscriptRow[] {
     return history.flatMap(message => [
@@ -94,45 +92,39 @@ export function showTerminal(options: TerminalOptions): Entity | null {
     const topic = options.topic && findOrder(state, options.topic)?.title;
     const training = state.tharsis.expedition === 'training';
     showAriesBadge(ui, content, [352, 18, 167, 29], status);
-    ui.label(content, [24, 61, 698, 24], topic ? `TOPIC  /  ${topic}` : training ? 'TRAINING GUIDANCE  /  AUTHORED BRIEFINGS' : 'STATION OPERATIONS  /  OPEN DISCUSSION', { size: 14, color: p.cyan });
+    ui.label(content, [24, 61, 698, 24], topic ? `TOPIC  /  ${topic}` : training ? 'TRAINING GUIDANCE  /  LOCAL BRIEFINGS' : 'STATION NEGOTIATION  /  LOCAL OPS', { size: 14, color: p.cyan });
 
-    if (status === 'fallback') {
-        const fallback = ui.frame(content, [20, 96, 1130, 166], p.ink, p.teal);
-        ui.label(fallback, [16, 10, 1088, 37], training ? 'Training uses authored briefings' : 'The mission is using local briefings', {
-            display: true, size: 26,
-        });
-        ui.label(fallback, [16, 53, 1088, 40], training
-            ? 'The guide, objectives, and built-in work orders are available. Retry the API to check for live guidance.'
-            : 'Objectives and built-in work orders are available. Retry the API to resume live discussions.', { size: 16, color: p.secondary, wrap: true });
-        button('aries-objectives', fallback, [16, 107, 205, 42], options.onObjectives, { label: 'Objectives', tone: 'hero' });
-        button('aries-work', fallback, [235, 107, 205, 42], options.onWorkOrders, { label: 'Work Orders' });
-        button('aries-retry', fallback, [453, 107, 205, 42], options.onRetry, { label: 'Retry API' });
-        return null;
-    }
-
-    const terminal = ui.frame(content, [20, 96, 708, 478], p.ink, p.teal);
+    const terminal = ui.frame(content, [20, 96, 708, 434], p.ink, p.teal);
     const rows = transcriptRows(options.history);
     const maxOffset = Math.max(0, rows.length - VISIBLE_ROWS);
     const offset = Math.min(options.page, maxOffset);
     const start = Math.max(0, maxOffset - offset);
-    ui.label(terminal, [16, 6, 404, 26], 'COMMS TRANSCRIPT', { size: 14, color: p.cyan });
+    ui.label(terminal, [16, 6, 404, 26], 'NEGOTIATION LOG', { size: 14, color: p.cyan });
     rows.slice(start, start + VISIBLE_ROWS).forEach((row, i) => {
-        const y = 47 + i * 19;
+        const y = 45 + i * 19;
         if (row.speaker) ui.box(terminal, [14, y, 668, 18], row.speaker === 'crew' ? p.well : p.panel);
         if (row.text) ui.label(terminal, [28, y, 640, 18], row.text, { size: row.speaker ? 13 : 15,
             color: row.speaker === 'crew' ? p.amber : row.speaker === 'aries' ? p.cyan : p.text });
     });
     if (!options.history.length) {
         const greeting = training ? 'Ask me for help with a work order, a resource shortage, or the next step in the training run.' :
-            topic ? 'Tell me what you want to change about this task. We can compare time, crew, and supplies.' :
-                'What is holding up the mission? We can work through a shortage or design a new station task.';
+            topic ? 'Negotiate shifts, supplies, or output for this task using the quick actions below or by typing.' :
+                'Pick a resource goal below or type a request to negotiate a custom station task.';
         ui.label(terminal, [18, 49, 650, 68], greeting, { size: 17, color: p.secondary, wrap: true, top: true });
     }
-    if (options.pending) ui.label(terminal, [16, 432, 265, 30], 'A.R.I.E.S. is responding…', { size: 13, color: p.cyan });
     if (maxOffset) {
-        button('chat-older', terminal, [476, 430, 95, 32], () => options.onPage(Math.min(maxOffset, offset + 12)), { label: 'Older', disabled: offset >= maxOffset });
-        button('chat-newer', terminal, [582, 430, 100, 32], () => options.onPage(Math.max(0, offset - 12)), { label: 'Newer', disabled: !offset });
+        button('chat-older', terminal, [476, 386, 95, 32], () => options.onPage(Math.min(maxOffset, offset + 12)), { label: 'Older', disabled: offset >= maxOffset });
+        button('chat-newer', terminal, [582, 386, 100, 32], () => options.onPage(Math.max(0, offset - 12)), { label: 'Newer', disabled: !offset });
     }
+
+    const quickReplies: ReadonlyArray<readonly [string, string, string]> = training
+        ? [['q-next', 'Next Step', 'What is the next step?'], ['q-power', 'Power', 'Need power'], ['q-water', 'Water', 'Need water'], ['q-o2', 'Oxygen', 'Need oxygen']]
+        : options.draft
+            ? [['q-fast', 'Make Faster', 'Make it faster'], ['q-cheap', 'Cut Cost', 'Cut cost and save supplies'], ['q-yield', 'Boost Yield', 'Boost output yield'], ['q-salvage', 'Salvage', 'Salvage equipment for materials']]
+            : [['q-power', 'Need Power', 'Need power'], ['q-water', 'Need Water', 'Need water'], ['q-o2', 'Need O₂', 'Need oxygen'], ['q-food', 'Need Food', 'Need food']];
+    quickReplies.forEach(([key, label, cmd], idx) => {
+        button(key, content, [20 + idx * 179, 540, 170, 38], () => options.onSubmit(cmd), { label, labelSize: 13 });
+    });
 
     const field = createTextInput({ world: options.world, events: options.events, parent: content,
         node: { position: UIPositionType.Absolute, insetLeft: px(20), insetTop: px(589), width: px(555), height: px(48) },

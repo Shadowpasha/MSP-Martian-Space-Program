@@ -5,7 +5,7 @@
  */
 
 export type PlanetId = 'mars' | 'moon';
-export type ExpeditionId = 'tharsis' | 'radiation' | 'ice' | 'training';
+export type ExpeditionId = 'tharsis' | 'radiation' | 'ice' | 'training' | 'shadow_ice' | 'oxygen_maker' | 'space_garden' | 'infinite';
 
 export const CREW_ROLES = ['engineer', 'botanist', 'pilot', 'medic', 'scientist', 'captain'] as const;
 export type CrewRole = typeof CREW_ROLES[number];
@@ -178,7 +178,7 @@ export interface MainLoopResult {
 
 export const UPGRADE_BRANCHES = ['Infrastructure', 'Survival', 'Operations', 'Crew'] as const;
 export type UpgradeBranch = typeof UPGRADE_BRANCHES[number];
-export type UpgradeTier = 1 | 2 | 3 | 4;
+export type UpgradeTier = 1 | 2 | 3 | 4 | 5;
 
 export interface SkillUpgradeDef {
     id: string;
@@ -189,6 +189,7 @@ export interface SkillUpgradeDef {
     slot: 'left' | 'center' | 'right';
     cost: number;
     prerequisites: readonly string[];
+    requiredCount?: number;
     apply: (m: SkillTreeModifiers) => SkillTreeModifiers;
 }
 
@@ -218,16 +219,26 @@ interface UpgradeSpec {
     effects?: UpgradeEffects;
 }
 
-function upgradeBranch(branch: UpgradeBranch, specs: readonly [UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec]): SkillUpgradeDef[] {
-    const [root, left, right, leftEnd, rightEnd] = specs;
-    const tiers = [1, 2, 2, 3, 3, 4] as const;
-    const slots = ['center', 'left', 'right', 'left', 'right', 'center'] as const;
-    const parents = [[], [root.id], [root.id], [left.id], [right.id], [leftEnd.id, rightEnd.id]];
-    const prices = { 1: 3, 2: 5, 3: 7, 4: 10 };
+function upgradeBranch(
+    branch: UpgradeBranch,
+    specs: readonly [UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec, UpgradeSpec],
+): SkillUpgradeDef[] {
+    const [root, t2l, t2r, t3l, t3c, t3r, t4l, t4c, t4r, cap] = specs;
+    const tiers = [1, 2, 2, 3, 3, 3, 4, 4, 4, 5] as const;
+    const slots = ['center', 'left', 'right', 'left', 'center', 'right', 'left', 'center', 'right', 'center'] as const;
+    const parents = [
+        [],
+        [root.id], [root.id],
+        [t2l.id], [t2l.id, t2r.id], [t2r.id],
+        [t3l.id, t3c.id], [t3c.id], [t3c.id, t3r.id],
+        [t4l.id, t4c.id, t4r.id],
+    ];
+    const prices = { 1: 3, 2: 4, 3: 6, 4: 8, 5: 11 };
     return specs.map(({ effects, ...spec }, index) => {
         const tier = tiers[index]!;
         return {
             ...spec, branch, tier, slot: slots[index]!, cost: prices[tier], prerequisites: parents[index]!,
+            ...(tier === 5 ? { requiredCount: 2 } : {}),
             apply(modifiers) {
                 if (!effects) return modifiers;
                 const next = { ...modifiers };
@@ -262,7 +273,11 @@ export const SKILL_TREE_UPGRADES = [
         { id: 'efficient_inverters', label: 'Efficient Inverters', summary: 'Makes 15% more solar power.', effects: { solarOutputMult: 1.15 } },
         { id: 'power_balancing', label: 'Power Balancing', summary: 'Uses 10% less power each day.', effects: { energyConsumptionMult: 0.9 } },
         { id: 'sun_tracking', label: 'Sun Tracking', summary: 'Makes 15% more solar power.', effects: { solarOutputMult: 1.15 } },
+        { id: 'smart_breakers', label: 'Smart Breakers', summary: 'Uses 10% less power each day and speeds up crewed tasks by 5%.', effects: { energyConsumptionMult: 0.9, taskSpeedBonus: 0.05 } },
         { id: 'heat_recovery', label: 'Heat Recovery', summary: 'Uses 10% less power each day.', effects: { energyConsumptionMult: 0.9 } },
+        { id: 'solid_state_storage', label: 'Solid-State Array', summary: 'Makes 25% more solar power, but uses 10% more daily power.', effects: { solarOutputMult: 1.25, energyConsumptionMult: 1.1 } },
+        { id: 'cryo_heat_pipes', label: 'Cryo Heat Pipes', summary: 'Uses 20% less daily power, but tasks run 8% slower.', effects: { energyConsumptionMult: 0.8, taskSpeedBonus: -0.08 } },
+        { id: 'dust_repellent_coatings', label: 'Dust Coatings', summary: 'Makes 15% more solar power.', effects: { solarOutputMult: 1.15 } },
         { id: GAMEPLAY_UPGRADES.microgrid, label: 'Habitat Microgrid', summary: 'Indoor Life Support orders can run through full storm shelter.' },
     ]),
     ...upgradeBranch('Survival', [
@@ -270,7 +285,11 @@ export const SKILL_TREE_UPGRADES = [
         { id: 'hydro_rationing', label: 'Algae Nutrient Loop', summary: 'Uses 25% less food each day. Plant tasks grow 20% more.', effects: { foodConsumptionMult: 0.75, hydroponicsYieldMult: 1.2 } },
         { id: 'greywater_reclaimer', label: 'Greywater Reclaimer', summary: 'Uses 15% less water each day.', effects: { waterConsumptionMult: 0.85 } },
         { id: 'grow_trays', label: 'Grow Trays', summary: 'Plant tasks grow 15% more.', effects: { hydroponicsYieldMult: 1.15 } },
+        { id: 'bioreactor_loop', label: 'Bioreactor Loop', summary: 'Uses 15% less O₂ and boosts plant yields by 10%.', effects: { oxygenConsumptionMult: 0.85, hydroponicsYieldMult: 1.1 } },
         { id: 'condenser', label: 'Condenser', summary: 'Uses 15% less water each day.', effects: { waterConsumptionMult: 0.85 } },
+        { id: 'vapor_recovery', label: 'Vapor Recovery', summary: 'Uses 22% less water each day, but draws 8% more power.', effects: { waterConsumptionMult: 0.78, energyConsumptionMult: 1.08 } },
+        { id: 'oxygen_scrubbers_v2', label: 'Zeolite Scrubbers', summary: 'Uses 15% less O₂ each day.', effects: { oxygenConsumptionMult: 0.85 } },
+        { id: 'hydro_led_matrix', label: 'LED Grow Matrix', summary: 'Plant tasks grow 30% more, but draw 10% more power.', effects: { hydroponicsYieldMult: 1.3, energyConsumptionMult: 1.1 } },
         { id: GAMEPLAY_UPGRADES.emergencyStores, label: 'Emergency Stores', summary: 'When station upkeep first depletes Food, Water, or O₂, release 8 Food, 8 Water, and 12 O₂.' },
     ]),
     ...upgradeBranch('Operations', [
@@ -278,7 +297,11 @@ export const SKILL_TREE_UPGRADES = [
         { id: 'survey_routes', label: 'Survey Routes', summary: 'Rover trips bring back 15% more.', effects: { roverYieldMult: 1.15 } },
         { id: 'planning_cache', label: 'Planning Cache', summary: 'A.R.I.E.S. plans cost 10% less.', effects: { aiCostDiscountMult: 0.9 } },
         { id: 'rover_racks', label: 'Rover Racks', summary: 'Rover trips bring back 15% more.', effects: { roverYieldMult: 1.15 } },
+        { id: 'route_telemetry', label: 'Route Telemetry', summary: 'Rover trips yield 10% more and tasks finish 10% faster.', effects: { roverYieldMult: 1.1, taskSpeedBonus: 0.1 } },
         { id: 'dispatch_automation', label: 'Dispatch Automation', summary: 'Crewed tasks go 10% faster.', effects: { taskSpeedBonus: 0.1 } },
+        { id: 'autonomous_nav', label: 'Autonomous Nav', summary: 'Rover trips yield 25% more, but draw 10% more power.', effects: { roverYieldMult: 1.25, energyConsumptionMult: 1.1 } },
+        { id: 'aries_heuristics', label: 'Ops Heuristics', summary: 'A.R.I.E.S. plans cost 15% less.', effects: { aiCostDiscountMult: 0.85 } },
+        { id: 'rapid_docking', label: 'Rapid Docking', summary: 'Crewed tasks go 25% faster, but morale drops 10% faster.', effects: { taskSpeedBonus: 0.25, moraleDecayMult: 1.1 } },
         { id: GAMEPLAY_UPGRADES.recorder, label: 'Autonomous Recorder', summary: 'Keep partial survey data through one lost sampling Sol per mission.' },
     ]),
     ...upgradeBranch('Crew', [
@@ -286,7 +309,11 @@ export const SKILL_TREE_UPGRADES = [
         { id: 'habitation_quarters', label: 'Habitation Quarters', summary: 'Crew spirit drops 10% slower.', effects: { moraleDecayMult: 0.9 } },
         { id: 'dosimeter_network', label: 'Dosimeter Network', summary: 'Blocks 10% more radiation.', effects: { radiationShielding: 0.1 } },
         { id: 'shift_scheduling', label: 'Shift Scheduling', summary: 'Crewed tasks go 20% faster.', effects: { taskSpeedBonus: 0.2 } },
+        { id: 'ergonomic_bays', label: 'Ergonomic Bays', summary: 'Morale drops 12% slower and tasks go 10% faster.', effects: { moraleDecayMult: 0.88, taskSpeedBonus: 0.1 } },
         { id: 'storm_shelter', label: 'Storm Shelter', summary: 'Blocks 15% more radiation.', effects: { radiationShielding: 0.15 } },
+        { id: 'boron_shielding', label: 'Boron Shielding', summary: 'Blocks 20% more radiation, but heavy hull cuts rover yield 10%.', effects: { radiationShielding: 0.2, roverYieldMult: 0.9 } },
+        { id: 'medbay_automation', label: 'Medbay Automation', summary: 'Crew spirit drops 15% slower.', effects: { moraleDecayMult: 0.85 } },
+        { id: 'eva_exosuits', label: 'EVA Exosuits', summary: 'Tasks go 25% faster and block 15% radiation, but tire crew 10% faster.', effects: { taskSpeedBonus: 0.25, radiationShielding: 0.15, moraleDecayMult: 1.1 } },
         { id: GAMEPLAY_UPGRADES.protectedRotation, label: 'Protected Rotation', summary: 'Spend 2 Food to give one crew member their rest Morale while they work this Sol.' },
     ]),
 ];
@@ -490,8 +517,13 @@ export const STORAGE_KEYS = {
     PROFILE: 'mars-outpost:profile-v1',
 } as const;
 
+export function cloneValue<T>(value: T): T {
+    if (typeof structuredClone === 'function') return structuredClone(value);
+    return JSON.parse(JSON.stringify(value)) as T;
+}
+
 export function cloneSetup(setup: MissionSetupInput): MissionSetupInput {
-    return JSON.parse(JSON.stringify(setup)) as MissionSetupInput;
+    return cloneValue(setup);
 }
 
 export function computeSkillModifiers(

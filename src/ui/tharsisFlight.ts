@@ -1,11 +1,12 @@
-import { Draggable, Interactable, UINode, UIPositionType, px, uiNodeWorldBox, type Color, type Entity, type FocusManagerState,
-    type InputState, type UIEventQueue, type World } from 'esengine';
+import {
+    Draggable, Interactable, UINode, UIPositionType, px, uiNodeWorldBox, type Color, type Entity, type FocusManagerState,
+    type InputState, type UIEventQueue, type World
+} from 'esengine';
 import type { CargoItemId, CrewMember, MainLoopResult, MissionSetupInput, ResourcePool } from '../contracts/gameContract';
 import { formatResource, missionDeadline, resourceEntries, RESOURCE_LABELS } from '../data/missions';
 import { expeditionChecklist, type Technique } from '../data/tharsisOrders';
-import { checkGeminiConnection } from '../services/geminiPlanner';
-import { discussWork, draftSurveyBriefing, type DiscussionMessage, type TaskDraft } from '../services/tharsisAries';
-import { advanceSol, commitBriefing, continueAfterOutcome, continueAfterReport, createInitialGameState, isTharsis } from '../simulation/solEngine';
+import { discussWork, type DiscussionMessage, type TaskDraft } from '../services/tharsisAries';
+import { advanceSol, continueAfterOutcome, continueAfterReport, createInitialGameState, isTharsis } from '../simulation/solEngine';
 import { defaultLoad, expeditionFor, fieldCrew, fieldReturnEstimate, resourceForecast, roverPosition, stormDay, type RoverLoad } from '../simulation/tharsis';
 import { briefingPreview, captainCanPreview, resolveBriefing, selectBriefingPreview, choiceBlock, commitmentLabel } from '../simulation/tharsisEvents';
 import { LOW_MORALE, radiationEffects, SEVERE_MORALE } from '../simulation/tharsisConditions';
@@ -75,6 +76,10 @@ const WEATHER_ICONS: Record<string, string> = {
 };
 type Panel = WorkPanel | 'roverChecklist' | 'cargo' | 'roverCargo' | 'log' | 'aries' | 'resources' | 'conditions' | 'objectives' | 'abilities' | 'solReview' | 'audio';
 
+const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+const EXPEDITION_MARGIN: Color = { r: 0.227, g: 0.114, b: 0.090, a: 1 };
+
 interface Options {
     world: World;
     root: Entity;
@@ -85,10 +90,11 @@ interface Options {
     setup: MissionSetupInput;
     profile: AudioSettings & { highContrast: boolean; reducedMotion: boolean };
     onFinish: (result: MainLoopResult) => void;
-    onExit: (target: 'menu' | 'mission') => void;
+    onExit: (target: 'menu' | 'mission' | 'scoreboard') => void;
     onRetry: () => void;
     onVolume: (field: VolumeField, value: number) => void;
     onSound: (enabled: boolean) => void;
+    onMarginColor?: (color: Color) => void;
 }
 
 export type RunButton = (key: string, parent: Entity, bounds: Bounds, action: () => void, options?: Parameters<FlightUi['button']>[3]) => ReturnType<FlightUi['button']>;
@@ -97,7 +103,7 @@ function resourceLine(pool: ResourcePool, inRover = false): string {
     return resourceEntries(pool).map(([key, val]) => inRover && key === 'oxygen' ? `${val} O₂` : formatResource(key, val)).join('   ');
 }
 
-export function mountTharsisFlight({ world, root, events, input, focus, art, setup, profile, onFinish, onExit, onRetry, onVolume, onSound }: Options) {
+export function mountTharsisFlight({ world, root, events, input, focus, art, setup, profile, onFinish, onExit, onRetry, onVolume, onSound, onMarginColor }: Options) {
     const initial = createInitialGameState(setup);
     if (!isTharsis(initial)) throw new Error('Expected the Tharsis expedition setup.');
     const state = initial;
@@ -115,7 +121,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     // (which happens on every change) never restarts them. Rebuilt only when the view switches.
     let backdrop: Entity | null = null;
     let backdropView: 'station' | 'expedition' | null = null;
-    let ambience: () => void = () => {};
+    let ambience: () => void = () => { };
     let crewWalkers: StationCrew | null = null;
     /** The astronaut outside at the survey site, while the rover is there (expedition view). */
     let eva: Eva | null = null;
@@ -161,21 +167,18 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         backdropView = view;
         const backUi = makeFlightUi(world, events, backdrop, art, focus, profile);
         const atSite = view === 'expedition';
+        onMarginColor?.(atSite ? EXPEDITION_MARGIN : backUi.palette.ink);
         const scene = mountSceneAmbience(backUi, backdrop, backdropMotion, atSite ? SITE : STATION, atSite ? SITE_AMBIENCE : STATION_AMBIENCE);
         crewWalkers = atSite ? null : mountStationCrew(backUi, backdrop, backdropMotion, crewOnStation());
         eva = atSite ? mountEva(backUi, backdrop, backdropMotion) : null;
         ambience = () => { scene(); crewWalkers?.tick(); eva?.tick(); };
     }
-    let ask: AbortController | null = null;
-    let sentMessage: DiscussionMessage | null = null;
-    let pendingBriefing: AbortController | null = null;
     let topic: string | null = null;
     const conversations = new Map<string | null, { messages: DiscussionMessage[]; draft: TaskDraft | null }>();
     const methods = new Map<string, Technique>();
     const pendingLeads = new Map<string, string>();
     let chatPage = 0;
-    let terminalStatus: TerminalStatus = 'checking';
-    let apiProbe: AbortController | null = null;
+    const terminalStatus: TerminalStatus = 'local';
     let draftNotice = '';
     let prompt = '';
     let selectedResource: keyof ResourcePool = 'energy';
@@ -187,8 +190,10 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     /** The game menu (retry, new mission, main menu) under the Menu button. */
     let gameMenu = false;
     let coach: Coach | null = null;
-    const levels: AudioSettings = { masterVolume: profile.masterVolume, musicVolume: profile.musicVolume,
-        sfxVolume: profile.sfxVolume, soundEnabled: profile.soundEnabled };
+    const levels: AudioSettings = {
+        masterVolume: profile.masterVolume, musicVolume: profile.musicVolume,
+        sfxVolume: profile.sfxVolume, soundEnabled: profile.soundEnabled
+    };
     let trackLabel: Entity | null = null;
     let shownTrack: string | null = null;
     let textInput: Entity | null = null;
@@ -203,31 +208,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     const stop = world.onDespawn(entity => {
         if (entity !== root) return;
         stop();
-        ask?.abort();
-        pendingBriefing?.abort();
-        apiProbe?.abort();
     });
-
-    function probeAries() {
-        if (apiProbe) return;
-        const operation = new AbortController();
-        apiProbe = operation;
-        terminalStatus = 'checking';
-        dirty = true;
-        void checkGeminiConnection(operation.signal).then(configured => {
-            if (!world.valid(root) || operation.signal.aborted) return;
-            apiProbe = null;
-            if (terminalStatus === 'checking') terminalStatus = configured ? 'configured' : 'fallback';
-            dirty = true;
-        });
-    }
-
-    function settleAries(success: boolean) {
-        apiProbe?.abort();
-        apiProbe = null;
-        terminalStatus = success ? 'online' : 'fallback';
-        dirty = true;
-    }
 
     function open(next: Panel | null, orderId?: string) {
         if (next === 'roverChecklist' && panel !== next) issuePage = null;
@@ -278,29 +259,17 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
 
     function submit(value: string) {
         const text = value.trim().slice(0, 480);
-        if (!text || ask || terminalStatus === 'fallback') return;
+        if (!text) return;
         const room = conversation();
-        const requestedTopic = topic;
-        const operation = new AbortController();
-        ask = operation;
         const previous = room.messages[room.messages.length - 1];
-        sentMessage = previous?.speaker === 'crew' && previous.text === text ? previous : { speaker: 'crew', text };
-        if (sentMessage !== previous) room.messages.push(sentMessage);
+        if (previous?.speaker !== 'crew' || previous.text !== text) room.messages.push({ speaker: 'crew', text });
         chatPage = 0;
         draftNotice = '';
         prompt = '';
+        const reply = discussWork(state, topic, room.messages, room.draft);
+        room.messages.push({ speaker: 'aries', text: reply.message });
+        if (reply.draft !== undefined) room.draft = reply.draft;
         dirty = true;
-        void discussWork(state, requestedTopic, room.messages, room.draft, operation.signal).then(reply => {
-            if (!world.valid(root) || operation.signal.aborted) return;
-            ask = null;
-            sentMessage = null;
-            settleAries(Boolean(reply));
-            if (reply) {
-                room.messages.push({ speaker: 'aries', text: reply.message });
-                if (reply.draft !== undefined) room.draft = reply.draft;
-            } else if (topic === requestedTopic && !prompt) prompt = text;
-            if (panel === 'aries') dirty = true;
-        });
     }
 
     function pickResource(key: keyof ResourcePool) {
@@ -372,29 +341,13 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
     function endSol() {
         const result = advanceSol(state);
         if (!result.advanced) { message = result.reason ?? ''; dirty = true; return; }
-        if (sentMessage && !prompt) prompt = sentMessage.text;
-        sentMessage = null;
-        ask?.abort();
-        ask = null;
         open(null);
         reportPage = 0;
-        reportAnimStart = performance.now();
+        reportAnimStart = nowMs();
         if (state.result) onFinish(state.result);
-        else if (!run.briefingCommitted) {
-            const operation = new AbortController();
-            pendingBriefing = operation;
-            const sol = state.sol;
-            void draftSurveyBriefing(state, operation.signal).then(briefing => {
-                if (!world.valid(root) || operation.signal.aborted) return;
-                pendingBriefing = null;
-                settleAries(Boolean(briefing && commitBriefing(state, sol, briefing)));
-            });
-        }
     }
 
     function closeReport() {
-        pendingBriefing?.abort();
-        pendingBriefing = null;
         continueAfterReport(state);
         dirty = true;
     }
@@ -706,7 +659,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         // Bottom left: where and when, with Goals and Weather under it.
         const clock = ui.frame(root, [12, 572, 324, 136], p.ink, day ? p.rust : p.edge);
         ui.label(clock, [12, 2, 300, 22], expeditionFor(state).region, { display: true, size: 17, fit: 12, color: p.secondary });
-        ui.label(clock, [12, 24, 300, 58], `SOL ${sol} / ${missionDeadline(state)}`, { display: true, size: 48, fit: 30, color: p.amber });
+        ui.label(clock, [12, 24, 300, 58], run.expedition === 'infinite' ? `SOL ${sol} · ENDLESS` : `SOL ${sol} / ${missionDeadline(state)}`, { display: true, size: 48, fit: 26, color: p.amber });
         if (interactive) {
             objectiveGlow = ui.box(clock, [9, 87, 148, 38], { r: 0.4, g: 0.85, b: 0.9, a: 0.35 });
             button('objectives', clock, [12, 90, 142, 32], () => open('objectives'), { label: 'Goals', labelSize: 15, tone: 'plain' });
@@ -783,7 +736,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         const p = ui.palette;
         if (run.phase === 'briefing') {
             const { briefing } = run;
-            const source = briefing.source === 'Gemini' ? 'Live API' : 'Authored';
+            const source = briefing.source;
             const box = console([132, 68, 1016, 584], briefing.title, `Sol ${state.sol} · ${briefing.area === 'rover' ? 'Rover briefing' : 'Station briefing'} · ${source}`);
             const storm = run.stormBriefing;
             if (storm) ui.label(box, [22, 88, 968, 54], `${storm.title.toUpperCase()}  ·  ${storm.observation}`, { size: 14, color: p.amber, wrap: true, top: true });
@@ -808,9 +761,9 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
                 });
                 if (canPreview) button(`preview-choice-${index}`, card, [width - previewWidth - 11, 211, previewWidth - 10, 36],
                     () => change(() => selectBriefingPreview(state, index)), {
-                        label: run.previewedChoice === index ? 'Previewed' : 'Preview outcome', labelSize: 12,
-                        disabled: Boolean(blocker) || run.previewedChoice !== null,
-                    });
+                    label: run.previewedChoice === index ? 'Previewed' : 'Preview outcome', labelSize: 12,
+                    disabled: Boolean(blocker) || run.previewedChoice !== null,
+                });
             });
             const preview = briefingPreview(state);
             if (preview) {
@@ -870,16 +823,16 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
                 button('reportPrev', box, [22, 534, 100, 44], () => { reportPage--; dirty = true; }, { label: 'Previous', disabled: !reportPage });
                 button('reportNext', box, [132, 534, 100, 44], () => { reportPage++; dirty = true; }, { label: 'More', disabled: (reportPage + 1) * max >= history.length });
             }
-            if (pendingBriefing) ui.label(box, [300, 536, 390, 44], 'A.R.I.E.S. is drafting the next briefing…', { size: 14, color: p.cyan });
             button('nextBrief', box, [776, 530, 268, 52], closeReport, { label: state.result ? 'View debrief' : 'Open next briefing', tone: 'primary' });
         } else if (state.result) {
             const result = state.result;
             const box = console([148, 88, 984, 544], result.outcome === 'victory' ? 'Survey complete' : 'Mission ended', `SOL ${result.solReached} · ${result.researchPointsEarned} RESEARCH EARNED`);
             ui.label(box, [22, 92, 912, 90], result.reason, { size: 22, wrap: true, color: result.outcome === 'victory' ? p.good : p.amber });
             result.lessons.slice(0, 4).forEach((lesson, index) => ui.label(box, [22, 192 + 58 * index, 912, 52], lesson, { size: 17, wrap: true }));
-            button('menu', box, [22, 454, 286, 52], () => onExit('menu'), { label: 'Main Menu', tone: 'primary' });
-            button('mission', box, [331, 454, 286, 52], () => onExit('mission'), { label: 'New Mission' });
-            button('retry', box, [640, 454, 286, 52], onRetry, { label: training ? 'Retry Training' : 'Retry Mission' });
+            button('menu', box, [22, 454, 214, 52], () => onExit('menu'), { label: 'Main Menu', tone: 'primary' });
+            button('mission', box, [252, 454, 214, 52], () => onExit('mission'), { label: 'New Mission' });
+            button('scoreboard', box, [482, 454, 214, 52], () => onExit('scoreboard'), { label: 'Scoreboard' });
+            button('retry', box, [712, 454, 214, 52], onRetry, { label: training ? 'Retry Training' : 'Retry Mission' });
         }
     }
 
@@ -922,28 +875,35 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
             showSolReview(ui, content, button, state, status!, openAction, () => open(null), endSol);
         }
         else if (panel) {
-            const titles: Partial<Record<Panel, string>> = { roverChecklist: 'Rover Checklist', cargo: 'Station storage', roverCargo: 'Expedition supplies',
+            const titles: Partial<Record<Panel, string>> = {
+                roverChecklist: 'Rover Checklist', cargo: 'Station storage', roverCargo: 'Expedition supplies',
                 log: 'Mission log', aries: 'A.R.I.E.S. Terminal', assignments: 'Scheduled tasks', resources: 'Resource management',
-                conditions: 'Environmental conditions', objectives: 'Mission Objectives', abilities: 'Crew Specialties', audio: 'Audio Settings' };
+                conditions: 'Environmental conditions', objectives: 'Mission Objectives', abilities: 'Crew Specialties', audio: 'Audio Settings'
+            };
             const title = titles[panel] ?? 'Work orders';
             const content = console([48, 28, 1184, 664], title);
             button('close', content, [1028, 12, 120, 42], () => open(null), { label: 'Close' });
             if (message) ui.label(content, [24, 608, 1120, 32], message, { color: ui.palette.amber, size: 15, wrap: true });
             if (panel === 'roverChecklist') {
                 draft ??= defaultLoad(state);
-                showRoverChecklist({ state, ui, content, button, draft, change, reset: () => { draft = defaultLoad(state); dirty = true; },
+                showRoverChecklist({
+                    state, ui, content, button, draft, change, reset: () => { draft = defaultLoad(state); dirty = true; },
                     issuePage, showIssues: page => { issuePage = page; dirty = true; }, openAction,
-                    dispatch: () => { draft = null; open(null); goTo('expedition'); } });
+                    dispatch: () => { draft = null; open(null); goTo('expedition'); }
+                });
             } else if (panel === 'cargo' || panel === 'roverCargo') {
-                showStorage({ state, ui, content, button, area: panel === 'cargo' ? 'station' : 'rover', change,
-                    highlight: selected as CargoItemId | undefined, open: target => open(target) });
+                showStorage({
+                    state, ui, content, button, area: panel === 'cargo' ? 'station' : 'rover', change,
+                    highlight: selected as CargoItemId | undefined, open: target => open(target)
+                });
             } else if (panel === 'aries') {
                 const room = conversation();
-                textInput = showTerminal({ ui, content, world, events, button, state, topic, history: room.messages, page: chatPage, status: terminalStatus,
-                    pending: Boolean(ask), prompt, draft: room.draft, notice: draftNotice, onSubmit: submit,
+                textInput = showTerminal({
+                    ui, content, world, events, button, state, topic, history: room.messages, page: chatPage, status: terminalStatus,
+                    pending: false, prompt, draft: room.draft, notice: draftNotice, onSubmit: submit,
                     onInput: value => { prompt = value; }, onPage: value => { chatPage = value; dirty = true; },
                     onDiscard: () => { room.draft = null; draftNotice = ''; dirty = true; }, onAccept: acceptDraft,
-                    onQueue: () => open('assignments'), onRetry: probeAries, onObjectives: () => open('objectives'),
+                    onQueue: () => open('assignments'), onRetry: () => { dirty = true; }, onObjectives: () => open('objectives'),
                     onWorkOrders: () => topic ? openWork(topic) : open('rover'),
                 });
             } else if (panel === 'objectives') {
@@ -979,7 +939,8 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
                 const lines = state.dailyLog.slice(-9).reverse();
                 lines.forEach((entry, index) => ui.label(content, [24, 84 + index * 52, 1120, 48], `SOL ${entry.sol}   ${entry.text}`, { size: 16, wrap: true, color: entry.kind === 'warn' ? ui.palette.amber : ui.palette.text }));
             } else {
-                showWorkConsole({ state, ui, content, button, panel, selected,
+                showWorkConsole({
+                    state, ui, content, button, panel, selected,
                     methods, selectMethod: (id, technique) => { if (technique) methods.set(id, technique); else methods.delete(id); dirty = true; },
                     pendingLead: selected ? (pendingLeads.get(selected) ?? null) : null,
                     selectLead: (orderId, leadId) => { pendingLeads.set(orderId, leadId); dirty = true; },
@@ -1007,19 +968,27 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
         }
     }
 
-    probeAries();
     function musicStatus() {
         return levels.soundEnabled ? shownTrack ? `Now playing · ${shownTrack}` : 'Loading mission music…' : 'Audio muted';
     }
     return () => {
         backdropMotion.tick();
         ambience();
-        if (dirty && !dragged.size) render();
+        if (dirty && !dragged.size) {
+            try {
+                render();
+            } catch (err) {
+                const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+                const errUi = makeFlightUi(world, events, doorLayer, art, focus, profile);
+                const box = errUi.frame(doorLayer, [40, 40, 1200, 120], errUi.palette.ink, errUi.palette.bad);
+                errUi.label(box, [16, 12, 1168, 96], `Render error: ${msg}`, { size: 18, color: errUi.palette.amber, wrap: true });
+            }
+        }
         moveCrewTags();
         if (airlock && !airlock.tick()) airlock = null;
         coach?.tick();
         if (!profile.reducedMotion) {
-            const pulse = 0.18 + 0.32 * (0.5 + 0.5 * Math.sin(performance.now() * 0.005));
+            const pulse = 0.18 + 0.32 * (0.5 + 0.5 * Math.sin(nowMs() * 0.005));
             if (objectiveGlow !== null && world.valid(objectiveGlow)) {
                 setVisualColor(world, objectiveGlow, { r: 0.4, g: 0.85, b: 0.9, a: pulse });
             }
@@ -1027,7 +996,7 @@ export function mountTharsisFlight({ world, root, events, input, focus, art, set
                 setVisualColor(world, warningGlow, { r: 0.93, g: 0.69, b: 0.4, a: pulse });
             }
             if (reportBars.length && run.phase === 'report') {
-                const elapsed = performance.now() - reportAnimStart;
+                const elapsed = nowMs() - reportAnimStart;
                 for (const bar of reportBars) {
                     if (!world.valid(bar.entity)) continue;
                     const t = Math.min(1, Math.max(0, (elapsed - bar.delayMs) / 600));

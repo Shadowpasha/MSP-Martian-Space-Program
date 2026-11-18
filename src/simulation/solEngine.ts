@@ -7,6 +7,7 @@
 import { expeditionOf } from '../data/expeditions';
 import {
     cloneSetup,
+    cloneValue,
     computeSkillModifiers,
     DEFAULT_MARS_SETUP,
     DEFAULT_SKILL_MODIFIERS,
@@ -137,7 +138,7 @@ export function advanceSol(state: OutpostGameState): { advanced: boolean; reason
 }
 
 export function previewEndSol(state: TharsisState): TharsisState {
-    const projected = structuredClone(state);
+    const projected = cloneValue(state);
     advanceSol(projected);
     return projected;
 }
@@ -154,7 +155,7 @@ export function continueAfterOutcome(state: TharsisState): void {
 
 export function commitBriefing(state: TharsisState, sol: number, briefing: SurveyBriefing): boolean {
     const run = state.tharsis;
-    if (run.expedition === 'training' || state.sol !== sol || run.phase !== 'report' || run.briefingCommitted || briefing.area !== run.briefing.area || briefing.source !== 'Gemini') return false;
+    if (run.expedition === 'training' || state.sol !== sol || run.phase !== 'report' || run.briefingCommitted || briefing.area !== run.briefing.area) return false;
     if (run.briefing.system === 'storm') run.stormBriefing = run.briefing;
     run.briefing = briefing;
     run.briefingCommitted = true;
@@ -186,13 +187,15 @@ function advanceTharsisSol(state: TharsisState): { advanced: boolean; reason?: s
     recordSol(state, completed);
     run.reportSol = state.sol;
     run.phase = 'report';
+    const infinite = run.expedition === 'infinite';
     const deadline = missionDeadline(state);
-    if (collapse || state.goal.completed || state.sol >= deadline) {
+    if (collapse || (!infinite && (state.goal.completed || state.sol >= deadline))) {
         const { site, surveyHours, dataKind } = expeditionOf(run.expedition);
         const reason = collapse ?? (state.goal.completed ? `The crew docked with ${surveyHours} hours of ${dataKind} from ${site} by Sol ${state.sol}.` :
             run.rover ? `Sol ${deadline} ended with the crew still in the field (${run.hours}/${surveyHours}h).` :
                 run.returnedWithData ? `Sol ${deadline} ended below the required station reserves.` : `Sol ${deadline} ended without a complete data drive at the station.`);
-        finalizeRun(state, state.goal.completed && !collapse ? 'victory' : 'defeat', reason, report);
+        finalizeRun(state, infinite || (state.goal.completed && !collapse) ? 'victory' : 'defeat',
+            infinite ? `Survived ${state.sol} Sols at ${site}: ${reason}` : reason, report);
         return { advanced: true };
     }
     state.sol++;

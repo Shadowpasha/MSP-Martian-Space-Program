@@ -1,11 +1,15 @@
 import { AVAILABLE_CREW, DEFAULT_CREW, SKILL_TREE_UPGRADES, type MainLoopResult, type SkillUpgradeDef } from '../contracts/gameContract';
 import { LAUNCH_CREW_SIZE } from './missions';
 
+export const VETERAN_SOLS = 25;
+
 export interface PlaytestProfile {
     crewIds: string[];
     upgradeIds: string[];
     researchPoints: number;
     awardedRuns: string[];
+    crewSols: Record<string, number>;
+    missionStars: Record<string, number>;
     reducedMotion: boolean;
     highContrast: boolean;
     /** Music and sound effects (the mixer mutes everything when off). */
@@ -28,6 +32,19 @@ function strings(value: unknown): string[] {
     return Array.isArray(value) ? [...new Set(value.filter((entry): entry is string => typeof entry === 'string'))] : [];
 }
 
+function numberMap(value: unknown): Record<string, number> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(value)) {
+        if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[k] = Math.floor(v);
+    }
+    return out;
+}
+
+export function isVeteran(profile: PlaytestProfile, crewId: string): boolean {
+    return (profile.crewSols[crewId] ?? 0) >= VETERAN_SOLS;
+}
+
 export function loadProfile(stored: unknown, legacySkills: unknown, preferReducedMotion: boolean): PlaytestProfile {
     const saved = (stored && typeof stored === 'object' ? stored : {}) as Partial<PlaytestProfile>;
     const savedCrew = strings(saved.crewIds).filter(id => CREW_IDS.has(id));
@@ -37,6 +54,8 @@ export function loadProfile(stored: unknown, legacySkills: unknown, preferReduce
         upgradeIds: strings([...strings(saved.upgradeIds), ...strings(legacySkills)]).filter(id => UPGRADE_IDS.has(id)),
         researchPoints,
         awardedRuns: strings(saved.awardedRuns),
+        crewSols: numberMap(saved.crewSols),
+        missionStars: numberMap(saved.missionStars),
         reducedMotion: typeof saved.reducedMotion === 'boolean' ? saved.reducedMotion : preferReducedMotion,
         highContrast: saved.highContrast === true,
         // `sound` was the toggle's name in an earlier build; honour it if a save still has it.
@@ -50,7 +69,11 @@ export function loadProfile(stored: unknown, legacySkills: unknown, preferReduce
 
 export function purchaseProblem(profile: PlaytestProfile, node: SkillUpgradeDef): string | null {
     if (profile.upgradeIds.includes(node.id)) return 'Already owned';
-    if (node.prerequisites.some(id => !profile.upgradeIds.includes(id))) return 'Unlock the required nodes first';
+    const ownedPrereqs = node.prerequisites.filter(id => profile.upgradeIds.includes(id)).length;
+    const needed = node.requiredCount ?? node.prerequisites.length;
+    if (ownedPrereqs < needed) {
+        return node.requiredCount ? `Unlock any ${needed} required nodes first` : 'Unlock the required nodes first';
+    }
     const missing = node.cost - profile.researchPoints;
     return missing > 0 ? `Need ${missing} more research point${missing === 1 ? '' : 's'}` : null;
 }
@@ -81,8 +104,40 @@ export function awardResearch(profile: PlaytestProfile, runId: string, earned: n
 
 const TRAINING_CLEAR = 'tharsis-training-first-clear';
 
-export function recordResearch(profile: PlaytestProfile, runId: string, result: MainLoopResult, training: boolean): PlaytestProfile {
-    if (!training) return awardResearch(profile, runId, result.researchPointsEarned);
+export interface RunMeta {
+    missionId?: string;
+    crewIds?: readonly string[];
+    targetSol?: number;
+}
+
+export function recordResearch(
+    profile: PlaytestProfile,
+    runId: string,
+    result: MainLoopResult,
+    training: boolean,
+    meta?: RunMeta,
+): PlaytestProfile {
+    let next = profile;
+    if (!training) {
+        const crewSols = { ...next.crewSols };
+        for (const id of meta?.crewIds ?? []) {
+            crewSols[id] = (crewSols[id] ?? 0) + Math.max(1, result.solReached);
+        }
+        const missionStars = { ...next.missionStars };
+        let starBonus = 0;
+        if (result.outcome === 'victory' && meta?.missionId) {
+            const early = (meta.targetSol ?? result.targetSol) - result.solReached >= 3;
+            const stars = early ? 3 : 2;
+            const prev = missionStars[meta.missionId] ?? 0;
+            if (stars > prev) {
+                starBonus = (stars - prev) * 2;
+                missionStars[meta.missionId] = stars;
+                result.researchPointsEarned += starBonus;
+            }
+        }
+        next = { ...next, crewSols, missionStars };
+        return awardResearch(next, runId, result.researchPointsEarned);
+    }
     if (result.outcome !== 'victory' || profile.awardedRuns.includes(TRAINING_CLEAR)) {
         result.researchPointsEarned = 0;
         return profile;

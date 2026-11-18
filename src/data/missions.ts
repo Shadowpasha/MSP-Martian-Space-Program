@@ -101,6 +101,37 @@ export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
         setup: WEATHER_SURVEY, difficulty: 1, briefing: THARSIS_BRIEFING,
         image: 'assets/textures/missions/previews/tharsis_weather_survey.png',
     };
+    const infiniteSetup: MissionSetupInput = {
+        ...surveyBase,
+        rules: 'tharsis-expedition',
+        expedition: 'infinite',
+        targetSol: 999,
+        missionGoal: {
+            ...surveyBase.missionGoal,
+            id: 'infinite_survival',
+            title: 'Infinite Survival',
+            description: 'Survive as many Sols as possible at Elysium Outpost through escalating storms.',
+            deadlineSol: 999,
+            requirements: expeditionRequirements('infinite'),
+            minimumReserves: { ...EXPEDITION_RESERVES },
+            requiredEquipment: { windSampler: 1 },
+        },
+    };
+    const infiniteOffer: MissionOffer = {
+        title: 'Infinite Survival',
+        site: 'MARS · ENDLESS',
+        description: 'Survive as many Sols as possible and post your score.',
+        setup: infiniteSetup,
+        difficulty: 3,
+        briefing: {
+            task: 'No rescue window is scheduled. Manage station life support, negotiate custom tasks, and survive escalating storm waves as long as possible.',
+            basis: 'Long-duration Mars habitat endurance',
+            fact: 'A conjunction-class Mars mission keeps crews on the surface for roughly 500 days before the return transfer window opens.',
+            lesson: 'Endless survival rewards recycling upgrades, early hydroponics, and careful storm rationing.',
+            source: 'NASA Mars Design Reference Architecture',
+        },
+        image: 'assets/textures/missions/previews/radiation_detective.png',
+    };
     return [
         ...(pending ? [{
             title: pending.missionGoal.title, site: pending.planet.toUpperCase() + ' · TEAM SETUP',
@@ -110,6 +141,7 @@ export function missionOffers(pending?: MissionSetupInput): MissionOffer[] {
         training,
         ...(!pending ? [survey] : []),
         ...laterMissions,
+        infiniteOffer,
     ];
 }
 
@@ -130,6 +162,7 @@ export function missionDeadline(setup: { targetSol: number; goal?: { deadlineSol
 }
 
 export function victoryCriteria(setup: MissionSetupInput): string {
+    if (setup.expedition === 'infinite') return 'Survive as many Sols as possible at Elysium Outpost.';
     const reserves = resourceEntries(setup.missionGoal.minimumReserves).map(([key, amount]) => formatResource(key, amount));
     const goal = `Dock with both travelers and ${expeditionOf(setup.expedition).surveyHours}h of data by Sol ${missionDeadline(setup)}.`;
     return reserves.length ? `${goal} Keep ${reserves.join(' · ')} at the station.` : goal;

@@ -114,7 +114,9 @@ test('Radiation Detective (Medium) and Ice Hunter (Hard) are expeditions with th
     assert.deepEqual(ice.missionGoal.requiredEquipment, { iceDrill: 1 });
     assert.equal(EXPEDITIONS.radiation.hazard.kind, 'solar');
     for (const id of ['moon_shadow_ice', 'oxygen_maker', 'space_garden']) {
-        assert.equal(expeditionSetup(NASA_MISSIONS.find(m => m.id === id)!), undefined, `${id} is coming soon`);
+        const extra = expeditionSetup(NASA_MISSIONS.find(m => m.id === id)!);
+        assert.ok(extra, `${id} is now playable`);
+        assert.equal(extra.rules, 'tharsis-expedition');
     }
 });
 
