@@ -38,7 +38,7 @@ export const TRAINING_RUN: MissionSetupInput = {
         deadlineSol: 5,
         requirements: expeditionRequirements('training'),
     },
-    crew: AVAILABLE_CREW.filter(member => ['captain', 'scientist', 'pilot', 'engineer'].includes(member.role))
+    crew: AVAILABLE_CREW.filter(member => ['crew_captain', 'crew_scientist', 'crew_pilot', 'crew_engineer'].includes(member.id))
         .map((member, index) => ({ ...member, stageAnchor: { ...surveyBase.crew[index]!.stageAnchor } })),
     startingResources: { energy: 80, food: 44, water: 48, oxygen: 46, res: 14 },
     startingConditions: { ...surveyBase.startingConditions, radiation: 8 },

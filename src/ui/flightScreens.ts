@@ -4,9 +4,9 @@ import {
     type CrewMember, type MissionRequirement, type SkillUpgradeDef, type TaskCategory, type UpgradeBranch,
 } from '../contracts/gameContract';
 import { CARGO_BY_ID, normalizeCargo } from '../data/cargo';
-import { CREW_ABILITIES } from '../data/crewAbilities';
+import { CREW_ABILITIES, crewAbilityFor } from '../data/crewAbilities';
 import { LAUNCH_CREW_SIZE, missionDeadline, victoryCriteria, type MissionOffer } from '../data/missions';
-import { isVeteran, purchaseProblem, VETERAN_SOLS, type PlaytestProfile } from '../data/profile';
+import { crewUnlockProblem, isVeteran, purchaseProblem, VETERAN_SOLS, type PlaytestProfile } from '../data/profile';
 import { MENU_BACKGROUND, SIDEBAR_BACKGROUND, type Bounds, type FlightUi, type IconName } from './flightUi';
 import { mountMenuWalker } from './menuWalker';
 import { mountMenuAmbience } from './menuAmbience';
@@ -301,49 +301,67 @@ export function showCrew(
     let lastTap = 0;
     let field = false;
     let cardTaps = { id: '', time: 0, count: 0 };
-    const cards = AVAILABLE_CREW.map((member, index) => {
-        const cardX = 12 + (index % 3) * 204;
-        const cardY = 48 + Math.floor(index / 3) * 270;
-        const button = ui.button(grid, [cardX, cardY, 192, 262], () => {
-            selected = member;
-            selectedId(member.id);
-            if (member.role === 'scientist') tap();
-            // Double-tap a card to add or remove that crew member. Only the second quick tap
-            // counts, so a longer burst of taps does not keep flipping them on and off.
-            const time = Date.now();
-            cardTaps = cardTaps.id === member.id && time - cardTaps.time < DOUBLE_TAP_MS
-                ? { id: member.id, time, count: cardTaps.count + 1 }
-                : { id: member.id, time, count: 1 };
-            if (cardTaps.count === 2) { toggleSelected(); return; }
-            refresh();
-        }, { tone: 'tile' });
-        tutorial.targets.set(`crew-card-${member.id}`, button.entity);
-        const outline = [
-            ui.box(button.entity, [4, 4, 184, 4], p.amber),
-            ui.box(button.entity, [4, 254, 184, 4], p.amber),
-            ui.box(button.entity, [4, 4, 4, 254], p.amber),
-            ui.box(button.entity, [184, 4, 4, 254], p.amber),
-        ];
-        ui.image(button.entity, [32, 10, 128, 160], member.portraitPath);
-        ui.box(button.entity, [8, 172, 176, 2], p.edge);
-        ui.label(button.entity, [14, 180, 166, 26], member.name, { display: true, size: 20, fit: 14 });
-        const roleIcon = ui.icon(button.entity, 14, 208, 20, member.role, p.secondary);
-        const roleText = ui.label(button.entity, [42, 207, 140, 22], titleCase(member.role), { color: p.secondary, size: 14 });
-        const alt = member.role === 'scientist' ? {
-            roleIcon, roleText,
-            icon: ui.icon(button.entity, 14, 208, 20, 'mars', p.good),
-            text: ui.label(button.entity, [42, 207, 142, 22], 'Not a Spy', { color: p.good, size: 14, fit: 11 }),
-        } : null;
-        if (alt) { ui.show(alt.icon, false); ui.show(alt.text, false); }
-        ui.label(button.entity, [14, 230, 168, 22], `Best at ${CATEGORIES[member.perk.bonusCategory]}`, { color: p.amber, size: 13, fit: 11 });
-        // Filled badge with a check mark, so "on the crew" never depends on colour alone.
-        const tag = ui.box(button.entity, [10, 10, 92, 24], p.amber);
-        ui.icon(tag, 4, 4, 16, 'check', p.ink);
-        ui.label(tag, [22, 0, 68, 24], 'On crew', { size: 13, color: p.ink, center: true });
-        // The roster deals in one card after another when the page opens.
-        motion.enter(button.entity, cardX, cardY, { dy: 18, delay: 40 + index * 55, duration: 320, reveal: true });
-        return { button, outline, tag, member, alt };
-    });
+    const CREW_PER_PAGE = 6;
+    const crewPages = Math.max(1, Math.ceil(AVAILABLE_CREW.length / CREW_PER_PAGE));
+    let crewPage = Math.floor(Math.max(0, AVAILABLE_CREW.indexOf(selected)) / CREW_PER_PAGE);
+    let crewPageLabel: Entity | null = null;
+    if (crewPages > 1) {
+        ui.button(root, [1052, 30, 52, 48], () => { crewPage = Math.max(0, crewPage - 1); rebuildGrid(); }, { label: '◀' });
+        crewPageLabel = ui.label(root, [1106, 30, 92, 48], `${crewPage + 1} / ${crewPages}`, { display: true, size: 20, center: true, color: p.amber });
+        ui.button(root, [1200, 30, 52, 48], () => { crewPage = Math.min(crewPages - 1, crewPage + 1); rebuildGrid(); }, { label: '▶' });
+    }
+    const cardLayer = ui.group(grid, [0, 0, 628, 596]);
+    let cards: Array<{ button: ReturnType<FlightUi['button']>; outline: Entity[]; tag: Entity; lockTag: Entity; member: CrewMember; alt: { roleIcon: Entity; roleText: Entity; icon: Entity; text: Entity } | null }> = [];
+    function rebuildGrid(): void {
+        for (const c of cards) ui.world.despawn(c.button.entity);
+        if (crewPageLabel) ui.setText(crewPageLabel, `${crewPage + 1} / ${crewPages}`);
+        const slice = AVAILABLE_CREW.slice(crewPage * CREW_PER_PAGE, (crewPage + 1) * CREW_PER_PAGE);
+        cards = slice.map((member, index) => {
+            const cardX = 12 + (index % 3) * 204;
+            const cardY = 48 + Math.floor(index / 3) * 270;
+            const lockedReason = crewUnlockProblem(profile, member.id);
+            const button = ui.button(cardLayer, [cardX, cardY, 192, 262], () => {
+                selected = member;
+                selectedId(member.id);
+                if (member.role === 'scientist') tap();
+                const time = Date.now();
+                cardTaps = cardTaps.id === member.id && time - cardTaps.time < DOUBLE_TAP_MS
+                    ? { id: member.id, time, count: cardTaps.count + 1 }
+                    : { id: member.id, time, count: 1 };
+                if (cardTaps.count === 2) { toggleSelected(); return; }
+                refresh();
+            }, { tone: 'tile' });
+            tutorial.targets.set(`crew-card-${member.id}`, button.entity);
+            const outline = [
+                ui.box(button.entity, [4, 4, 184, 4], p.amber),
+                ui.box(button.entity, [4, 254, 184, 4], p.amber),
+                ui.box(button.entity, [4, 4, 4, 254], p.amber),
+                ui.box(button.entity, [184, 4, 4, 254], p.amber),
+            ];
+            ui.image(button.entity, [32, 10, 128, 160], member.portraitPath, lockedReason ? { r: 0.45, g: 0.45, b: 0.55, a: 0.7 } : undefined);
+            ui.box(button.entity, [8, 172, 176, 2], p.edge);
+            ui.label(button.entity, [14, 180, 166, 26], member.name, { display: true, size: 20, fit: 14, color: lockedReason ? p.muted : p.text });
+            const roleIcon = ui.icon(button.entity, 14, 208, 20, member.role, lockedReason ? p.muted : p.secondary);
+            const roleText = ui.label(button.entity, [42, 207, 140, 22], titleCase(member.role), { color: lockedReason ? p.muted : p.secondary, size: 14 });
+            const alt = member.role === 'scientist' ? {
+                roleIcon, roleText,
+                icon: ui.icon(button.entity, 14, 208, 20, 'mars', p.good),
+                text: ui.label(button.entity, [42, 207, 142, 22], 'Not a Spy', { color: p.good, size: 14, fit: 11 }),
+            } : null;
+            if (alt) { ui.show(alt.icon, false); ui.show(alt.text, false); }
+            ui.label(button.entity, [14, 230, 168, 22], lockedReason ? 'Locked' : `Best at ${CATEGORIES[member.perk.bonusCategory]}`, { color: lockedReason ? p.muted : p.amber, size: 13, fit: 11 });
+            const tag = ui.box(button.entity, [10, 10, 92, 24], p.amber);
+            ui.icon(tag, 4, 4, 16, 'check', p.ink);
+            ui.label(tag, [22, 0, 68, 24], 'On crew', { size: 13, color: p.ink, center: true });
+            const lockTag = ui.box(button.entity, [10, 10, 82, 24], p.well);
+            ui.icon(lockTag, 4, 4, 16, 'lock', p.muted);
+            ui.label(lockTag, [22, 0, 56, 24], 'Locked', { size: 12, color: p.muted, center: true });
+            ui.show(lockTag, Boolean(lockedReason));
+            motion.enter(button.entity, cardX, cardY, { dy: 18, delay: 40 + index * 55, duration: 320, reveal: true });
+            return { button, outline, tag, lockTag, member, alt };
+        });
+        refresh();
+    }
 
     function tap(): void {
         const time = Date.now();
@@ -369,7 +387,7 @@ export function showCrew(
 
     const portraits = AVAILABLE_CREW.map(member => ui.image(inspector, [118, 12, 128, 160], member.portraitPath));
     const name = ui.label(inspector, [16, 180, 332, 34], '', { display: true, size: 28, fit: 18 });
-    const role = ui.label(inspector, [16, 214, 332, 22], '', { size: 15, color: p.amber });
+    const role = ui.label(inspector, [16, 214, 332, 22], '', { size: 15, fit: 11, color: p.amber });
     const bio = ui.label(inspector, [16, 240, 332, 70], '', { wrap: true, top: true, color: p.secondary, size: 14 });
     // These are real astronauts: every bio names where its facts come from.
     const source = ui.label(inspector, [16, 309, 332, 18], '', { size: 12, color: p.muted });
@@ -385,7 +403,10 @@ export function showCrew(
     const abilityText = ui.label(abilityCard, [12, 26, 316, 46], '', { size: 13, color: p.text, wrap: true, top: true });
     // One action per state: Add (seat open), Remove (on the crew), or a plain "Crew is full" note.
     function addSelected(): void {
-        if (assigned.includes(selected.id) || assigned.length >= LAUNCH_CREW_SIZE) return;
+        if (crewUnlockProblem(profile, selected.id) || assigned.includes(selected.id) || assigned.length >= LAUNCH_CREW_SIZE) {
+            play('buzz');
+            return;
+        }
         assigned = [...assigned, selected.id];
         onCrew(assigned);
         refresh();
@@ -410,7 +431,7 @@ export function showCrew(
     const remove = ui.button(inspector, [16, 532, 332, 44], removeSelected, { label: 'Remove from Crew' });
     const fullPlate = ui.box(inspector, [16, 532, 332, 44], p.well);
     ui.icon(fullPlate, 12, 12, 20, 'lock', p.muted);
-    ui.label(fullPlate, [44, 0, 276, 44], 'Crew is full', { size: 15, color: p.muted });
+    const fullLabel = ui.label(fullPlate, [44, 0, 276, 44], 'Crew is full', { size: 13, fit: 11, color: p.muted, wrap: true });
 
     // The new crew member's badge and seat pip hop in; filling the last seat ripples all four pips.
     function celebrateJoin(): void {
@@ -466,15 +487,18 @@ export function showCrew(
         ui.setText(perkName, selected.perk.title);
         ui.setText(focus, perkScope(selected));
         perks(selected).forEach((line, index) => ui.setText(perkRows[index]!, line));
-        ui.setText(abilityName, CREW_ABILITIES[selected.role].name);
-        ui.setText(abilityText, CREW_ABILITIES[selected.role].description);
-        ui.show(add.entity, !onCrew && !full);
-        add.setDisabled(onCrew || full);
-        ui.show(remove.entity, onCrew);
-        remove.setDisabled(!onCrew);
-        ui.show(fullPlate, !onCrew && full);
+        const ability = crewAbilityFor(selected);
+        ui.setText(abilityName, ability.name);
+        ui.setText(abilityText, ability.description);
+        const lockedReason = crewUnlockProblem(profile, selected.id);
+        ui.show(add.entity, !lockedReason && !onCrew && !full);
+        add.setDisabled(Boolean(lockedReason) || onCrew || full);
+        ui.show(remove.entity, !lockedReason && onCrew);
+        remove.setDisabled(Boolean(lockedReason) || !onCrew);
+        ui.show(fullPlate, Boolean(lockedReason) || (!onCrew && full));
+        ui.setText(fullLabel, lockedReason ?? 'Crew is full');
     }
-    refresh();
+    rebuildGrid();
     return motion.tick;
 }
 

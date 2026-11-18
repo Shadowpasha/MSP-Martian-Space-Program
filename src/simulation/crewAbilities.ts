@@ -1,5 +1,5 @@
 import type { CrewMember, CrewRole } from '../contracts/gameContract';
-import { CREW_ABILITIES } from '../data/crewAbilities';
+import { crewAbilityFor } from '../data/crewAbilities';
 import { FIELD_REST_MORALE } from './tharsisConditions';
 import { localArea, stormDay, syncMorale, type Area, type TharsisState } from './tharsis';
 import { appendLog, applyResourceDelta, spend } from './stateOps';
@@ -7,6 +7,7 @@ import { appendLog, applyResourceDelta, spend } from './stateOps';
 export interface CrewAbilityState {
     doubleShiftStarts: Record<string, number>;
     used: Partial<Record<CrewRole, true>>;
+    usedIds?: Partial<Record<string, true>>;
     trayHarvestSol: number | null;
     stormOverrideSol: number | null;
 }
@@ -16,9 +17,12 @@ const RECOVERY_SOLS = 3;
 const FABRICATION_COST = { res: 4 };
 const TRAY_COST = { water: 2 };
 const OVERRIDE_COST = { energy: 4 };
+const CHELATION_COST = { water: 2, energy: 2 };
+const SYNTHESIS_COST = { energy: 3, res: 2 };
+const RENDEZVOUS_COST = { energy: 4 };
 
 export function doubleShift(state: TharsisState, member: CrewMember) {
-    if (member.role !== 'scientist') return null;
+    if (member.id !== 'crew_scientist') return null;
     const start = state.tharsis.abilities.doubleShiftStarts[member.id];
     if (start === undefined) return null;
     const recovery = start + DOUBLE_SHIFT_SOLS;
@@ -45,8 +49,11 @@ export function crewAbilityStatus(state: TharsisState, member: CrewMember): stri
     const cycle = doubleShift(state, member);
     if (cycle) return cycle.active ? `2 shifts · to Sol ${cycle.recovery - 1}` : `Recovery · to Sol ${cycle.ready - 1}`;
     if (member.role === 'captain') return '1 preview / briefing';
-    if (member.role === 'botanist' && abilities.trayHarvestSol !== null) return `Harvest Sol ${abilities.trayHarvestSol}`;
-    if (member.role === 'pilot' && abilities.stormOverrideSol === state.sol) return 'Override armed';
+    if (member.id === 'crew_botanist' && abilities.trayHarvestSol !== null) return `Harvest Sol ${abilities.trayHarvestSol}`;
+    if (member.id === 'crew_pilot' && abilities.stormOverrideSol === state.sol) return 'Override armed';
+    if (member.id === 'crew_jemison' || member.id === 'crew_whitson' || member.id === 'crew_aldrin') {
+        return abilities.usedIds?.[member.id] ? 'Used' : 'Ready';
+    }
     return abilities.used[member.role] ? 'Used' : 'Ready';
 }
 
@@ -56,7 +63,23 @@ export function crewAbilityProblem(state: TharsisState, area: Area, memberId: st
     const member = local?.crew.find(candidate => candidate.id === memberId && candidate.health > 0);
     if (!local || !member) return 'This crew member is unavailable here.';
     const { abilities, rover, fieldPair, completed } = state.tharsis;
-    if (abilities.used[member.role]) return 'Already used this mission.';
+    const unique = member.id === 'crew_jemison' || member.id === 'crew_whitson' || member.id === 'crew_aldrin';
+    if (unique ? abilities.usedIds?.[member.id] : abilities.used[member.role]) return 'Already used this mission.';
+    if (member.id === 'crew_jemison') {
+        return local.resources.water < CHELATION_COST.water || local.resources.energy < CHELATION_COST.energy
+            ? 'Needs 2 Water and 2 Power here.' : null;
+    }
+    if (member.id === 'crew_whitson') {
+        return area !== 'station' ? 'Microgravity Synthesis needs the station.'
+            : local.resources.energy < SYNTHESIS_COST.energy || local.resources.res < SYNTHESIS_COST.res
+                ? 'Needs 3 station Power and 2 Materials.' : null;
+    }
+    if (member.id === 'crew_aldrin') {
+        if (area !== 'rover' || !rover || (rover.phase !== 'outbound' && rover.phase !== 'returning') || rover.travelLeft <= 1) {
+            return 'Available while driving with >1 Sol left.';
+        }
+        return local.resources.energy < RENDEZVOUS_COST.energy ? 'Needs 4 rover Power.' : null;
+    }
     switch (member.role) {
         case 'captain': return 'Use Read the Situation during a briefing.';
         case 'scientist':
@@ -85,6 +108,29 @@ export function activateCrewAbility(state: TharsisState, area: Area, memberId: s
     const local = localArea(state, area)!;
     const member = local.crew.find(candidate => candidate.id === memberId)!;
     const { abilities, dutyStreak } = state.tharsis;
+    if (member.id === 'crew_jemison') {
+        spend(local.resources, CHELATION_COST);
+        local.conditions.radiation = Math.max(0, Number((local.conditions.radiation - 15).toFixed(1)));
+        local.crew.forEach(c => { if (c.health > 0) c.morale = Math.min(100, c.morale + 10); });
+        syncMorale(local.crew, local.conditions);
+        abilities.usedIds = { ...abilities.usedIds, [member.id]: true };
+        appendLog(state, 'good', `${member.name} · ${crewAbilityFor(member).name}.`);
+        return null;
+    }
+    if (member.id === 'crew_whitson') {
+        spend(local.resources, SYNTHESIS_COST);
+        applyResourceDelta(local.resources, { food: 12, oxygen: 12 });
+        abilities.usedIds = { ...abilities.usedIds, [member.id]: true };
+        appendLog(state, 'good', `${member.name} · ${crewAbilityFor(member).name}.`);
+        return null;
+    }
+    if (member.id === 'crew_aldrin') {
+        spend(local.resources, RENDEZVOUS_COST);
+        state.tharsis.rover!.travelLeft = Math.max(1, state.tharsis.rover!.travelLeft - 1);
+        abilities.usedIds = { ...abilities.usedIds, [member.id]: true };
+        appendLog(state, 'good', `${member.name} · ${crewAbilityFor(member).name}.`);
+        return null;
+    }
     switch (member.role) {
         case 'scientist':
             abilities.doubleShiftStarts[memberId] = state.sol;
@@ -113,7 +159,7 @@ export function activateCrewAbility(state: TharsisState, area: Area, memberId: s
         }
     }
     if (member.role !== 'scientist') abilities.used[member.role] = true;
-    appendLog(state, 'good', `${member.name} · ${CREW_ABILITIES[member.role].name}.`);
+    appendLog(state, 'good', `${member.name} · ${crewAbilityFor(member).name}.`);
     return null;
 }
 

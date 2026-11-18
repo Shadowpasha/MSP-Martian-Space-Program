@@ -45,17 +45,32 @@ export function isVeteran(profile: PlaytestProfile, crewId: string): boolean {
     return (profile.crewSols[crewId] ?? 0) >= VETERAN_SOLS;
 }
 
+export function crewUnlockProblem(profile: PlaytestProfile, crewId: string): string | null {
+    if (crewId === 'crew_jemison') {
+        return Object.values(profile.missionStars).some(s => s >= 3) ? null : 'Earn 3-Star Mastery on any mission';
+    }
+    if (crewId === 'crew_whitson') {
+        const total = Object.values(profile.crewSols).reduce((a, b) => a + b, 0);
+        return total >= 50 ? null : `Log 50 total Sols across runs (${total}/50)`;
+    }
+    if (crewId === 'crew_aldrin') {
+        return (profile.missionStars['goal_moon_shadow_ice'] ?? 0) >= 1 ? null : 'Complete Shadow Ice (Cabeus Crater)';
+    }
+    return null;
+}
+
 export function loadProfile(stored: unknown, legacySkills: unknown, preferReducedMotion: boolean): PlaytestProfile {
     const saved = (stored && typeof stored === 'object' ? stored : {}) as Partial<PlaytestProfile>;
-    const savedCrew = strings(saved.crewIds).filter(id => CREW_IDS.has(id));
     const researchPoints = Number.isSafeInteger(saved.researchPoints) && saved.researchPoints! >= 0 ? saved.researchPoints! : 3;
-    return {
-        crewIds: Array.isArray(saved.crewIds) ? savedCrew.slice(0, LAUNCH_CREW_SIZE) : DEFAULT_CREW.map(member => member.id),
+    const crewSols = numberMap(saved.crewSols);
+    const missionStars = numberMap(saved.missionStars);
+    const baseProfile: PlaytestProfile = {
+        crewIds: [],
         upgradeIds: strings([...strings(saved.upgradeIds), ...strings(legacySkills)]).filter(id => UPGRADE_IDS.has(id)),
         researchPoints,
         awardedRuns: strings(saved.awardedRuns),
-        crewSols: numberMap(saved.crewSols),
-        missionStars: numberMap(saved.missionStars),
+        crewSols,
+        missionStars,
         reducedMotion: typeof saved.reducedMotion === 'boolean' ? saved.reducedMotion : preferReducedMotion,
         highContrast: saved.highContrast === true,
         // `sound` was the toggle's name in an earlier build; honour it if a save still has it.
@@ -65,6 +80,9 @@ export function loadProfile(stored: unknown, legacySkills: unknown, preferReduce
         sfxVolume: clampUnit(saved.sfxVolume, 0.34),
         vibration: saved.vibration !== false,
     };
+    const savedCrew = strings(saved.crewIds).filter(id => CREW_IDS.has(id) && !crewUnlockProblem(baseProfile, id));
+    baseProfile.crewIds = Array.isArray(saved.crewIds) ? savedCrew.slice(0, LAUNCH_CREW_SIZE) : DEFAULT_CREW.map(member => member.id);
+    return baseProfile;
 }
 
 export function purchaseProblem(profile: PlaytestProfile, node: SkillUpgradeDef): string | null {

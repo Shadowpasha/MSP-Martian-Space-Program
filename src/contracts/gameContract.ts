@@ -479,6 +479,42 @@ export const AVAILABLE_CREW: CrewMember[] = [
             costMultiplier: 0.9, speedMultiplier: 1.3, yieldMultiplier: 1.2,
         },
     },
+    {
+        id: 'crew_jemison', name: 'Mae Jemison', role: 'scientist', trait: 'STS-47 Specialist',
+        bio: 'Physician and chemical engineer who flew aboard Space Shuttle Endeavour (STS-47, 1992) as the first Black woman in space.',
+        source: { label: 'NASA: Mae C. Jemison', url: 'https://www.nasa.gov/people/mae-c-jemison/' },
+        portraitPath: 'assets/textures/crew_jemison.png', stamina: 92, health: 96, morale: 88,
+        stageAnchor: { x: 0.63, y: 0.55 },
+        perk: {
+            id: 'perk_orbital_lab', title: 'Orbital Lab Lead', bonusCategory: 'SCI',
+            description: '−25% cost, +40% progress, and +25% yield on Science tasks.',
+            costMultiplier: 0.75, speedMultiplier: 1.4, yieldMultiplier: 1.25,
+        },
+    },
+    {
+        id: 'crew_whitson', name: 'Peggy Whitson', role: 'botanist', trait: 'ISS Endurance Commander',
+        bio: 'Biochemist who logged 675 days in space, commanded the International Space Station twice, and led microgravity biology research.',
+        source: { label: 'NASA: Peggy A. Whitson', url: 'https://www.nasa.gov/people/peggy-a-whitson/' },
+        portraitPath: 'assets/textures/crew_whitson.png', stamina: 95, health: 96, morale: 90,
+        stageAnchor: { x: 0.38, y: 0.56 },
+        perk: {
+            id: 'perk_endurance_bio', title: 'Endurance Commander', bonusCategory: 'BIO',
+            description: '−25% cost, +35% progress, and +25% yield on Hydroponics tasks.',
+            costMultiplier: 0.75, speedMultiplier: 1.35, yieldMultiplier: 1.25,
+        },
+    },
+    {
+        id: 'crew_aldrin', name: 'Buzz Aldrin', role: 'pilot', trait: 'Apollo 11 Lunar Pilot',
+        bio: 'Lunar Module Pilot on Apollo 11 (1969) who pioneered orbital rendezvous techniques and walked on the Moon.',
+        source: { label: 'NASA: Buzz Aldrin', url: 'https://www.nasa.gov/people/buzz-aldrin/' },
+        portraitPath: 'assets/textures/crew_aldrin.png', stamina: 94, health: 94, morale: 87,
+        stageAnchor: { x: 0.63, y: 0.55 },
+        perk: {
+            id: 'perk_lunar_rendezvous', title: 'Lunar Rendezvous', bonusCategory: 'NAV',
+            description: '−25% cost, +40% progress, and +25% yield on Navigation & Expedition tasks.',
+            costMultiplier: 0.75, speedMultiplier: 1.4, yieldMultiplier: 1.25,
+        },
+    },
 ];
 
 export const MOON_TEST_SETUP: MissionSetupInput = {

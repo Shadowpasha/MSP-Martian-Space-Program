@@ -163,9 +163,10 @@ test('the crater rim needs heater Power even in clear conditions', () => {
 test('every starting crew can pack enough storm reserves on the longer expedition routes', () => {
     for (const id of ['radiation_detective', 'ice_hunter']) {
         const setup = setupFor(id);
-        for (let i = 0; i < AVAILABLE_CREW.length; i++) {
-            for (let j = i + 1; j < AVAILABLE_CREW.length; j++) {
-                const crew = AVAILABLE_CREW.filter((_, index) => index !== i && index !== j);
+        const starter = AVAILABLE_CREW.slice(0, 6);
+        for (let i = 0; i < starter.length; i++) {
+            for (let j = i + 1; j < starter.length; j++) {
+                const crew = starter.filter((_, index) => index !== i && index !== j);
                 for (let seed = 0; seed < 3; seed++) {
                     const state = run(setup, seed, 'prepared', crew);
                     assert.equal(state.result?.outcome, 'victory', `${id} ${crew.map(member => member.role)} seed ${seed}: ${state.result?.reason}`);

@@ -1,6 +1,6 @@
 import type { Entity } from 'esengine';
 import { CREW_ROLES, type CrewMember } from '../contracts/gameContract';
-import { CREW_ABILITIES } from '../data/crewAbilities';
+import { crewAbilityFor } from '../data/crewAbilities';
 import { activateCrewAbility, crewAbilityProblem, crewAbilityStatus, doubleShift, stationShiftCapacity } from '../simulation/crewAbilities';
 import { activateUpgrade, hasUpgrade, upgradeProblem, type UpgradeCommand } from '../simulation/tharsisUpgrades';
 import { localArea, type Area, type TharsisState } from '../simulation/tharsis';
@@ -32,7 +32,7 @@ export function showCrewAbilities(ui: FlightUi, content: Entity, button: RunButt
     const member = state.crew.find(candidate => candidate.id === crewId) ?? state.crew[0]!;
     const area: Area = state.tharsis.rover?.crewIds.includes(member.id) ? 'rover' : 'station';
     const local = localArea(state, area)!;
-    const ability = CREW_ABILITIES[member.role];
+    const ability = crewAbilityFor(member);
     state.crew.forEach((candidate, index) => {
         button(`specialty-${candidate.id}`, content, [24 + index * 280, 68, 264, 50], () => select(candidate.id), {
             label: candidate.name, tone: candidate === member ? 'hero' : 'plain',
@@ -61,16 +61,8 @@ export function showCrewAbilities(ui: FlightUi, content: Entity, button: RunButt
     ui.label(details, [18, 141 + D, 330, 29], ability.name, { size: 24, display: true, color: p.cyan, fit: 18 });
     ui.label(details, [348, 145 + D, 176, 25], crewAbilityStatus(state, member), { size: 14, fit: 11, color: p.amber });
     ui.label(details, [18, 175 + D, 506, 52], ability.description, { size: 15, wrap: true, top: true });
-    const bestTime: Record<typeof member.role, string> = {
-        captain: 'Best time: Before picking a news choice to see what happens first.',
-        scientist: 'Best time: Early on when you have lots of station tasks to finish.',
-        engineer: 'Best time: When you need an extra Repair Kit and have 4 Materials.',
-        botanist: 'Best time: When you have a Seed Pod and want extra Food in 2 days.',
-        pilot: 'Best time: When the rover is stuck in a dust storm.',
-        medic: 'Best time: When a crew member gets hurt and you have a Medkit.',
-    };
-    ui.label(details, [18, 228 + D, 506, 36], bestTime[member.role], { size: 14, color: p.cyan, wrap: true, top: true });
-    if (member.role === 'scientist' && !doubleShift(state, member)) {
+    ui.label(details, [18, 228 + D, 506, 36], ability.bestTime, { size: 14, color: p.cyan, wrap: true, top: true });
+    if (member.id === 'crew_scientist' && !doubleShift(state, member)) {
         ui.label(details, [18, 266 + D, 506, 26], 'Works twice as fast for 3 days, then rests for 3 days.',
             { size: 14, color: p.amber });
     }

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { AVAILABLE_CREW, DEFAULT_CREW, DEFAULT_MARS_SETUP, GAMEPLAY_UPGRADES, SKILL_TREE_UPGRADES, UPGRADE_BRANCHES, computeSkillModifiers } from '../src/contracts/gameContract';
 import { packedInventory, placementProblem, rotatedCells, type CargoPlacement } from '../src/data/cargo';
 import { buildLaunchSetup, launchProblem, missionOffers } from '../src/data/missions';
-import { isVeteran, loadProfile, purchaseProblem, purchaseUpgrade, recordResearch, resetUpgrades, spentResearch } from '../src/data/profile';
+import { crewUnlockProblem, isVeteran, loadProfile, purchaseProblem, purchaseUpgrade, recordResearch, resetUpgrades, spentResearch } from '../src/data/profile';
 import { createInitialGameState, isTharsis } from '../src/simulation/solEngine';
 import { hasUpgrade } from '../src/simulation/tharsisUpgrades';
 
@@ -62,7 +62,7 @@ test('cargo rotations are normalized and rejected moves preserve the draft and s
 });
 
 test('crew, cargo and one paid upgrade transfer into the built-in survey', () => {
-    assert.equal(AVAILABLE_CREW.length, 6);
+    assert.equal(AVAILABLE_CREW.length, 9);
     const crewIds = [...starterCrew.filter(id => id !== 'crew_pilot'), 'crew_captain'];
     const profile = purchaseUpgrade(loadProfile(null, [], false), SKILL_TREE_UPGRADES.find(node => node.id === 'closed_o2')!);
     assert.match(launchProblem(buildLaunchSetup(playableOffer, crewIds, [])!)!, /Wind Sampler/);
@@ -150,4 +150,22 @@ test('Tier 5 unlocks with any two Tier 4 nodes, and runs award crew veterancy an
     profile = recordResearch(profile, 'run-2', result, false, { missionId: 'tharsis_weather_survey', crewIds: ['crew_engineer'], targetSol: 20 });
     assert.equal(profile.crewSols['crew_engineer'], 30);
     assert.equal(isVeteran(profile, 'crew_engineer'), true);
+});
+
+test('unlockable NASA astronauts stay locked until their requirements are met', () => {
+    const fresh = loadProfile(null, [], false);
+    assert.ok(crewUnlockProblem(fresh, 'crew_jemison'));
+    assert.ok(crewUnlockProblem(fresh, 'crew_whitson'));
+    assert.ok(crewUnlockProblem(fresh, 'crew_aldrin'));
+    assert.equal(crewUnlockProblem(fresh, 'crew_engineer'), null);
+
+    const unlocked = loadProfile({
+        missionStars: { tharsis_weather_survey: 3, goal_moon_shadow_ice: 1 },
+        crewSols: { crew_engineer: 30, crew_pilot: 25 },
+        crewIds: ['crew_jemison', 'crew_whitson', 'crew_aldrin', 'crew_engineer'],
+    }, [], false);
+    assert.equal(crewUnlockProblem(unlocked, 'crew_jemison'), null);
+    assert.equal(crewUnlockProblem(unlocked, 'crew_whitson'), null);
+    assert.equal(crewUnlockProblem(unlocked, 'crew_aldrin'), null);
+    assert.deepEqual(unlocked.crewIds, ['crew_jemison', 'crew_whitson', 'crew_aldrin', 'crew_engineer']);
 });
